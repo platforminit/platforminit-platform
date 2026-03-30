@@ -29,6 +29,7 @@ apt:
     - auditd
     - fail2ban
     - unattended-upgrades
+    - aide
 
 external_binaries:
   yq:
