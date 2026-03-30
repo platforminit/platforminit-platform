@@ -1,11 +1,7 @@
-# feat/host-bootstrap
+# feat/host-access
 
 ## Overview
-Deterministic host creation and bootstrap foundation
-# feat/baseline
-
-## Overview
-Host baseline enforcement and security policy foundation
+Secure SSH access model and remote tooling synchronization
 
 ---
 
