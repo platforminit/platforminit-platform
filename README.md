@@ -1,7 +1,7 @@
-# feat/drift-check
+# feat/fim
 
 ## Overview
-Non-interactive drift detection workflow with scoped sudo execution
+Policy-driven file integrity monitoring workflow
 
 ---
 
