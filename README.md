@@ -1,3 +1,7 @@
+# feat/host-bootstrap
+
+## Overview
+Deterministic host creation and bootstrap foundation
 # feat/baseline
 
 ## Overview
