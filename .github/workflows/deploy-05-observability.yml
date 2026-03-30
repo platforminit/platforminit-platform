@@ -1,0 +1,12 @@
+name: 05 - Deploy Observability Stack
+
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Observability layer is not integrated yet in this monorepo build."
+          echo "Reserved for the next platform slice."
