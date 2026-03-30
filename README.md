@@ -1,3 +1,90 @@
+# feat/baseline
+
+## Overview
+Host baseline enforcement and security policy foundation
+
+---
+
+## Feature Documentation
+
+# PlatformInit Platform
+
+Monorepo for PlatformInit's step-by-step VPS to platform automation.
+
+## User-facing workflow order
+
+1. **01 - Create or Rebuild Host**
+2. **02 - Configure Host Baseline**
+3. **03 - Install Kubernetes Cluster**
+4. **04 - Enable Platform (Ingress, TLS, ArgoCD)**
+5. **05 - Deploy Observability Stack**
+
+## Current implementation scope
+
+- Provider implementation: **Hetzner Cloud**
+- Active development domain: **sysadminhomelab.hu**
+- Product brand: **PlatformInit**
+
+## Secret contract
+
+See `docs/secrets-reference.md`.
+
+
+## Policy-driven v2 additions
+
+This version keeps the existing 00/01/02/03/04 workflow UX and adds 02.1–02.5 security workflows.
+Legacy CH01 capture/restore content is preserved under `platform/host-baseline/archive/legacy-v1/`.
+
+
+## Privilege model
+
+- `01 - Create or Rebuild Host` provisions the machine and injects the automation key for initial root access.
+- `01.1 - Host Bootstrap` creates `devops` and `itadmin`, installs the shared SSH public key for both users, disables root login and password auth, and installs the scoped privilege helper.
+- `A1 - Access Elevation` is the only supported elevation path. It is approval-gated through the `privileged-ops` environment and grants a 15-minute time-bound sudo window scoped to the target workflow path.
+- `HOST_LOGIN_USER` should be switched to `devops` after `01.1` completes successfully.
+
+
+## Current operating model
+
+- `01 - Create or Rebuild Host`
+- `01.1 - Host Bootstrap`
+- `A1 - Access Elevation`
+- `A2 - Security Patching`
+- `02 - Apply Host Baseline`
+- `03 - Install Kubernetes Cluster`
+- `04 - Enable Platform`
+
+Security model:
+- shared automation key pair for this iteration
+- `root` bootstrap only
+- `devops` runtime user without standing sudo
+- `itadmin` scoped privilege broker
+- deterministic dependency layer with pinned `yq` install
+- policy-driven FIM (no AIDE baseline database)
+
+
+## Host access tooling lifecycle
+
+- `01.1 - Host Bootstrap` installs the initial broker tooling.
+- `01.2 - Sync Host Access Tooling` updates `platforminit-grant-sudo`, `platforminit-sync-host-access`, and `lib-policy.sh` in place without rebuilding the host.
+- Destructive infrastructure actions remain the customer's backup/snapshot responsibility.
+
+## Artifact contract
+
+- `02 - Apply Host Baseline` requires the **host-baseline** build artifact.
+- `03 - Install Kubernetes Cluster` requires the **cluster** build artifact.
+- `04 - Enable Platform` requires the **platform-services** build artifact.
+- Each deploy workflow now accepts both the producing **workflow run ID** and the specific **artifact ID**.
+
+
+## Day-2 operations
+
+See `docs/day2-ops.md`.
+
+---
+
+## Platform Context
+
 # platforminit-platform
 
 Turn any VPS into a production-ready platform in minutes.
