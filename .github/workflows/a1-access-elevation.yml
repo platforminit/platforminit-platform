@@ -1,0 +1,112 @@
+name: A1 - Access Elevation
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_id_override:
+        description: Optional Hetzner server ID override
+        required: false
+        default: ''
+      host_ipv4_override:
+        description: Optional explicit IPv4 override for break-glass/debug
+        required: false
+        default: ''
+      target_user:
+        description: User to elevate temporarily
+        required: true
+        default: devops
+      duration_minutes:
+        description: Time-bound elevation window in minutes
+        required: true
+        default: '15'
+      mode:
+        description: Elevation mode
+        required: true
+        default: interactive-elevation
+        type: choice
+        options:
+          - baseline
+          - drift
+          - security-check
+          - security-apply
+          - fim-check
+          - aide-init
+          - aide-check
+          - cluster
+          - platform
+          - observability
+          - interactive-elevation
+          - automation-admin-shell
+  workflow_call:
+    inputs:
+      server_id_override:
+        required: false
+        type: string
+        default: ''
+      host_ipv4_override:
+        required: false
+        type: string
+        default: ''
+      target_user:
+        required: false
+        type: string
+        default: devops
+      duration_minutes:
+        required: false
+        type: string
+        default: '15'
+      mode:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  grant:
+    runs-on: ubuntu-latest
+    environment: privileged-ops
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve target host
+        id: target
+        uses: ./.github/actions/resolve-target-host
+        with:
+          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
+          infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
+          server_id_override: ${{ inputs.server_id_override }}
+          host_ipv4_override: ${{ inputs.host_ipv4_override }}
+
+      - name: Setup SSH key
+        env:
+          AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$AUTOMATION_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Add host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ steps.target.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Grant temporary sudo
+        env:
+          HOST: ${{ steps.target.outputs.public_ip }}
+          BROKER_USER: itadmin
+          TARGET_USER: ${{ inputs.target_user }}
+          DURATION_MINUTES: ${{ inputs.duration_minutes }}
+          SCOPE: ${{ inputs.mode }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$BROKER_USER@$HOST"             "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"
