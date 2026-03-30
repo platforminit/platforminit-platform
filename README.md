@@ -1,7 +1,7 @@
-# feat/fim
+# feat/aide
 
 ## Overview
-Policy-driven file integrity monitoring workflow
+Production-ready AIDE initialization and non-blocking integrity checks
 
 ---
 
