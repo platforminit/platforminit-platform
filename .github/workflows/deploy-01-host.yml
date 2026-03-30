@@ -1,0 +1,410 @@
+name: 01 - Create or Rebuild Host
+"on":
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Create a new host or rebuild an existing one
+        required: true
+        default: create
+        type: choice
+        options:
+          - create
+          - rebuild
+      image:
+        description: Hetzner image
+        required: true
+        default: ubuntu-24.04
+      server_type:
+        description: Hetzner server type for create
+        required: true
+        default: cax31
+        type: choice
+        options:
+          - cax31
+          - cx43
+      region:
+        description: Hetzner location for create/volume
+        required: true
+        default: fsn1
+      server_name:
+        description: Server name for create
+        required: false
+        default: platforminit-host
+      server_id_override:
+        description: Existing server ID for rebuild
+        required: false
+        default: ""
+      volume_size_gb:
+        description: Volume size in GB for create (0 = skip volume)
+        required: true
+        default: "0"
+      volume_name:
+        description: Volume name for create
+        required: false
+        default: platforminit-srv
+
+permissions:
+  contents: read
+
+jobs:
+  host-lifecycle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate inputs and secrets
+        shell: bash
+        env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
+          AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
+          ACTION_NAME: ${{ inputs.action }}
+          SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
+          VOLUME_SIZE_GB: ${{ inputs.volume_size_gb }}
+        run: |
+          set -euo pipefail
+          [ -n "${INFRA_API_TOKEN:-}" ] || { echo "Missing INFRA_API_TOKEN" >&2; exit 1; }
+          [ -n "${AUTOMATION_SSH_PUBLIC_KEY:-}" ] || { echo "Missing AUTOMATION_SSH_PUBLIC_KEY" >&2; exit 1; }
+          [[ "${VOLUME_SIZE_GB}" =~ ^[0-9]+$ ]] || { echo "volume_size_gb must be numeric" >&2; exit 1; }
+
+          if [[ "${ACTION_NAME}" == "rebuild" ]]; then
+            sid="${SERVER_ID_OVERRIDE:-${INFRA_SERVER_ID:-}}"
+            sid="$(printf '%s' "$sid" | tr -d '[:space:]' | sed 's/^#//')"
+            [[ "$sid" =~ ^[0-9]+$ ]] || { echo "Missing numeric server ID for rebuild" >&2; exit 1; }
+          fi
+
+      - name: Resolve Hetzner SSH key
+        id: sshkey
+        shell: bash
+        env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}" -H "Content-Type: application/json")
+
+          pubkey_raw="$(printf '%s\n' "${AUTOMATION_SSH_PUBLIC_KEY}" | sed '/^[[:space:]]*$/d' | head -n1)"
+          pubkey_norm="$(printf '%s\n' "${pubkey_raw}" | awk '{print $1" "$2}')"
+          [ -n "${pubkey_norm}" ] || { echo "Normalized public key is empty" >&2; exit 1; }
+
+          pubkey_file="$(mktemp)"
+          printf '%s\n' "${pubkey_raw}" > "${pubkey_file}"
+
+          local_md5="$(ssh-keygen -l -E md5 -f "${pubkey_file}" | awk '{print $2}' | sed 's/^MD5://')"
+
+          list_body="$(mktemp)"
+          list_code="$(curl -sS -o "${list_body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/ssh_keys")"
+          [[ "${list_code}" == "200" ]] || { cat "${list_body}" >&2; exit 1; }
+
+          ssh_key_id="$(
+            jq -r \
+              --arg pk "${pubkey_norm}" \
+              --arg md5 "${local_md5}" \
+              '
+              [
+                .ssh_keys[]
+                | . as $k
+                | ($k.public_key | split(" ") | .[0:2] | join(" ")) as $remote_norm
+                | select(
+                    $remote_norm == $pk
+                    or ($k.fingerprint // "") == $md5
+                    or (($k.public_key | split(" ") | .[1]) == ($pk | split(" ") | .[1]))
+                  )
+                | .id
+              ] | first // empty
+              ' "${list_body}"
+          )"
+
+          if [[ -n "${ssh_key_id}" ]]; then
+            echo "Reusing existing Hetzner SSH key id=${ssh_key_id}"
+            echo "ssh_key_id=${ssh_key_id}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Creating SSH key in Hetzner..."
+          create_payload="$(jq -n --arg name "platforminit-automation" --arg public_key "${pubkey_raw}" '{name:$name,public_key:$public_key}')"
+
+          create_body="$(mktemp)"
+          create_code="$(curl -sS -o "${create_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/ssh_keys" "${auth[@]}" -d "${create_payload}")"
+
+          if [[ "${create_code}" == "201" ]]; then
+            ssh_key_id="$(jq -r '.ssh_key.id // empty' "${create_body}")"
+          elif [[ "${create_code}" == "409" ]]; then
+            echo "SSH key already exists remotely, re-querying..."
+            retry_body="$(mktemp)"
+            retry_code="$(curl -sS -o "${retry_body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/ssh_keys")"
+            [[ "${retry_code}" == "200" ]] || { cat "${retry_body}" >&2; exit 1; }
+            ssh_key_id="$(
+              jq -r \
+                --arg pk "${pubkey_norm}" \
+                --arg md5 "${local_md5}" \
+                '
+                [
+                  .ssh_keys[]
+                  | . as $k
+                  | ($k.public_key | split(" ") | .[0:2] | join(" ")) as $remote_norm
+                  | select(
+                      $remote_norm == $pk
+                      or ($k.fingerprint // "") == $md5
+                      or (($k.public_key | split(" ") | .[1]) == ($pk | split(" ") | .[1]))
+                    )
+                  | .id
+                ] | first // empty
+                ' "${retry_body}"
+            )"
+          else
+            cat "${create_body}" >&2
+            exit 1
+          fi
+
+          [[ -n "${ssh_key_id}" ]] || { echo "Could not resolve Hetzner SSH key id from existing public key" >&2; exit 1; }
+          echo "ssh_key_id=${ssh_key_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or rebuild host
+        id: lifecycle
+        shell: bash
+        env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
+          AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
+          ACTION_NAME: ${{ inputs.action }}
+          IMAGE: ${{ inputs.image }}
+          SERVER_TYPE: ${{ inputs.server_type }}
+          REGION: ${{ inputs.region }}
+          SERVER_NAME: ${{ inputs.server_name }}
+          SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
+          VOLUME_SIZE_GB: ${{ inputs.volume_size_gb }}
+          VOLUME_NAME: ${{ inputs.volume_name }}
+          SSH_KEY_ID: ${{ steps.sshkey.outputs.ssh_key_id }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p .tmp
+          cat > .tmp/user-data.yaml <<EOF
+          #cloud-config
+          disable_root: false
+          ssh_pwauth: false
+          bootcmd:
+            - mkdir -p /root/.ssh
+            - chmod 700 /root/.ssh
+          write_files:
+            - path: /root/.ssh/authorized_keys
+              owner: root:root
+              permissions: '0600'
+              content: |
+                ${AUTOMATION_SSH_PUBLIC_KEY}
+          runcmd:
+            - chage -d -1 root || true
+          EOF
+
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}" -H "Content-Type: application/json")
+          volume_id=""
+          action_id=""
+          sid=""
+          server_name="${SERVER_NAME}"
+
+          if [[ "${ACTION_NAME}" == "create" ]]; then
+            if [[ "${VOLUME_SIZE_GB}" != "0" ]]; then
+              vol_list="$(mktemp)"
+              vol_code="$(curl -sS -o "${vol_list}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
+              [[ "${vol_code}" == "200" ]] || { cat "${vol_list}" >&2; exit 1; }
+
+              volume_id="$(jq -r --arg name "${VOLUME_NAME}" --arg location "${REGION}" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "${vol_list}")"
+
+              if [[ -z "${volume_id}" ]]; then
+                vol_payload="$(jq -n --arg name "${VOLUME_NAME}" --argjson size "${VOLUME_SIZE_GB}" --arg location "${REGION}" '{name:$name,size:$size,location:$location,format:"ext4"}')"
+                create_vol_body="$(mktemp)"
+                create_vol_code="$(curl -sS -o "${create_vol_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/volumes" "${auth[@]}" -d "${vol_payload}")"
+
+                if [[ "${create_vol_code}" == "201" ]]; then
+                  volume_id="$(jq -r '.volume.id // empty' "${create_vol_body}")"
+                elif [[ "${create_vol_code}" == "409" ]]; then
+                  requery_vol="$(mktemp)"
+                  requery_vol_code="$(curl -sS -o "${requery_vol}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
+                  [[ "${requery_vol_code}" == "200" ]] || { cat "${requery_vol}" >&2; exit 1; }
+                  volume_id="$(jq -r --arg name "${VOLUME_NAME}" --arg location "${REGION}" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "${requery_vol}")"
+                else
+                  cat "${create_vol_body}" >&2
+                  exit 1
+                fi
+              else
+                echo "Reusing existing volume ${volume_id}"
+              fi
+
+              [[ -n "${volume_id}" ]] || { echo "Failed to resolve volume id" >&2; exit 1; }
+            fi
+
+            if [[ -n "${volume_id}" ]]; then
+              payload="$(jq -n --arg name "${SERVER_NAME}" --arg server_type "${SERVER_TYPE}" --arg image "${IMAGE}" --arg location "${REGION}" --rawfile user_data .tmp/user-data.yaml --argjson vid "${volume_id}" --argjson ssh_key_id "${SSH_KEY_ID}" '{name:$name,server_type:$server_type,image:$image,location:$location,user_data:$user_data,volumes:[$vid],ssh_keys:[$ssh_key_id]}')"
+            else
+              payload="$(jq -n --arg name "${SERVER_NAME}" --arg server_type "${SERVER_TYPE}" --arg image "${IMAGE}" --arg location "${REGION}" --rawfile user_data .tmp/user-data.yaml --argjson ssh_key_id "${SSH_KEY_ID}" '{name:$name,server_type:$server_type,image:$image,location:$location,user_data:$user_data,ssh_keys:[$ssh_key_id]}')"
+            fi
+
+            create_server_body="$(mktemp)"
+            create_server_code="$(curl -sS -o "${create_server_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/servers" "${auth[@]}" -d "${payload}")"
+            [[ "${create_server_code}" == "201" ]] || { cat "${create_server_body}" >&2; exit 1; }
+
+            sid="$(jq -r '.server.id // empty' "${create_server_body}")"
+            action_id="$(jq -r '.action.id // empty' "${create_server_body}")"
+            [[ -n "${sid}" ]] || { cat "${create_server_body}" >&2; exit 1; }
+          else
+            sid="${SERVER_ID_OVERRIDE:-${INFRA_SERVER_ID:-}}"
+            sid="$(printf '%s' "${sid}" | tr -d '[:space:]' | sed 's/^#//')"
+
+            body="$(mktemp)"
+            code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/servers/${sid}")"
+            [[ "${code}" == "200" ]] || { cat "${body}" >&2; exit 1; }
+
+            server_name="$(jq -r '.server.name // empty' "${body}")"
+            payload="$(jq -n --arg image "${IMAGE}" --rawfile user_data .tmp/user-data.yaml --argjson ssh_key_id "${SSH_KEY_ID}" '{image:$image,user_data:$user_data,ssh_keys:[$ssh_key_id]}')"
+
+            rebuild_body="$(mktemp)"
+            rebuild_code="$(curl -sS -o "${rebuild_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/servers/${sid}/actions/rebuild" "${auth[@]}" -d "${payload}")"
+            [[ "${rebuild_code}" == "201" ]] || { cat "${rebuild_body}" >&2; exit 1; }
+
+            action_id="$(jq -r '.action.id // empty' "${rebuild_body}")"
+            [[ -n "${action_id}" ]] || { cat "${rebuild_body}" >&2; exit 1; }
+          fi
+
+          echo "server_id=${sid}" >> "$GITHUB_OUTPUT"
+          echo "action_id=${action_id}" >> "$GITHUB_OUTPUT"
+          echo "server_name=${server_name}" >> "$GITHUB_OUTPUT"
+          echo "volume_id=${volume_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Hetzner action to finish
+        shell: bash
+        env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          ACTION_ID: ${{ steps.lifecycle.outputs.action_id }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
+
+          for _ in $(seq 1 120); do
+            body="$(mktemp)"
+            code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/actions/${ACTION_ID}")"
+            [[ "${code}" == "200" ]] || { cat "${body}" >&2; exit 1; }
+
+            status="$(jq -r '.action.status // empty' "${body}")"
+            progress="$(jq -r '.action.progress // 0' "${body}")"
+            echo "Action status=${status} progress=${progress}%"
+
+            if [[ "${status}" == "success" ]]; then
+              exit 0
+            elif [[ "${status}" == "error" ]]; then
+              cat "${body}" >&2
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          echo "Timed out waiting for Hetzner action ${ACTION_ID}" >&2
+          exit 1
+
+      - name: Resolve server public IP
+        id: server
+        shell: bash
+        env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          SERVER_ID: ${{ steps.lifecycle.outputs.server_id }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
+
+          for _ in $(seq 1 60); do
+            body="$(mktemp)"
+            code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/servers/${SERVER_ID}")"
+            [[ "${code}" == "200" ]] || { cat "${body}" >&2; exit 1; }
+
+            ip="$(jq -r '.server.public_net.ipv4.ip // empty' "${body}")"
+            if [[ -n "${ip}" ]]; then
+              echo "public_ip=${ip}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Timed out waiting for public IPv4" >&2
+          exit 1
+
+      - name: Setup SSH key
+        shell: bash
+        env:
+          AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${AUTOMATION_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Add host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="${{ steps.server.outputs.public_ip }}"
+          install -d -m 700 "${HOME}/.ssh"
+          touch "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/known_hosts"
+
+          for _ in $(seq 1 60); do
+            if ssh-keyscan -T 5 -H "${host}" >> "${HOME}/.ssh/known_hosts" 2>/dev/null; then
+              sort -u "${HOME}/.ssh/known_hosts" -o "${HOME}/.ssh/known_hosts"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Timed out waiting for SSH host key on ${host}" >&2
+          exit 1
+
+      - name: Wait for root SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="${{ steps.server.outputs.public_ip }}"
+
+          for _ in $(seq 1 60); do
+            if ssh \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no \
+              -o KbdInteractiveAuthentication=no \
+              -o NumberOfPasswordPrompts=0 \
+              -o ConnectTimeout=10 \
+              -i ~/.ssh/id_ed25519 \
+              root@"${host}" "true" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "Timed out waiting for root SSH" >&2
+          exit 1
+
+      - name: Write lifecycle summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p lifecycle-summary
+          cat > lifecycle-summary/summary.txt <<EOF
+          action=${{ inputs.action }}
+          server_id=${{ steps.lifecycle.outputs.server_id }}
+          server_name=${{ steps.lifecycle.outputs.server_name }}
+          public_ip=${{ steps.server.outputs.public_ip }}
+          volume_id=${{ steps.lifecycle.outputs.volume_id }}
+          ssh_key_id=${{ steps.sshkey.outputs.ssh_key_id }}
+          region=${{ inputs.region }}
+          server_type=${{ inputs.server_type }}
+          image=${{ inputs.image }}
+          EOF
+          cat lifecycle-summary/summary.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-lifecycle-${{ github.run_id }}
+          path: lifecycle-summary
+          if-no-files-found: error

@@ -1,8 +1,5 @@
-.DS_Store
-Thumbs.db
-*.log
-*.tmp
-*.swp
-*.swo
-.vscode/
-.idea/
+*.zip
+*.tar.gz
+artifacts/
+dist/
+__pycache__/
