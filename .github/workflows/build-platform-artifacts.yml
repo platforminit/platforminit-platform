@@ -1,0 +1,116 @@
+name: 00 - Build Platform Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - dev
+      - feature/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component_name: host-baseline
+            source_dir: platform/host-baseline
+            artifact_prefix: platforminit-host-baseline
+          - component_name: cluster
+            source_dir: platform/cluster
+            artifact_prefix: platforminit-cluster
+          - component_name: platform-services
+            source_dir: platform/platform-services
+            artifact_prefix: platforminit-platform-services
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package ${{ matrix.component_name }}
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          short_sha="${GITHUB_SHA::8}"
+          stage_dir="${RUNNER_TEMP}/${{ matrix.artifact_prefix }}-${short_sha}"
+          tar_name="${{ matrix.artifact_prefix }}-${short_sha}.tar.gz"
+
+          package_root="$stage_dir/platform/${{ matrix.component_name }}"
+          mkdir -p "$package_root"
+
+          rsync -a \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'reports/*' \
+            --exclude 'artifacts/' \
+            --exclude 'dist/' \
+            --exclude '*.zip' \
+            --exclude '*.tar.gz' \
+            "${{ matrix.source_dir }}/" "$package_root/"
+
+          tar -C "$stage_dir" -czf "${RUNNER_TEMP}/${tar_name}" .
+
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "tar_name=$tar_name" >> "$GITHUB_OUTPUT"
+          echo "stage_dir=$stage_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Print package inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "== Component: ${{ matrix.component_name }} =="
+          echo "Artifact file: ${{ steps.pkg.outputs.tar_name }}"
+          echo "SHA: ${{ steps.pkg.outputs.short_sha }}"
+          echo "Workflow run ID: ${{ github.run_id }}"
+          echo "Run URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Top-level file inventory:"
+          find "${{ steps.pkg.outputs.stage_dir }}" -maxdepth 3 -type f | sort
+          echo
+          echo "SHA256:"
+          sha256sum "${RUNNER_TEMP}/${{ steps.pkg.outputs.tar_name }}"
+
+      - name: Upload artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.component_name }}-release-${{ steps.pkg.outputs.short_sha }}
+          path: ${{ runner.temp }}/${{ steps.pkg.outputs.tar_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Print artifact metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "========================================"
+          echo "BUILD OUTPUT"
+          echo "========================================"
+          echo "Workflow run ID: ${{ github.run_id }}"
+          echo "Component: ${{ matrix.component_name }}"
+          echo "Artifact name: ${{ matrix.component_name }}-release-${{ steps.pkg.outputs.short_sha }}"
+          echo "Artifact ID: ${{ steps.upload.outputs.artifact-id }}"
+          echo "Artifact URL: ${{ steps.upload.outputs.artifact-url }}"
+          echo "Artifact digest: ${{ steps.upload.outputs.artifact-digest }}"
+          echo "========================================"
+
+      - name: Append artifact metadata to workflow summary
+        shell: bash
+        run: |
+          {
+            echo "## Artifact metadata"
+            echo ""
+            echo "- Workflow run ID: \`${{ github.run_id }}\`"
+            echo "- Component: \`${{ matrix.component_name }}\`"
+            echo "- Artifact name: \`${{ matrix.component_name }}-release-${{ steps.pkg.outputs.short_sha }}\`"
+            echo "- Artifact ID: \`${{ steps.upload.outputs.artifact-id }}\`"
+            echo "- Artifact URL: ${{ steps.upload.outputs.artifact-url }}"
+            echo "- Artifact digest: \`${{ steps.upload.outputs.artifact-digest }}\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
