@@ -1,7 +1,7 @@
-# feat/k3s
+# feat/platform
 
 ## Overview
-Automated lightweight Kubernetes cluster provisioning with k3s
+Platform enablement with ArgoCD, ingress and TLS automation
 
 ---
 
