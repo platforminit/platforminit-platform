@@ -2,6 +2,10 @@
 
 ## Overview
 Deterministic host creation and bootstrap foundation
+# feat/baseline
+
+## Overview
+Host baseline enforcement and security policy foundation
 
 ---
 
