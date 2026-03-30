@@ -1,7 +1,7 @@
-# feat/host-access
+# feat/drift-check
 
 ## Overview
-Secure SSH access model and remote tooling synchronization
+Non-interactive drift detection workflow with scoped sudo execution
 
 ---
 
