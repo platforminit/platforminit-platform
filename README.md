@@ -1,7 +1,7 @@
-# feat/aide
+# feat/k3s
 
 ## Overview
-Production-ready AIDE initialization and non-blocking integrity checks
+Automated lightweight Kubernetes cluster provisioning with k3s
 
 ---
 
