@@ -17,6 +17,8 @@ GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-changeme}"
 VM_STACK_CHART_VERSION="${VM_STACK_CHART_VERSION:-0.72.5}"
 LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-6.55.0}"
 ALLOY_CHART_VERSION="${ALLOY_CHART_VERSION:-1.0.0}"
+KUBECONFIG_PATH="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+export KUBECONFIG="${KUBECONFIG_PATH}"
 
 ensure_runtime_deps() {
   export DEBIAN_FRONTEND=noninteractive
@@ -34,11 +36,25 @@ ensure_helm() {
 
 ensure_cluster_ready() {
   need kubectl
-  kubectl get nodes >/dev/null 2>&1 || die "kubectl cannot access cluster"
+  [[ -f "${KUBECONFIG}" ]] || die "Missing kubeconfig: ${KUBECONFIG}"
+  kubectl get nodes >/dev/null 2>&1 || die "kubectl cannot access cluster via ${KUBECONFIG}"
 }
 
 ensure_namespace() {
   kubectl get ns "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
+}
+
+wait_for_vm_operator() {
+  log "Waiting for VictoriaMetrics operator rollout"
+  local deploy_name=""
+  for candidate in observability-vmstack-operator observability-vmstack-victoria-metrics-operator vm-operator victoria-metrics-operator; do
+    if kubectl -n "${NAMESPACE}" get deploy "${candidate}" >/dev/null 2>&1; then
+      deploy_name="${candidate}"
+      break
+    fi
+  done
+  [[ -n "${deploy_name}" ]] || die "VictoriaMetrics operator deployment not found in namespace ${NAMESPACE}"
+  kubectl -n "${NAMESPACE}" rollout status deployment/"${deploy_name}" --timeout=300s
 }
 
 prepare_values() {
@@ -108,6 +124,7 @@ main() {
   install_repos
   deploy_vm_stack
   wait_for_vm_crds
+  wait_for_vm_operator
   apply_post_vm_manifests
   deploy_loki
   deploy_alloy

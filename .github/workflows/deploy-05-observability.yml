@@ -136,9 +136,17 @@ jobs:
           rsync -a --delete "$unpack_dir/platform/observability/" "$release_dir/"
           find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
 
-          env             DEPLOY_MODE="$DEPLOY_MODE"             BASE_DOMAIN="$PLATFORM_BASE_DOMAIN"             GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD"             bash "$release_dir/scripts/ch05-orchestrator.sh"
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          test -f "$KUBECONFIG" || { echo "Missing kubeconfig at $KUBECONFIG" >&2; exit 1; }
 
-          bash "$release_dir/validate/ch05-validate-observability.sh" | tee "$report_file"
+          env \
+            KUBECONFIG="$KUBECONFIG" \
+            DEPLOY_MODE="$DEPLOY_MODE" \
+            BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
+            GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+            bash "$release_dir/scripts/ch05-orchestrator.sh"
+
+          env KUBECONFIG="$KUBECONFIG" bash "$release_dir/validate/ch05-validate-observability.sh" | tee "$report_file"
           EOS
           chmod +x /tmp/ch05-remote.sh
 
