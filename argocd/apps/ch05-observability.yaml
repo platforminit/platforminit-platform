@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ch05-observability
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/PlatformInit/platforminit-platform.git
+    targetRevision: feat/ch05-observability-foundation
+    path: platform/observability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
