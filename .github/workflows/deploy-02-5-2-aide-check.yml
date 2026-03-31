@@ -11,8 +11,6 @@ on:
         description: Optional explicit IPv4 override for break-glass/debug
         required: false
         default: ''
-  schedule:
-    - cron: '58 3 1 * *'
 
 permissions:
   contents: read
@@ -61,26 +59,48 @@ jobs:
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Upload scripts and policy
+      - name: Upload scripts and config
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-run"
-          scp -i ~/.ssh/id_ed25519 \
-            platform/host-baseline/scripts/aide-check.sh \
-            platform/host-baseline/scripts/lib-policy.sh \
-            "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/"
+          scp -i ~/.ssh/id_ed25519                 platform/host-baseline/scripts/aide-check.sh                 platform/host-baseline/scripts/lib-policy.sh                 platform/host-baseline/aide/aide.conf                 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/"
 
-      - name: Execute AIDE check
+      - name: Execute AIDE check detached
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
-            "chmod +x /tmp/platforminit-run/aide-check.sh && sudo -n /tmp/platforminit-run/aide-check.sh /tmp/platforminit-aide-check.txt"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" '
+            rm -f /tmp/platforminit-aide-check.txt /tmp/platforminit-aide-check.exit /tmp/platforminit-aide-check.nohup
+            chmod +x /tmp/platforminit-run/aide-check.sh
+            nohup sudo -n /tmp/platforminit-run/aide-check.sh /tmp/platforminit-aide-check.txt                   >/tmp/platforminit-aide-check.nohup 2>&1 &
+            pid=$!
+            (
+              wait "$pid"
+              rc=$?
+              echo "$rc" > /tmp/platforminit-aide-check.exit
+            ) >/dev/null 2>&1 &
+          '
+
+      - name: Wait for AIDE check result
+        env:
+          HOST: ${{ steps.server.outputs.public_ip }}
+          HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 180); do
+            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST"                   'test -f /tmp/platforminit-aide-check.exit'; then
+              echo "AIDE check completed."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for AIDE check completion." >&2
+          exit 1
 
       - name: Fetch report
         if: always()
@@ -91,6 +111,8 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/aide-check
           scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-aide-check.txt" artifacts/aide-check/ 2>/dev/null || true
+          scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-aide-check.nohup" artifacts/aide-check/ 2>/dev/null || true
+          scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-aide-check.exit" artifacts/aide-check/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
