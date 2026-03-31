@@ -58,6 +58,18 @@ deploy_vm_stack() {
   helm upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack     --namespace "${NAMESPACE}"     --version "${VM_STACK_CHART_VERSION}"     -f /tmp/ch05-vm-values.yaml     --wait --timeout 15m
 }
 
+wait_for_vm_crds() {
+  log "Waiting for VictoriaMetrics CRDs"
+  local crd
+  for crd in     vmrules.operator.victoriametrics.com     vmagents.operator.victoriametrics.com     vmalerts.operator.victoriametrics.com     vmsingles.operator.victoriametrics.com
+  do
+    timeout 180 bash -c "until kubectl get crd ${crd} >/dev/null 2>&1; do sleep 2; done"
+  done
+
+  log "Waiting for VictoriaMetrics API registration"
+  timeout 180 bash -c 'until kubectl api-resources --api-group=operator.victoriametrics.com 2>/dev/null | grep -q "VMRule"; do sleep 2; done'
+}
+
 deploy_loki() {
   log "Deploying Loki"
   helm upgrade --install loki grafana/loki     --namespace "${NAMESPACE}"     --version "${LOKI_CHART_VERSION}"     -f "${REPO_ROOT}/values/loki-values.yaml"     --wait --timeout 15m
@@ -71,7 +83,7 @@ deploy_alloy() {
   helm upgrade --install alloy grafana/alloy     --namespace "${NAMESPACE}"     --version "${ALLOY_CHART_VERSION}"     -f "${REPO_ROOT}/values/alloy-values.yaml"     --wait --timeout 15m
 }
 
-apply_manifests() {
+apply_post_vm_manifests() {
   log "Applying vmagent additional scrape config"
   kubectl create configmap vmagent-additional-scrape     --namespace "${NAMESPACE}"     --from-file=additional-scrape.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml"     --dry-run=client -o yaml | kubectl apply -f -
 
@@ -94,11 +106,11 @@ main() {
   ensure_namespace
   prepare_values
   install_repos
-  apply_manifests
   deploy_vm_stack
+  wait_for_vm_crds
+  apply_post_vm_manifests
   deploy_loki
   deploy_alloy
-  apply_manifests
   restart_if_needed
   log "CH05 observability deploy completed in mode=${DEPLOY_MODE}"
 }

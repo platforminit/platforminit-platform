@@ -170,7 +170,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./observability-reports
-          scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/srv/platforminit/observability/reports/ch05-validate-${SHORTSHA}.log" "./observability-reports/" || true
+          if ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f /srv/platforminit/observability/reports/ch05-validate-${SHORTSHA}.log"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/srv/platforminit/observability/reports/ch05-validate-${SHORTSHA}.log" "./observability-reports/"
+          else
+            echo "No validation report found; deploy failed before validation step"
+          fi
 
       - name: Upload validation report
         if: always()
