@@ -28,6 +28,10 @@ jobs:
             source_dir: platform/platform-services
             artifact_prefix: platforminit-platform-services
 
+          - component_name: observability
+            source_dir: platform/observability
+            artifact_prefix: platforminit-observability
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
