@@ -1,46 +1,106 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OBS_NAMESPACE="${OBS_NAMESPACE:-observability}"
-GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-admin}"
-VM_CHART_VERSION="${VM_CHART_VERSION:-0.72.5}"
+log(){ echo "[CH05][$(date -u +%FT%TZ)] $*"; }
+die(){ echo "FATAL: $*" >&2; exit 1; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
+
+[[ $EUID -eq 0 ]] || die "Run as root (sudo)."
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+DEPLOY_MODE="${DEPLOY_MODE:-baseline}"
+NAMESPACE="${NAMESPACE:-observability}"
+BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
+GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-changeme}"
+VM_STACK_CHART_VERSION="${VM_STACK_CHART_VERSION:-0.72.5}"
 LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-6.55.0}"
 ALLOY_CHART_VERSION="${ALLOY_CHART_VERSION:-1.0.0}"
 
-log(){ echo "[CH05][$(date -u +%FT%TZ)] $*"; }
-need(){ command -v "$1" >/dev/null 2>&1 || { echo "FATAL: missing binary: $1" >&2; exit 1; }; }
+ensure_runtime_deps() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y >/dev/null
+  apt-get install -y --no-install-recommends curl ca-certificates gnupg rsync >/dev/null
+}
 
-need kubectl
-need helm
-need awk
-need sed
-need grep
+ensure_helm() {
+  if command -v helm >/dev/null 2>&1; then
+    return 0
+  fi
+  log "Installing helm"
+  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null
+}
 
-log "Apply namespace"
-kubectl apply -f "$ROOT_DIR/manifests/namespace.yaml"
+ensure_cluster_ready() {
+  need kubectl
+  kubectl get nodes >/dev/null 2>&1 || die "kubectl cannot access cluster"
+}
 
-log "Deploy VictoriaMetrics K8s Stack"
-helm upgrade --install vmstack vm/victoria-metrics-k8s-stack   --namespace "$OBS_NAMESPACE"   --create-namespace   --version "$VM_CHART_VERSION"   --values "$ROOT_DIR/values/victoria-metrics-k8s-stack-values.yaml"   --set grafana.adminPassword="$GRAFANA_ADMIN_PASSWORD"   --wait --timeout 15m
+ensure_namespace() {
+  kubectl get ns "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
+}
 
-log "Deploy Loki"
-helm upgrade --install loki grafana/loki   --namespace "$OBS_NAMESPACE"   --version "$LOKI_CHART_VERSION"   --values "$ROOT_DIR/values/loki-values.yaml"   --wait --timeout 15m
+prepare_values() {
+  local vm_values="${REPO_ROOT}/values/victoria-metrics-k8s-stack-values.yaml"
+  cp "${vm_values}" /tmp/ch05-vm-values.yaml
+  sed -i "s/adminPassword: changeme/adminPassword: ${GRAFANA_ADMIN_PASSWORD//\//\/}/" /tmp/ch05-vm-values.yaml
+}
 
-log "Deploy Alloy"
-helm upgrade --install alloy grafana/alloy   --namespace "$OBS_NAMESPACE"   --version "$ALLOY_CHART_VERSION"   --values "$ROOT_DIR/values/alloy-values.yaml"   --wait --timeout 15m
+install_repos() {
+  helm repo add vm https://victoriametrics.github.io/helm-charts/ >/dev/null
+  helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
+  helm repo update >/dev/null
+}
 
-log "Apply VMServiceScrape resources"
-kubectl apply -f "$ROOT_DIR/manifests/metrics/argocd-vmservicescrape.yaml" || true
-kubectl apply -f "$ROOT_DIR/manifests/metrics/cert-manager-vmservicescrape.yaml" || true
-kubectl apply -f "$ROOT_DIR/manifests/metrics/traefik-vmservicescrape.yaml" || true
+deploy_vm_stack() {
+  log "Deploying VictoriaMetrics stack"
+  helm upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack     --namespace "${NAMESPACE}"     --version "${VM_STACK_CHART_VERSION}"     -f /tmp/ch05-vm-values.yaml     --wait --timeout 15m
+}
 
-log "Apply VMRule alerts"
-kubectl apply -f "$ROOT_DIR/manifests/alerts/platform-vmrule.yaml"
+deploy_loki() {
+  log "Deploying Loki"
+  helm upgrade --install loki grafana/loki     --namespace "${NAMESPACE}"     --version "${LOKI_CHART_VERSION}"     -f "${REPO_ROOT}/values/loki-values.yaml"     --wait --timeout 15m
+}
 
-log "Provision Grafana datasources"
-bash "$ROOT_DIR/scripts/provision-grafana-datasources.sh"
+deploy_alloy() {
+  log "Applying Alloy config"
+  kubectl apply -f "${REPO_ROOT}/manifests/logging/alloy-logs-config.yaml"
 
-log "Validate observability baseline"
-bash "$ROOT_DIR/validate/ch05-validate-observability.sh"
+  log "Deploying Alloy"
+  helm upgrade --install alloy grafana/alloy     --namespace "${NAMESPACE}"     --version "${ALLOY_CHART_VERSION}"     -f "${REPO_ROOT}/values/alloy-values.yaml"     --wait --timeout 15m
+}
 
-log "CH05 completed"
+apply_manifests() {
+  log "Applying vmagent additional scrape config"
+  kubectl create configmap vmagent-additional-scrape     --namespace "${NAMESPACE}"     --from-file=additional-scrape.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml"     --dry-run=client -o yaml | kubectl apply -f -
+
+  log "Applying alert rules"
+  kubectl apply -f "${REPO_ROOT}/manifests/alerts/platform-vmrule.yaml"
+
+  log "Provisioning Grafana datasources"
+  bash "${REPO_ROOT}/scripts/provision-grafana-datasources.sh"
+}
+
+restart_if_needed() {
+  kubectl -n "${NAMESPACE}" rollout restart deploy/observability-vmstack-grafana || true
+  kubectl -n "${NAMESPACE}" rollout status deploy/observability-vmstack-grafana --timeout=300s || true
+}
+
+main() {
+  ensure_runtime_deps
+  ensure_helm
+  ensure_cluster_ready
+  ensure_namespace
+  prepare_values
+  install_repos
+  apply_manifests
+  deploy_vm_stack
+  deploy_loki
+  deploy_alloy
+  apply_manifests
+  restart_if_needed
+  log "CH05 observability deploy completed in mode=${DEPLOY_MODE}"
+}
+
+main "$@"

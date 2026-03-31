@@ -1,106 +1,66 @@
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
-  name: platforminit-observability-baseline
+  name: platform-rules
   namespace: observability
-  labels:
-    app.kubernetes.io/part-of: platforminit
-    platforminit.io/chapter: ch05
 spec:
   groups:
-    - name: platforminit.host
+    - name: platform.rules
+      interval: 30s
       rules:
-        - alert: HostCPUHigh
-          expr: avg by (instance) (rate(node_cpu_seconds_total{mode!="idle"}[5m])) > 0.85
+        - alert: NodeCPUHigh
+          expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
           for: 10m
           labels:
             severity: warning
-            layer: host
           annotations:
-            summary: Host CPU usage is high
-            description: CPU usage has exceeded 85% for 10 minutes.
-        - alert: HostMemoryPressure
-          expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+            summary: Node CPU usage is high
+            description: Instance {{ $labels.instance }} CPU usage exceeded 85% for 10m.
+        - alert: NodeMemoryPressure
+          expr: (1 - ((node_memory_MemAvailable_bytes or node_memory_MemFree_bytes) / node_memory_MemTotal_bytes)) * 100 > 90
           for: 10m
           labels:
             severity: warning
-            layer: host
           annotations:
-            summary: Host memory pressure detected
-            description: Available memory dropped below 15% for 10 minutes.
-        - alert: HostDiskPressure
-          expr: (node_filesystem_avail_bytes{mountpoint="/srv",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/srv",fstype!="tmpfs"}) < 0.15
+            summary: Node memory usage is high
+            description: Instance {{ $labels.instance }} memory usage exceeded 90% for 10m.
+        - alert: NodeFilesystemSpaceLow
+          expr: (node_filesystem_avail_bytes{fstype!=""} / node_filesystem_size_bytes{fstype!=""}) * 100 < 15
           for: 15m
           labels:
-            severity: critical
-            layer: host
+            severity: warning
           annotations:
-            summary: /srv free space is low
-            description: /srv free space dropped below 15% for 15 minutes.
-    - name: platforminit.kubernetes
-      rules:
-        - alert: KubernetesNodeNotReady
-          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
-          for: 5m
-          labels:
-            severity: critical
-            layer: kubernetes
-          annotations:
-            summary: Kubernetes node is not ready
-            description: Node has been not ready for more than 5 minutes.
+            summary: Node filesystem space is low
+            description: Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} has less than 15% free space.
         - alert: PodCrashLooping
-          expr: max by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total[10m])) > 3
-          for: 5m
-          labels:
-            severity: warning
-            layer: kubernetes
-          annotations:
-            summary: Pod restart loop detected
-            description: A container restarted more than 3 times in 10 minutes.
-        - alert: PodNotReady
-          expr: max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}) > 0
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
           for: 10m
           labels:
-            severity: warning
-            layer: kubernetes
+            severity: critical
           annotations:
-            summary: Pod is not healthy
-            description: Pod is stuck in Pending, Unknown, or Failed state.
-    - name: platforminit.platform
-      rules:
-        - alert: ArgoCDAppOutOfSync
-          expr: max by (name) (argocd_app_info{sync_status!="Synced"}) > 0
+            summary: Pod is restarting repeatedly
+            description: Pod {{ $labels.namespace }}/{{ $labels.pod }} restarted more than 3 times in 15m.
+        - alert: PodNotReady
+          expr: kube_pod_status_ready{condition="true"} == 0
           for: 15m
           labels:
             severity: warning
-            layer: platform
           annotations:
-            summary: Argo CD application is out of sync
-            description: At least one Argo CD application has remained out of sync for 15 minutes.
-        - alert: CertExpirySoon
-          expr: min by (name, exported_namespace) ((certmanager_certificate_expiration_timestamp_seconds - time()) / 86400) < 14
-          for: 30m
-          labels:
-            severity: warning
-            layer: platform
-          annotations:
-            summary: Certificate expires soon
-            description: Certificate will expire within 14 days.
+            summary: Pod is not ready
+            description: Pod {{ $labels.namespace }}/{{ $labels.pod }} has not been ready for 15m.
         - alert: LokiDown
           expr: up{job=~".*loki.*"} == 0
           for: 10m
           labels:
-            severity: critical
-            layer: observability
+            severity: warning
           annotations:
             summary: Loki target is down
-            description: Loki metrics endpoint is unavailable.
+            description: Loki scrape target has been down for 10m.
         - alert: VictoriaMetricsDown
-          expr: up{job=~".*vm.*|.*victoria.*"} == 0
+          expr: up{job=~".*victoria.*|.*vm.*"} == 0
           for: 10m
           labels:
-            severity: critical
-            layer: observability
+            severity: warning
           annotations:
             summary: VictoriaMetrics target is down
-            description: VictoriaMetrics metrics endpoint is unavailable.
+            description: VictoriaMetrics scrape target has been down for 10m.

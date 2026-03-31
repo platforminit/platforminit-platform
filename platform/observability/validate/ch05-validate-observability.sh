@@ -1,26 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-OBS_NAMESPACE="${OBS_NAMESPACE:-observability}"
 
-log(){ echo "[CH05-VALIDATE][$(date -u +%FT%TZ)] $*"; }
-need(){ command -v "$1" >/dev/null 2>&1 || { echo "FATAL: missing binary: $1" >&2; exit 1; }; }
-need kubectl
+pass(){ echo "PASS | $1 | $2"; }
+fail(){ echo "FAIL | $1 | $2"; exit 1; }
 
-log "Wait for key workloads"
-kubectl -n "$OBS_NAMESPACE" rollout status deploy/vmstack-grafana --timeout=10m || true
-kubectl -n "$OBS_NAMESPACE" rollout status sts/loki --timeout=10m || true
-kubectl -n "$OBS_NAMESPACE" rollout status ds/alloy --timeout=10m || true
+NS="${NAMESPACE:-observability}"
 
-log "Print workload inventory"
-kubectl -n "$OBS_NAMESPACE" get pods -o wide
-kubectl -n "$OBS_NAMESPACE" get svc
-kubectl -n "$OBS_NAMESPACE" get vmservicescrape || true
-kubectl -n "$OBS_NAMESPACE" get vmrule || true
+kubectl get ns "${NS}" >/dev/null 2>&1 && pass NAMESPACE "observability namespace exists" || fail NAMESPACE "namespace missing"
+kubectl -n "${NS}" get pods >/dev/null 2>&1 && pass POD_LIST "pods listed" || fail POD_LIST "cannot list pods"
 
-log "Verify Grafana datasource config"
-kubectl -n "$OBS_NAMESPACE" get configmap grafana-datasources-platforminit >/dev/null
+for deploy in observability-vmstack-grafana alloy; do
+  kubectl -n "${NS}" get deploy "${deploy}" >/dev/null 2>&1 && pass "DEPLOY_${deploy}" "deployment exists" || true
+done
 
-log "Verify helm releases"
-helm -n "$OBS_NAMESPACE" list
-
-log "Validation finished"
+kubectl -n "${NS}" get statefulset observability-vmstack-vmsingle >/dev/null 2>&1 && pass VM_SINGLE "VictoriaMetrics present" || fail VM_SINGLE "VictoriaMetrics statefulset missing"
+kubectl -n "${NS}" get statefulset loki >/dev/null 2>&1 && pass LOKI "Loki present" || fail LOKI "Loki statefulset missing"
+kubectl -n "${NS}" get configmap grafana-datasources >/dev/null 2>&1 && pass GRAFANA_DS "Grafana datasources configmap present" || fail GRAFANA_DS "Grafana datasources configmap missing"
+kubectl -n "${NS}" get vmrule platform-rules >/dev/null 2>&1 && pass VMRULE "VMRule present" || fail VMRULE "VMRule missing"
