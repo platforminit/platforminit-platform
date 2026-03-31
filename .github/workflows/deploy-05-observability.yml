@@ -19,10 +19,14 @@ on:
         description: Optional explicit IPv4 override for break-glass/debug
         required: false
         default: ''
-      grafana_admin_password:
-        description: Optional Grafana admin password override
-        required: false
-        default: ''
+      deploy_mode:
+        description: Baseline or reconcile mode
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - reconcile
 
 permissions:
   contents: read
@@ -36,7 +40,7 @@ jobs:
       target_user: devops
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
-      mode: platform
+      mode: observability
     secrets: inherit
 
   deploy:
@@ -44,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Resolve target host
         id: server
         uses: ./.github/actions/resolve-target-host
@@ -52,6 +57,7 @@ jobs:
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
+
       - name: Download observability artifact
         uses: actions/download-artifact@v4
         with:
@@ -59,8 +65,10 @@ jobs:
           artifact-ids: ${{ inputs.artifact_id }}
           github-token: ${{ github.token }}
           path: ./downloaded-artifacts
+
       - name: Resolve archive
         id: artifact
+        shell: bash
         run: |
           set -euo pipefail
           archive_path="$(find ./downloaded-artifacts -type f -name 'platforminit-observability-*.tar.gz' | sort | head -n1)"
@@ -70,59 +78,108 @@ jobs:
           short_sha="${short_sha%.tar.gz}"
           echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+
       - name: Setup SSH key
         env:
           AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "$AUTOMATION_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+
       - name: Add host key
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
+
       - name: Render remote observability script
         env:
-          GRAFANA_ADMIN_PASSWORD_SECRET: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-          GRAFANA_ADMIN_PASSWORD_INPUT: ${{ inputs.grafana_admin_password }}
+          DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        shell: bash
         run: |
           set -euo pipefail
-          grafana_admin_password="$GRAFANA_ADMIN_PASSWORD_SECRET"
-          if [ -n "$GRAFANA_ADMIN_PASSWORD_INPUT" ]; then
-            grafana_admin_password="$GRAFANA_ADMIN_PASSWORD_INPUT"
-          fi
-          [ -n "$grafana_admin_password" ] || grafana_admin_password='admin'
           cat > /tmp/ch05-remote.sh <<'EOS'
           #!/usr/bin/env bash
           set -euo pipefail
           SHORT_SHA="$1"
-          password_file="$2"
-          GRAFANA_ADMIN_PASSWORD="$(cat "$password_file")"
+          DEPLOY_MODE="$2"
+          PLATFORM_BASE_DOMAIN="$3"
+          GRAFANA_ADMIN_PASSWORD="$4"
+
           release_dir="/srv/platforminit/observability/${SHORT_SHA}"
           tmp_dir="/tmp/platforminit-observability/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
-          mkdir -p "$release_dir" "$unpack_dir"
-          rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
-          tar -xzf "${tmp_dir}/observability-release.tar.gz" -C "$unpack_dir"
-          test -d "$unpack_dir/platform/observability" || { echo "Missing platform/observability in artifact" >&2; find "$unpack_dir" -maxdepth 4 -print >&2; exit 1; }
-          rsync -a --delete "$unpack_dir/platform/observability/" "$release_dir/"
-          find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
-          helm repo add vm https://victoriametrics.github.io/helm-charts/ >/dev/null 2>&1 || true
-          helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
-          helm repo update >/dev/null 2>&1
-          env GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" bash "$release_dir/scripts/ch05-orchestrator.sh"
+
+          mkdir -p "$tmp_dir"
+
+          sudo -n mkdir -p "$release_dir" "$unpack_dir"
+          sudo -n rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
+          sudo -n tar -xzf "${tmp_dir}/observability-release.tar.gz" -C "$unpack_dir"
+
+          test -d "$unpack_dir/platform/observability" || {
+            echo "Missing platform/observability in artifact" >&2
+            sudo -n find "$unpack_dir" -maxdepth 4 -print >&2
+            exit 1
+          }
+
+          sudo -n rsync -a --delete "$unpack_dir/platform/observability/" "$release_dir/"
+          sudo -n find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
+          sudo -n env \
+            DEPLOY_MODE="$DEPLOY_MODE" \
+            BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
+            GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+            bash "$release_dir/scripts/ch05-orchestrator.sh"
           EOS
           chmod +x /tmp/ch05-remote.sh
-          printf '%s' "$grafana_admin_password" > /tmp/ch05-admin-password.txt
+
       - name: Upload and run observability deploy
+        env:
+          HOST: ${{ steps.server.outputs.public_ip }}
+          HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
+          SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
+          ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
+          DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519 devops@${{ steps.server.outputs.public_ip }} "mkdir -p /tmp/platforminit-observability/${{ steps.artifact.outputs.short_sha }}"
-          scp -i ~/.ssh/id_ed25519 "${{ steps.artifact.outputs.archive_path }}" devops@${{ steps.server.outputs.public_ip }}:/tmp/platforminit-observability/${{ steps.artifact.outputs.short_sha }}/observability-release.tar.gz
-          scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh devops@${{ steps.server.outputs.public_ip }}:/tmp/ch05-remote.sh
-          scp -i ~/.ssh/id_ed25519 /tmp/ch05-admin-password.txt devops@${{ steps.server.outputs.public_ip }}:/tmp/ch05-admin-password.txt
-          ssh -i ~/.ssh/id_ed25519 devops@${{ steps.server.outputs.public_ip }}             "chmod +x /tmp/ch05-remote.sh && /tmp/ch05-remote.sh '${{ steps.artifact.outputs.short_sha }}' /tmp/ch05-admin-password.txt"
+          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-observability/${SHORTSHA} /tmp/platforminit-run"
+          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-observability/${SHORTSHA}/observability-release.tar.gz"
+          scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
+          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
+            "chmod +x /tmp/platforminit-run/ch05-remote.sh && /tmp/platforminit-run/ch05-remote.sh '$SHORTSHA' '$DEPLOY_MODE' '$PLATFORM_BASE_DOMAIN' '$GRAFANA_ADMIN_PASSWORD'"
+
+      - name: Validate observability
+        env:
+          HOST: ${{ steps.server.outputs.public_ip }}
+          HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
+          SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
+            "sudo -n bash /srv/platforminit/observability/${SHORTSHA}/validate/ch05-validate-observability.sh"
+
+      - name: Print deploy metadata
+        shell: bash
+        run: |
+          {
+            echo "## Observability deploy metadata"
+            echo ""
+            echo "- Workflow run ID: \`${{ github.run_id }}\`"
+            echo "- Artifact run ID: \`${{ inputs.artifact_run_id }}\`"
+            echo "- Artifact ID: \`${{ inputs.artifact_id }}\`"
+            echo "- Short SHA: \`${{ steps.artifact.outputs.short_sha }}\`"
+            echo "- Target host: \`${{ steps.server.outputs.public_ip }}\`"
+            echo "- Deploy mode: \`${{ inputs.deploy_mode }}\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,44 +1,7 @@
 alloy:
   configMap:
-    create: true
-    content: |
-      discovery.kubernetes "pods" {
-        role = "pod"
-      }
-
-      loki.source.kubernetes "pods" {
-        targets    = discovery.kubernetes.pods.targets
-        forward_to = [loki.process.platform.receiver]
-      }
-
-      loki.process "platform" {
-        stage.static_labels {
-          values = {
-            cluster = "platforminit-single-node",
-            environment = "homelab",
-          }
-        }
-
-        stage.label_keep {
-          values = [
-            "namespace",
-            "pod",
-            "container",
-            "app",
-            "component",
-            "cluster",
-            "environment",
-          ]
-        }
-
-        forward_to = [loki.write.default.receiver]
-      }
-
-      loki.write "default" {
-        endpoint {
-          url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
-        }
-      }
+    create: false
+    name: alloy-logs-config
 
 controller:
   type: daemonset
@@ -53,3 +16,9 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
