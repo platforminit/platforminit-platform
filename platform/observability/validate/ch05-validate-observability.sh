@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+export KUBECONFIG
+[ -f "${KUBECONFIG}" ] || { echo "FAIL | KUBECONFIG | missing kubeconfig ${KUBECONFIG}"; exit 1; }
+
+
 pass(){ echo "PASS | $1 | $2"; }
 fail(){ echo "FAIL | $1 | $2"; exit 1; }
 

@@ -1,4 +1,3 @@
-# Disabled because monitoring.coreos.com ServiceMonitor CRDs are not installed in the VictoriaMetrics-only baseline.
 alloy:
   configMap:
     create: false
@@ -23,3 +22,5 @@ rbac:
 
 serviceAccount:
   create: true
+
+# ServiceMonitor disabled intentionally for the current VictoriaMetrics-only baseline.
