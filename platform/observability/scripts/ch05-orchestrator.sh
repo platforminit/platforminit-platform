@@ -18,6 +18,10 @@ VM_STACK_CHART_VERSION="${VM_STACK_CHART_VERSION:-0.72.5}"
 LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-6.55.0}"
 ALLOY_CHART_VERSION="${ALLOY_CHART_VERSION:-1.0.0}"
 
+KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+export KUBECONFIG
+
+
 ensure_runtime_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y >/dev/null
@@ -34,7 +38,8 @@ ensure_helm() {
 
 ensure_cluster_ready() {
   need kubectl
-  kubectl get nodes >/dev/null 2>&1 || die "kubectl cannot access cluster"
+  [ -f "${KUBECONFIG}" ] || die "Missing kubeconfig: ${KUBECONFIG}"
+  kubectl --kubeconfig "${KUBECONFIG}" get nodes >/dev/null 2>&1 || die "kubectl cannot access cluster via ${KUBECONFIG}"
 }
 
 ensure_namespace() {
