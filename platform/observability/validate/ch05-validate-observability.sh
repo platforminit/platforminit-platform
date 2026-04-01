@@ -5,8 +5,6 @@ pass(){ echo "PASS | $1 | $2"; }
 fail(){ echo "FAIL | $1 | $2"; exit 1; }
 
 NS="${NAMESPACE:-observability}"
-export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-[[ -f "${KUBECONFIG}" ]] || fail KUBECONFIG "missing kubeconfig ${KUBECONFIG}"
 
 kubectl get ns "${NS}" >/dev/null 2>&1 && pass NAMESPACE "observability namespace exists" || fail NAMESPACE "namespace missing"
 kubectl -n "${NS}" get pods >/dev/null 2>&1 && pass POD_LIST "pods listed" || fail POD_LIST "cannot list pods"
