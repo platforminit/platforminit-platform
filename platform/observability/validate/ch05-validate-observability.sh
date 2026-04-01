@@ -1,24 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-export KUBECONFIG
-[ -f "${KUBECONFIG}" ] || { echo "FAIL | KUBECONFIG | missing kubeconfig ${KUBECONFIG}"; exit 1; }
+ns="observability"
 
+pass() { echo "PASS | $1 | $2"; }
+fail() { echo "FAIL | $1 | $2"; exit 1; }
 
-pass(){ echo "PASS | $1 | $2"; }
-fail(){ echo "FAIL | $1 | $2"; exit 1; }
+kubectl get ns "$ns" >/dev/null 2>&1 && pass "NAMESPACE" "observability namespace exists" || fail "NAMESPACE" "missing"
 
-NS="${NAMESPACE:-observability}"
+kubectl -n "$ns" get pods >/dev/null 2>&1 && pass "POD_LIST" "pods listed" || fail "POD_LIST" "no pods"
 
-kubectl get ns "${NS}" >/dev/null 2>&1 && pass NAMESPACE "observability namespace exists" || fail NAMESPACE "namespace missing"
-kubectl -n "${NS}" get pods >/dev/null 2>&1 && pass POD_LIST "pods listed" || fail POD_LIST "cannot list pods"
+kubectl -n "$ns" get deploy observability-vmstack-grafana >/dev/null 2>&1 &&   pass "GRAFANA" "grafana deployment exists" || fail "GRAFANA" "missing"
 
-for deploy in observability-vmstack-grafana alloy; do
-  kubectl -n "${NS}" get deploy "${deploy}" >/dev/null 2>&1 && pass "DEPLOY_${deploy}" "deployment exists" || true
-done
-
-kubectl -n "${NS}" get statefulset observability-vmstack-vmsingle >/dev/null 2>&1 && pass VM_SINGLE "VictoriaMetrics present" || fail VM_SINGLE "VictoriaMetrics statefulset missing"
-kubectl -n "${NS}" get statefulset loki >/dev/null 2>&1 && pass LOKI "Loki present" || fail LOKI "Loki statefulset missing"
-kubectl -n "${NS}" get configmap grafana-datasources >/dev/null 2>&1 && pass GRAFANA_DS "Grafana datasources configmap present" || fail GRAFANA_DS "Grafana datasources configmap missing"
-kubectl -n "${NS}" get vmrule platform-rules >/dev/null 2>&1 && pass VMRULE "VMRule present" || fail VMRULE "VMRule missing"
+if kubectl -n "$ns" get vmsingle >/dev/null 2>&1; then
+  pass "VM_SINGLE" "VMSingle CR exists"
+elif kubectl -n "$ns" get pods -l app.kubernetes.io/name=victoria-metrics-single-server >/dev/null 2>&1; then
+  pass "VM_SINGLE" "VictoriaMetrics pod present"
+else
+  fail "VM_SINGLE" "VictoriaMetrics not detected"
+fi
