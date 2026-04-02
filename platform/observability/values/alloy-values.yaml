@@ -1,0 +1,26 @@
+alloy:
+  configMap:
+    create: false
+    name: alloy-logs-config
+
+controller:
+  type: daemonset
+
+serviceMonitor:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+
+# ServiceMonitor disabled intentionally for the current VictoriaMetrics-only baseline.

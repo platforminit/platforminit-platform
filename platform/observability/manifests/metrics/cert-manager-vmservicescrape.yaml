@@ -1,0 +1,22 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: cert-manager-metrics
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: platforminit
+    platforminit.io/chapter: ch05
+spec:
+  namespaceSelector:
+    matchNames:
+      - cert-manager
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/instance
+        operator: In
+        values:
+          - cert-manager
+  endpoints:
+    - port: tcp-prometheus-servicemonitor
+      interval: 30s
+      path: /metrics
