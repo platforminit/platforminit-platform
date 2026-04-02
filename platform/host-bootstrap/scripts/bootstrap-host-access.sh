@@ -33,6 +33,7 @@ ensure_srv_mount(){
   mkdir -p /srv
   grep -qE '^[^#].+[[:space:]]+/srv[[:space:]]+' /etc/fstab || echo "UUID=${uuid} /srv ext4 defaults,nofail 0 2" >> /etc/fstab
   mount /srv
+  init_audit_dirs
   audit "srv_mount_ready" "ok" "device=${candidate}"
 }
 install_helpers(){ install -d -m 755 /usr/local/lib/platforminit /usr/local/sbin "$BOOTSTRAP_AUDIT_DIR"; install -m 644 /tmp/platforminit-lib-policy.sh /usr/local/lib/platforminit/lib-policy.sh; install -m 755 /tmp/platforminit-grant-temporary-sudo.sh /usr/local/sbin/platforminit-grant-sudo; install -m 755 /tmp/platforminit-sync-host-access.sh /usr/local/sbin/platforminit-sync-host-access; }
