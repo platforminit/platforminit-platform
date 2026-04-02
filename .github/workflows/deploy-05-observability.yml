@@ -258,8 +258,7 @@ jobs:
           for retry in $(seq 1 10); do
             status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
               "if [ -s '${remote_run_status}' ]; then cat '${remote_run_status}'; elif [ -f '${remote_run_status}' ]; then echo '__EMPTY_STATUS__'; else echo '__NO_STATUS__'; fi" \
-              | tr -d '[:space:]')"
-
+              | tr -d '\r[:space:]')"
             case "${status}" in
               __NO_STATUS__|__EMPTY_STATUS__|"")
                 echo "[poll] Remote CH05 status not ready yet (retry ${retry}/10)"
