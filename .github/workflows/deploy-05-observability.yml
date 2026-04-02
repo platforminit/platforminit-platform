@@ -129,28 +129,35 @@ jobs:
           run_log="${tmp_dir}/ch05-run-${SHORT_SHA}.log"
           run_pid="${tmp_dir}/ch05-run-${SHORT_SHA}.pid"
           run_status="${tmp_dir}/ch05-run-${SHORT_SHA}.status"
+          run_done="${tmp_dir}/ch05-run-${SHORT_SHA}.done"
           validate_log="${tmp_dir}/ch05-validate-${SHORT_SHA}.log"
           report_file="${report_dir}/ch05-validate-${SHORT_SHA}.log"
 
           ensure_owner_access() {
-            touch "$run_log" "$run_status" "$validate_log" "$run_pid" 2>/dev/null || true
-            chown "${OWNER_USER}:${OWNER_USER}" "$tmp_dir" "$run_log" "$run_status" "$validate_log" "$run_pid" 2>/dev/null || true
-            chmod 644 "$run_log" "$run_status" "$validate_log" 2>/dev/null || true
-            chmod 644 "$run_pid" 2>/dev/null || true
+            mkdir -p "$tmp_dir"
+            chown "${OWNER_USER}:${OWNER_USER}" "$tmp_dir" 2>/dev/null || true
+            chmod 755 "$tmp_dir" 2>/dev/null || true
+            for f in "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"; do
+              if [ -e "$f" ]; then
+                chown "${OWNER_USER}:${OWNER_USER}" "$f" 2>/dev/null || true
+                chmod 644 "$f" 2>/dev/null || true
+              fi
+            done
           }
 
           launch() {
             mkdir -p "$tmp_dir"
-            rm -f "$run_log" "$run_pid" "$run_status" "$validate_log"
+            rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
+            : > "$run_log"
             ensure_owner_access
-            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >"$run_log" 2>&1 < /dev/null &
+            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
             echo $! > "$run_pid"
             ensure_owner_access
             echo "launched pid=$(cat "$run_pid")"
           }
 
           run_main() {
-            trap 'rc=$?; printf "%s\n" "$rc" > "$run_status"; ensure_owner_access; exit "$rc"' EXIT
+            trap 'rc=$?; printf "%s\n" "$rc" > "$run_status"; touch "$run_done"; ensure_owner_access; exit "$rc"' EXIT
 
             mkdir -p "$release_dir" "$unpack_dir" "$report_dir" "$tmp_dir"
             rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
@@ -226,12 +233,13 @@ jobs:
           remote_tmp_dir="/tmp/platforminit-observability/${SHORTSHA}"
           remote_run_log="${remote_tmp_dir}/ch05-run-${SHORTSHA}.log"
           remote_run_status="${remote_tmp_dir}/ch05-run-${SHORTSHA}.status"
+          remote_run_done="${remote_tmp_dir}/ch05-run-${SHORTSHA}.done"
 
           max_attempts=80
           sleep_seconds=15
 
           for attempt in $(seq 1 "${max_attempts}"); do
-            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_status}'"; then
+            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
               break
             fi
 
@@ -240,15 +248,26 @@ jobs:
             sleep "${sleep_seconds}"
           done
 
-          if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_status}'"; then
+          if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
             echo "Timed out waiting for CH05 deploy to finish." >&2
             ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
             exit 1
           fi
 
-          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "cat '${remote_run_status}'")"
+          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -s '${remote_run_status}' && cat '${remote_run_status}' || true" | tr -d '
+[:space:]')"
           echo "Remote CH05 exit status: ${status}"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+
+          if [[ -z "${status}" ]]; then
+            echo "Remote CH05 status file is empty." >&2
+            exit 1
+          fi
+
+          if [[ ! "${status}" =~ ^[0-9]+$ ]]; then
+            echo "Remote CH05 status is not numeric: ${status}" >&2
+            exit 1
+          fi
 
           [ "${status}" = "0" ] || exit "${status}"
 
