@@ -99,10 +99,6 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Render remote observability script
-        env:
-          DEPLOY_MODE: ${{ inputs.deploy_mode }}
-          PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
-          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
@@ -153,7 +149,7 @@ jobs:
           EOS
           chmod +x /tmp/ch05-remote.sh
 
-      - name: Upload and run observability deploy
+      - name: Upload and launch observability deploy
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
@@ -165,11 +161,66 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-observability/${SHORTSHA} /tmp/platforminit-run"
+          remote_report_dir="/srv/platforminit/observability/reports"
+          remote_run_log="${remote_report_dir}/ch05-run-${SHORTSHA}.log"
+          remote_run_pid="${remote_report_dir}/ch05-run-${SHORTSHA}.pid"
+          remote_run_status="${remote_report_dir}/ch05-run-${SHORTSHA}.status"
+
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-observability/${SHORTSHA} /tmp/platforminit-run"
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-observability/${SHORTSHA}/observability-release.tar.gz"
           scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
-          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
-            "chmod +x /tmp/platforminit-run/ch05-remote.sh && sudo -n /tmp/platforminit-run/ch05-remote.sh '$SHORTSHA' '$DEPLOY_MODE' '$PLATFORM_BASE_DOMAIN' '$GRAFANA_ADMIN_PASSWORD'"
+
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
+            set -euo pipefail
+            chmod +x /tmp/platforminit-run/ch05-remote.sh
+            sudo -n mkdir -p '${remote_report_dir}'
+            sudo -n rm -f '${remote_run_log}' '${remote_run_pid}' '${remote_run_status}'
+            nohup bash -lc '
+              sudo -n /tmp/platforminit-run/ch05-remote.sh '"'"'${SHORTSHA}'"'"' '"'"'${DEPLOY_MODE}'"'"' '"'"'${PLATFORM_BASE_DOMAIN}'"'"' '"'"'${GRAFANA_ADMIN_PASSWORD}'"'"'
+              rc=\$?
+              printf "%s\n" "\$rc" | sudo -n tee '"'"'${remote_run_status}'"'"' >/dev/null
+              exit \$rc
+            ' > '${remote_run_log}' 2>&1 < /dev/null &
+            echo \$! | sudo -n tee '${remote_run_pid}' >/dev/null
+          "
+          echo "Remote observability deploy launched."
+
+      - name: Poll observability deploy
+        env:
+          HOST: ${{ steps.server.outputs.public_ip }}
+          HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
+          SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_report_dir="/srv/platforminit/observability/reports"
+          remote_run_log="${remote_report_dir}/ch05-run-${SHORTSHA}.log"
+          remote_run_status="${remote_report_dir}/ch05-run-${SHORTSHA}.status"
+
+          max_attempts=80
+          sleep_seconds=15
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_run_status}'"; then
+              break
+            fi
+
+            echo "[poll] CH05 still running (attempt ${attempt}/${max_attempts})"
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n tail -n 20 '${remote_run_log}' 2>/dev/null || true"
+            sleep "${sleep_seconds}"
+          done
+
+          if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_run_status}'"; then
+            echo "Timed out waiting for CH05 deploy to finish." >&2
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+            exit 1
+          fi
+
+          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n cat '${remote_run_status}'")"
+          echo "Remote CH05 exit status: ${status}"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+
+          [ "${status}" = "0" ] || exit "${status}"
 
       - name: Fetch validation report
         if: always()
@@ -181,10 +232,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./observability-reports
-          if ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f /srv/platforminit/observability/reports/ch05-validate-${SHORTSHA}.log"; then
-            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/srv/platforminit/observability/reports/ch05-validate-${SHORTSHA}.log" "./observability-reports/"
+          remote_report_dir="/srv/platforminit/observability/reports"
+
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_report_dir}/ch05-validate-${SHORTSHA}.log'"; then
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n cat '${remote_report_dir}/ch05-validate-${SHORTSHA}.log'" > "./observability-reports/ch05-validate-${SHORTSHA}.log"
           else
             echo "No validation report found; deploy failed before validation step"
+          fi
+
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_report_dir}/ch05-run-${SHORTSHA}.log'"; then
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n cat '${remote_report_dir}/ch05-run-${SHORTSHA}.log'" > "./observability-reports/ch05-run-${SHORTSHA}.log"
           fi
 
       - name: Upload validation report

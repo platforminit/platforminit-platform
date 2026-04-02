@@ -4,6 +4,10 @@ grafana:
   enabled: true
   adminPassword: changeme
   defaultDashboardsTimezone: utc
+
+  # Grafana default datasource policy:
+  # keep the chart-managed VictoriaMetrics datasource as the only default datasource.
+  # Additional datasources such as Loki are provisioned separately without isDefault=true.
   sidecar:
     datasources:
       enabled: true
