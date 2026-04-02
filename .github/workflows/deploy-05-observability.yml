@@ -106,10 +106,19 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
 
-          SHORT_SHA="$1"
-          DEPLOY_MODE="$2"
-          PLATFORM_BASE_DOMAIN="$3"
-          GRAFANA_ADMIN_PASSWORD="$4"
+          usage() {
+            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE PLATFORM_BASE_DOMAIN GRAFANA_ADMIN_PASSWORD OWNER_USER" >&2
+            exit 2
+          }
+
+          [[ $# -ge 6 ]] || usage
+
+          ACTION="$1"
+          SHORT_SHA="$2"
+          DEPLOY_MODE="$3"
+          PLATFORM_BASE_DOMAIN="$4"
+          GRAFANA_ADMIN_PASSWORD="$5"
+          OWNER_USER="$6"
 
           [[ "${EUID}" -eq 0 ]] || { echo "ch05-remote.sh must run as root" >&2; exit 1; }
 
@@ -117,35 +126,68 @@ jobs:
           tmp_dir="/tmp/platforminit-observability/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
           report_dir="/srv/platforminit/observability/reports"
+          run_log="${tmp_dir}/ch05-run-${SHORT_SHA}.log"
+          run_pid="${tmp_dir}/ch05-run-${SHORT_SHA}.pid"
+          run_status="${tmp_dir}/ch05-run-${SHORT_SHA}.status"
+          validate_log="${tmp_dir}/ch05-validate-${SHORT_SHA}.log"
           report_file="${report_dir}/ch05-validate-${SHORT_SHA}.log"
 
-          mkdir -p "$release_dir" "$unpack_dir" "$report_dir"
-          rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
-          tar -xzf "${tmp_dir}/observability-release.tar.gz" -C "$unpack_dir"
-
-          test -d "$unpack_dir/platform/observability" || {
-            echo "Missing platform/observability in artifact" >&2
-            find "$unpack_dir" -maxdepth 4 -print >&2
-            exit 1
+          ensure_owner_access() {
+            touch "$run_log" "$run_status" "$validate_log" "$run_pid" 2>/dev/null || true
+            chown "${OWNER_USER}:${OWNER_USER}" "$tmp_dir" "$run_log" "$run_status" "$validate_log" "$run_pid" 2>/dev/null || true
+            chmod 644 "$run_log" "$run_status" "$validate_log" 2>/dev/null || true
+            chmod 644 "$run_pid" 2>/dev/null || true
           }
 
-          rsync -a --delete "$unpack_dir/platform/observability/" "$release_dir/"
-          find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
-
-          export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
-          test -f "$KUBECONFIG" || {
-            echo "Missing kubeconfig at $KUBECONFIG" >&2
-            exit 1
+          launch() {
+            mkdir -p "$tmp_dir"
+            rm -f "$run_log" "$run_pid" "$run_status" "$validate_log"
+            ensure_owner_access
+            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >"$run_log" 2>&1 < /dev/null &
+            echo $! > "$run_pid"
+            ensure_owner_access
+            echo "launched pid=$(cat "$run_pid")"
           }
 
-          env \
-            KUBECONFIG="$KUBECONFIG" \
-            DEPLOY_MODE="$DEPLOY_MODE" \
-            BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
-            GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
-            "$release_dir/scripts/ch05-orchestrator.sh"
+          run_main() {
+            trap 'rc=$?; printf "%s\n" "$rc" > "$run_status"; ensure_owner_access; exit "$rc"' EXIT
 
-          env KUBECONFIG="$KUBECONFIG" "$release_dir/validate/ch05-validate-observability.sh" | tee "$report_file"
+            mkdir -p "$release_dir" "$unpack_dir" "$report_dir" "$tmp_dir"
+            rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
+            tar -xzf "${tmp_dir}/observability-release.tar.gz" -C "$unpack_dir"
+
+            test -d "$unpack_dir/platform/observability" || {
+              echo "Missing platform/observability in artifact" >&2
+              find "$unpack_dir" -maxdepth 4 -print >&2
+              exit 1
+            }
+
+            rsync -a --delete "$unpack_dir/platform/observability/" "$release_dir/"
+            find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
+
+            export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+            test -f "$KUBECONFIG" || {
+              echo "Missing kubeconfig at $KUBECONFIG" >&2
+              exit 1
+            }
+
+            env \
+              KUBECONFIG="$KUBECONFIG" \
+              DEPLOY_MODE="$DEPLOY_MODE" \
+              BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
+              GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
+              "$release_dir/scripts/ch05-orchestrator.sh"
+
+            env KUBECONFIG="$KUBECONFIG" "$release_dir/validate/ch05-validate-observability.sh" | tee "$validate_log"
+            cp "$validate_log" "$report_file" || true
+            ensure_owner_access
+          }
+
+          case "$ACTION" in
+            launch) launch ;;
+            run) run_main ;;
+            *) usage ;;
+          esac
           EOS
           chmod +x /tmp/ch05-remote.sh
 
@@ -161,10 +203,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          remote_report_dir="/srv/platforminit/observability/reports"
-          remote_run_log="${remote_report_dir}/ch05-run-${SHORTSHA}.log"
-          remote_run_pid="${remote_report_dir}/ch05-run-${SHORTSHA}.pid"
-          remote_run_status="${remote_report_dir}/ch05-run-${SHORTSHA}.status"
 
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-observability/${SHORTSHA} /tmp/platforminit-run"
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-observability/${SHORTSHA}/observability-release.tar.gz"
@@ -173,15 +211,7 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh
-            sudo -n mkdir -p '${remote_report_dir}'
-            sudo -n rm -f '${remote_run_log}' '${remote_run_pid}' '${remote_run_status}'
-            nohup bash -lc '
-              sudo -n /tmp/platforminit-run/ch05-remote.sh '"'"'${SHORTSHA}'"'"' '"'"'${DEPLOY_MODE}'"'"' '"'"'${PLATFORM_BASE_DOMAIN}'"'"' '"'"'${GRAFANA_ADMIN_PASSWORD}'"'"'
-              rc=\$?
-              printf "%s\n" "\$rc" | sudo -n tee '"'"'${remote_run_status}'"'"' >/dev/null
-              exit \$rc
-            ' > '${remote_run_log}' 2>&1 < /dev/null &
-            echo \$! | sudo -n tee '${remote_run_pid}' >/dev/null
+            sudo -n /tmp/platforminit-run/ch05-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_ADMIN_PASSWORD}' '${HOST_LOGIN_USER}'
           "
           echo "Remote observability deploy launched."
 
@@ -193,32 +223,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          remote_report_dir="/srv/platforminit/observability/reports"
-          remote_run_log="${remote_report_dir}/ch05-run-${SHORTSHA}.log"
-          remote_run_status="${remote_report_dir}/ch05-run-${SHORTSHA}.status"
+          remote_tmp_dir="/tmp/platforminit-observability/${SHORTSHA}"
+          remote_run_log="${remote_tmp_dir}/ch05-run-${SHORTSHA}.log"
+          remote_run_status="${remote_tmp_dir}/ch05-run-${SHORTSHA}.status"
 
           max_attempts=80
           sleep_seconds=15
 
           for attempt in $(seq 1 "${max_attempts}"); do
-            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_run_status}'"; then
+            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_status}'"; then
               break
             fi
 
             echo "[poll] CH05 still running (attempt ${attempt}/${max_attempts})"
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n tail -n 20 '${remote_run_log}' 2>/dev/null || true"
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 20 '${remote_run_log}' 2>/dev/null || true"
             sleep "${sleep_seconds}"
           done
 
-          if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_run_status}'"; then
+          if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_status}'"; then
             echo "Timed out waiting for CH05 deploy to finish." >&2
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
             exit 1
           fi
 
-          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n cat '${remote_run_status}'")"
+          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "cat '${remote_run_status}'")"
           echo "Remote CH05 exit status: ${status}"
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
 
           [ "${status}" = "0" ] || exit "${status}"
 
@@ -232,16 +262,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./observability-reports
-          remote_report_dir="/srv/platforminit/observability/reports"
+          remote_tmp_dir="/tmp/platforminit-observability/${SHORTSHA}"
 
-          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_report_dir}/ch05-validate-${SHORTSHA}.log'"; then
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n cat '${remote_report_dir}/ch05-validate-${SHORTSHA}.log'" > "./observability-reports/ch05-validate-${SHORTSHA}.log"
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-validate-${SHORTSHA}.log'"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-validate-${SHORTSHA}.log" "./observability-reports/ch05-validate-${SHORTSHA}.log"
           else
             echo "No validation report found; deploy failed before validation step"
           fi
 
-          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n test -f '${remote_report_dir}/ch05-run-${SHORTSHA}.log'"; then
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "sudo -n cat '${remote_report_dir}/ch05-run-${SHORTSHA}.log'" > "./observability-reports/ch05-run-${SHORTSHA}.log"
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-run-${SHORTSHA}.log'"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-run-${SHORTSHA}.log" "./observability-reports/ch05-run-${SHORTSHA}.log"
           fi
 
       - name: Upload validation report
@@ -258,13 +288,9 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Observability deploy metadata"
-            echo ""
-            echo "- Workflow run ID: \`${{ github.run_id }}\`"
-            echo "- Artifact run ID: \`${{ inputs.artifact_run_id }}\`"
-            echo "- Artifact ID: \`${{ inputs.artifact_id }}\`"
-            echo "- Short SHA: \`${{ steps.artifact.outputs.short_sha }}\`"
-            echo "- Target host: \`${{ steps.server.outputs.public_ip }}\`"
-            echo "- Deploy mode: \`${{ inputs.deploy_mode }}\`"
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "CH05 run completed"
+            echo "artifact_run_id=${{ inputs.artifact_run_id }}"
+            echo "artifact_id=${{ inputs.artifact_id }}"
+            echo "short_sha=${{ steps.artifact.outputs.short_sha }}"
+            echo "host_public_ip=${{ steps.server.outputs.public_ip }}"
+          }
