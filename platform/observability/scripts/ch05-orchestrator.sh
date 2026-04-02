@@ -17,12 +17,10 @@ GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-changeme}"
 VM_STACK_CHART_VERSION="${VM_STACK_CHART_VERSION:-0.72.5}"
 LOKI_CHART_VERSION="${LOKI_CHART_VERSION:-6.55.0}"
 ALLOY_CHART_VERSION="${ALLOY_CHART_VERSION:-1.0.0}"
-VM_STACK_TIMEOUT="${VM_STACK_TIMEOUT:-25m}"
-LOKI_TIMEOUT="${LOKI_TIMEOUT:-15m}"
-ALLOY_TIMEOUT="${ALLOY_TIMEOUT:-15m}"
 
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
+
 
 ensure_runtime_deps() {
   export DEBIAN_FRONTEND=noninteractive
@@ -60,54 +58,15 @@ install_repos() {
   helm repo update >/dev/null
 }
 
-apply_vmagent_additional_scrape_secret() {
-  log "Applying vmagent additional scrape secret"
-  kubectl -n "${NAMESPACE}" create secret generic vmagent-additional-scrape \
-    --from-file=prometheus-additional.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml" \
-    --dry-run=client -o yaml | kubectl apply -f -
-}
-
-collect_namespace_diagnostics() {
-  log "Collecting diagnostics for namespace=${NAMESPACE}"
-  kubectl -n "${NAMESPACE}" get pods -o wide || true
-  kubectl -n "${NAMESPACE}" get pvc || true
-  kubectl -n "${NAMESPACE}" get events --sort-by=.lastTimestamp | tail -n 50 || true
-
-  local pod
-  while IFS= read -r pod; do
-    [ -n "${pod}" ] || continue
-    log "Describe pod ${pod}"
-    kubectl -n "${NAMESPACE}" describe pod "${pod}" || true
-  done < <(
-    kubectl -n "${NAMESPACE}" get pods --no-headers 2>/dev/null \
-      | awk '{
-          split($2, ready, "/");
-          if ($3 != "Running" && $3 != "Completed") { print $1; next }
-          if (ready[1] != ready[2]) { print $1 }
-        }'
-  )
-}
-
 deploy_vm_stack() {
   log "Deploying VictoriaMetrics stack"
-  if ! helm upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack \
-    --namespace "${NAMESPACE}" \
-    --version "${VM_STACK_CHART_VERSION}" \
-    -f /tmp/ch05-vm-values.yaml \
-    --wait --timeout "${VM_STACK_TIMEOUT}"; then
-    collect_namespace_diagnostics
-    die "VictoriaMetrics stack deployment failed"
-  fi
+  helm upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack     --namespace "${NAMESPACE}"     --version "${VM_STACK_CHART_VERSION}"     -f /tmp/ch05-vm-values.yaml     --wait --timeout 15m
 }
 
 wait_for_vm_crds() {
   log "Waiting for VictoriaMetrics CRDs"
   local crd
-  for crd in \
-    vmrules.operator.victoriametrics.com \
-    vmagents.operator.victoriametrics.com \
-    vmalerts.operator.victoriametrics.com \
-    vmsingles.operator.victoriametrics.com
+  for crd in     vmrules.operator.victoriametrics.com     vmagents.operator.victoriametrics.com     vmalerts.operator.victoriametrics.com     vmsingles.operator.victoriametrics.com
   do
     timeout 180 bash -c "until kubectl get crd ${crd} >/dev/null 2>&1; do sleep 2; done"
   done
@@ -118,11 +77,7 @@ wait_for_vm_crds() {
 
 deploy_loki() {
   log "Deploying Loki"
-  helm upgrade --install loki grafana/loki \
-    --namespace "${NAMESPACE}" \
-    --version "${LOKI_CHART_VERSION}" \
-    -f "${REPO_ROOT}/values/loki-values.yaml" \
-    --wait --timeout "${LOKI_TIMEOUT}"
+  helm upgrade --install loki grafana/loki     --namespace "${NAMESPACE}"     --version "${LOKI_CHART_VERSION}"     -f "${REPO_ROOT}/values/loki-values.yaml"     --wait --timeout 15m
 }
 
 deploy_alloy() {
@@ -130,15 +85,12 @@ deploy_alloy() {
   kubectl apply -f "${REPO_ROOT}/manifests/logging/alloy-logs-config.yaml"
 
   log "Deploying Alloy"
-  helm upgrade --install alloy grafana/alloy \
-    --namespace "${NAMESPACE}" \
-    --version "${ALLOY_CHART_VERSION}" \
-    -f "${REPO_ROOT}/values/alloy-values.yaml" \
-    --wait --timeout "${ALLOY_TIMEOUT}"
+  helm upgrade --install alloy grafana/alloy     --namespace "${NAMESPACE}"     --version "${ALLOY_CHART_VERSION}"     -f "${REPO_ROOT}/values/alloy-values.yaml"     --wait --timeout 15m
 }
 
 apply_post_vm_manifests() {
-  apply_vmagent_additional_scrape_secret
+  log "Applying vmagent additional scrape config"
+  kubectl create configmap vmagent-additional-scrape     --namespace "${NAMESPACE}"     --from-file=additional-scrape.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml"     --dry-run=client -o yaml | kubectl apply -f -
 
   log "Applying alert rules"
   kubectl apply -f "${REPO_ROOT}/manifests/alerts/platform-vmrule.yaml"
@@ -159,7 +111,6 @@ main() {
   ensure_namespace
   prepare_values
   install_repos
-  apply_vmagent_additional_scrape_secret
   deploy_vm_stack
   wait_for_vm_crds
   apply_post_vm_manifests
