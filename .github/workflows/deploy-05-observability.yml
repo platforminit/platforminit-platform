@@ -157,7 +157,7 @@ jobs:
           }
 
           run_main() {
-            trap 'rc=$?; printf "%s\n" "$rc" > "$run_status"; touch "$run_done"; ensure_owner_access; exit "$rc"' EXIT
+            trap 'rc=$?; printf "%s\n" "$rc" > "${run_status}.tmp"; mv "${run_status}.tmp" "$run_status"; touch "$run_done"; ensure_owner_access; exit "$rc"' EXIT
 
             mkdir -p "$release_dir" "$unpack_dir" "$report_dir" "$tmp_dir"
             rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
@@ -254,12 +254,32 @@ jobs:
             exit 1
           fi
 
-          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -s '${remote_run_status}' && cat '${remote_run_status}' || true" | tr -d '
-[:space:]')"
+          status=""
+          for retry in $(seq 1 10); do
+            status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
+              "if [ -s '${remote_run_status}' ]; then cat '${remote_run_status}'; elif [ -f '${remote_run_status}' ]; then echo '__EMPTY_STATUS__'; else echo '__NO_STATUS__'; fi" \
+              | tr -d '[:space:]')"
+
+            case "${status}" in
+              __NO_STATUS__|__EMPTY_STATUS__|"")
+                echo "[poll] Remote CH05 status not ready yet (retry ${retry}/10)"
+                sleep 2
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done
+
           echo "Remote CH05 exit status: ${status}"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
 
-          if [[ -z "${status}" ]]; then
+          if [[ "${status}" == "__NO_STATUS__" ]]; then
+            echo "Remote CH05 status file does not exist." >&2
+            exit 1
+          fi
+
+          if [[ "${status}" == "__EMPTY_STATUS__" || -z "${status}" ]]; then
             echo "Remote CH05 status file is empty." >&2
             exit 1
           fi
