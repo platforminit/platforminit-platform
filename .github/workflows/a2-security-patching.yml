@@ -24,7 +24,7 @@ jobs:
     with:
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
-      target_user: devops
+      target_user: ${{ secrets.HOST_LOGIN_USER }}
       duration_minutes: '15'
       mode: security-apply
     secrets: inherit
