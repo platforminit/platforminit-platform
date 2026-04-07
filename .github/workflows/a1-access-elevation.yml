@@ -13,8 +13,8 @@ on:
         default: ''
       target_user:
         description: User to elevate temporarily
-        required: true
-        default: devops
+        required: false
+        default: ''
       duration_minutes:
         description: Time-bound elevation window in minutes
         required: true
@@ -50,7 +50,7 @@ on:
       target_user:
         required: false
         type: string
-        default: devops
+        default: ''
       duration_minutes:
         required: false
         type: string
@@ -102,11 +102,14 @@ jobs:
         env:
           HOST: ${{ steps.target.outputs.public_ip }}
           BROKER_USER: itadmin
-          TARGET_USER: ${{ inputs.target_user }}
+          INPUT_TARGET_USER: ${{ inputs.target_user }}
+          DEFAULT_TARGET_USER: ${{ secrets.HOST_LOGIN_USER }}
           DURATION_MINUTES: ${{ inputs.duration_minutes }}
           SCOPE: ${{ inputs.mode }}
           RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
+          TARGET_USER="${INPUT_TARGET_USER:-$DEFAULT_TARGET_USER}"
+          [ -n "$TARGET_USER" ] || { echo "Missing target user (input or HOST_LOGIN_USER secret)" >&2; exit 1; }
           ssh -i ~/.ssh/id_ed25519 "$BROKER_USER@$HOST"             "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"

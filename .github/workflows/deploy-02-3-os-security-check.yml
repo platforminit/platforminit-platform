@@ -23,7 +23,7 @@ jobs:
     uses: ./.github/workflows/a1-access-elevation.yml
     with:
       server_id_override: ${{ inputs.server_id_override }}
-      target_user: devops
+      target_user: ${{ secrets.HOST_LOGIN_USER }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
       mode: security-check

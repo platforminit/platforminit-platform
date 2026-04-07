@@ -37,7 +37,7 @@ jobs:
     uses: ./.github/workflows/a1-access-elevation.yml
     with:
       server_id_override: ${{ inputs.server_id_override }}
-      target_user: devops
+      target_user: ${{ secrets.HOST_LOGIN_USER }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
       mode: platform
@@ -124,7 +124,7 @@ jobs:
       - name: Upload and run platform deploy
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
-          HOST_LOGIN_USER: devops
+          HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
           DNS_API_TOKEN: ${{ secrets.DNS_API_TOKEN }}
