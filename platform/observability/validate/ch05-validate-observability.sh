@@ -19,3 +19,15 @@ elif kubectl -n "$ns" get pods -l app.kubernetes.io/name=victoria-metrics-single
 else
   fail "VM_SINGLE" "VictoriaMetrics not detected"
 fi
+
+if kubectl -n "$ns" get ingress grafana >/dev/null 2>&1; then
+  pass "GRAFANA_INGRESS" "grafana ingress exists"
+else
+  fail "GRAFANA_INGRESS" "grafana ingress missing"
+fi
+
+if kubectl -n "$ns" get certificate grafana-tls >/dev/null 2>&1; then
+  pass "GRAFANA_TLS" "grafana certificate exists"
+else
+  fail "GRAFANA_TLS" "grafana certificate missing"
+fi
