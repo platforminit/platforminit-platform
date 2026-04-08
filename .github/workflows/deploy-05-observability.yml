@@ -20,13 +20,13 @@ on:
         required: false
         default: ''
       deploy_mode:
-        description: Baseline or reconcile mode
+        description: staging or prod issuer selection
         required: true
-        default: baseline
+        default: staging
         type: choice
         options:
-          - baseline
-          - reconcile
+          - staging
+          - prod
 
 permissions:
   contents: read

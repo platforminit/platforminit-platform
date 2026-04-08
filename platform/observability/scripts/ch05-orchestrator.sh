@@ -10,7 +10,8 @@ need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-DEPLOY_MODE="${DEPLOY_MODE:-baseline}"
+DEPLOY_MODE="${DEPLOY_MODE:-staging}"
+CLUSTER_ISSUER="letsencrypt-${DEPLOY_MODE}"
 NAMESPACE="${NAMESPACE:-observability}"
 BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-changeme}"
@@ -50,6 +51,19 @@ prepare_values() {
   local vm_values="${REPO_ROOT}/values/victoria-metrics-k8s-stack-values.yaml"
   cp "${vm_values}" /tmp/ch05-vm-values.yaml
   sed -i "s/adminPassword: changeme/adminPassword: ${GRAFANA_ADMIN_PASSWORD//\//\/}/" /tmp/ch05-vm-values.yaml
+}
+
+apply_grafana_ingress() {
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "${tmp_dir}"' RETURN
+
+  sed     -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g"     "${REPO_ROOT}/ingress/grafana-ingress.yaml" > "${tmp_dir}/grafana-ingress.yaml"
+
+  sed     -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g"     -e "s|__CLUSTER_ISSUER__|${CLUSTER_ISSUER}|g"     "${REPO_ROOT}/ingress/grafana-certificate.yaml" > "${tmp_dir}/grafana-certificate.yaml"
+
+  kubectl apply -f "${tmp_dir}/grafana-certificate.yaml"
+  kubectl apply -f "${tmp_dir}/grafana-ingress.yaml"
 }
 
 install_repos() {
@@ -117,7 +131,8 @@ main() {
   deploy_loki
   deploy_alloy
   restart_if_needed
-  log "CH05 observability deploy completed in mode=${DEPLOY_MODE}"
+  apply_grafana_ingress
+  log "CH05 observability deploy completed with issuer=${CLUSTER_ISSUER}"
 }
 
 main "$@"
