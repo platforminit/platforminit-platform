@@ -11,6 +11,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 DEPLOY_MODE="${DEPLOY_MODE:-staging}"
+case "${DEPLOY_MODE}" in
+  staging|prod) ;;
+  *) die "DEPLOY_MODE must be staging or prod, got: ${DEPLOY_MODE}" ;;
+esac
 CLUSTER_ISSUER="letsencrypt-${DEPLOY_MODE}"
 NAMESPACE="${NAMESPACE:-observability}"
 BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
