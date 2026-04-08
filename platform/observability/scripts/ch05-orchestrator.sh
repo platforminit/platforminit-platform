@@ -54,16 +54,22 @@ prepare_values() {
 }
 
 apply_grafana_ingress() {
-  local tmp_dir
+  local tmp_dir=""
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "${tmp_dir}"' RETURN
 
-  sed     -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g"     "${REPO_ROOT}/ingress/grafana-ingress.yaml" > "${tmp_dir}/grafana-ingress.yaml"
+  sed \
+    -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g" \
+    "${REPO_ROOT}/ingress/grafana-ingress.yaml" > "${tmp_dir}/grafana-ingress.yaml"
 
-  sed     -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g"     -e "s|__CLUSTER_ISSUER__|${CLUSTER_ISSUER}|g"     "${REPO_ROOT}/ingress/grafana-certificate.yaml" > "${tmp_dir}/grafana-certificate.yaml"
+  sed \
+    -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g" \
+    -e "s|__CLUSTER_ISSUER__|${CLUSTER_ISSUER}|g" \
+    "${REPO_ROOT}/ingress/grafana-certificate.yaml" > "${tmp_dir}/grafana-certificate.yaml"
 
   kubectl apply -f "${tmp_dir}/grafana-certificate.yaml"
   kubectl apply -f "${tmp_dir}/grafana-ingress.yaml"
+
+  rm -rf "${tmp_dir}"
 }
 
 install_repos() {
