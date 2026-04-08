@@ -10,12 +10,20 @@ need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-DEPLOY_MODE="${DEPLOY_MODE:-staging}"
+DEPLOY_MODE="${DEPLOY_MODE:-baseline}"
+ISSUER_MODE="${ISSUER_MODE:-staging}"
+
 case "${DEPLOY_MODE}" in
-  staging|prod) ;;
-  *) die "DEPLOY_MODE must be staging or prod, got: ${DEPLOY_MODE}" ;;
+  baseline|reconcile) ;;
+  *) die "DEPLOY_MODE must be baseline or reconcile, got: ${DEPLOY_MODE}" ;;
 esac
-CLUSTER_ISSUER="letsencrypt-${DEPLOY_MODE}"
+
+case "${ISSUER_MODE}" in
+  staging|prod) ;;
+  *) die "ISSUER_MODE must be staging or prod, got: ${ISSUER_MODE}" ;;
+esac
+
+CLUSTER_ISSUER="letsencrypt-${ISSUER_MODE}"
 NAMESPACE="${NAMESPACE:-observability}"
 BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-changeme}"
@@ -83,7 +91,7 @@ install_repos() {
 }
 
 deploy_vm_stack() {
-  log "Deploying VictoriaMetrics stack"
+  log "Deploying VictoriaMetrics stack (mode=${DEPLOY_MODE})"
   helm upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack     --namespace "${NAMESPACE}"     --version "${VM_STACK_CHART_VERSION}"     -f /tmp/ch05-vm-values.yaml     --wait --timeout 15m
 }
 
@@ -142,7 +150,7 @@ main() {
   deploy_alloy
   restart_if_needed
   apply_grafana_ingress
-  log "CH05 observability deploy completed with issuer=${CLUSTER_ISSUER}"
+  log "CH05 observability deploy completed with deploy_mode=${DEPLOY_MODE} issuer=${CLUSTER_ISSUER}"
 }
 
 main "$@"
