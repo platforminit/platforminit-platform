@@ -20,6 +20,14 @@ on:
         required: false
         default: ''
       deploy_mode:
+        description: baseline or reconcile deployment mode
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - reconcile
+      issuer_mode:
         description: staging or prod issuer selection
         required: true
         default: staging
@@ -106,18 +114,19 @@ jobs:
           set -euo pipefail
 
           usage() {
-            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE PLATFORM_BASE_DOMAIN GRAFANA_ADMIN_PASSWORD OWNER_USER" >&2
+            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE ISSUER_MODE PLATFORM_BASE_DOMAIN GRAFANA_ADMIN_PASSWORD OWNER_USER" >&2
             exit 2
           }
 
-          [[ $# -ge 6 ]] || usage
+          [[ $# -ge 7 ]] || usage
 
           ACTION="$1"
           SHORT_SHA="$2"
           DEPLOY_MODE="$3"
-          PLATFORM_BASE_DOMAIN="$4"
-          GRAFANA_ADMIN_PASSWORD="$5"
-          OWNER_USER="$6"
+          ISSUER_MODE="$4"
+          PLATFORM_BASE_DOMAIN="$5"
+          GRAFANA_ADMIN_PASSWORD="$6"
+          OWNER_USER="$7"
 
           [[ "${EUID}" -eq 0 ]] || { echo "ch05-remote.sh must run as root" >&2; exit 1; }
 
@@ -149,7 +158,7 @@ jobs:
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             ensure_owner_access
-            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
+            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$ISSUER_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
             echo $! > "$run_pid"
             ensure_owner_access
             echo "launched pid=$(cat "$run_pid")"
@@ -180,6 +189,7 @@ jobs:
             env \
               KUBECONFIG="$KUBECONFIG" \
               DEPLOY_MODE="$DEPLOY_MODE" \
+              ISSUER_MODE="$ISSUER_MODE" \
               BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
               GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
               "$release_dir/scripts/ch05-orchestrator.sh"
@@ -204,6 +214,7 @@ jobs:
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
           DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          ISSUER_MODE: ${{ inputs.issuer_mode }}
           PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         shell: bash
@@ -217,7 +228,7 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh
-            sudo -n /tmp/platforminit-run/ch05-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_ADMIN_PASSWORD}' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch05-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${ISSUER_MODE}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_ADMIN_PASSWORD}' '${HOST_LOGIN_USER}'
           "
           echo "Remote observability deploy launched."
 
