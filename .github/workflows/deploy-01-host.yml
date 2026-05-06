@@ -41,9 +41,13 @@ name: 01 - Create or Rebuild Host
           - cax31
           - cx43
       region:
-        description: Hetzner location for create/volume
+        description: Primary Hetzner location for create/volume
         required: true
         default: fsn1
+      fallback_regions:
+        description: Comma-separated fallback locations used only when Hetzner returns placement/resource_unavailable during host creation
+        required: false
+        default: nbg1,hel1
       server_name:
         description: Optional physical server name override; empty means host_name
         required: false
@@ -211,8 +215,10 @@ jobs:
           label_host="$HOST_NAME"
           label_role="$HOST_ROLE"
           label_layout="$VOLUME_LAYOUT"
+          effective_region="$REGION"
           volume_ids_json="[]"
           volume_summary=""
+          volume_attach_action_ids=""
 
           ensure_volume() {
             local role="$1" name="$2" size="$3" mount_path="$4"
@@ -224,12 +230,12 @@ jobs:
             list_code="$(curl -sS -o "$list_body" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
             [[ "$list_code" == "200" ]] || { cat "$list_body" >&2; exit 1; }
 
-            volume_id="$(jq -r --arg name "$name" --arg location "$REGION" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "$list_body")"
+            volume_id="$(jq -r --arg name "$name" --arg location "$effective_region" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "$list_body")"
             if [[ -z "$volume_id" ]]; then
               payload="$(jq -n \
                 --arg name "$name" \
                 --argjson size "$size" \
-                --arg location "$REGION" \
+                --arg location "$effective_region" \
                 --arg project "$PROJECT" \
                 --arg host "$HOST_NAME" \
                 --arg role "$role" \
@@ -244,7 +250,7 @@ jobs:
                 requery="$(mktemp)"
                 requery_code="$(curl -sS -o "$requery" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
                 [[ "$requery_code" == "200" ]] || { cat "$requery" >&2; exit 1; }
-                volume_id="$(jq -r --arg name "$name" --arg location "$REGION" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "$requery")"
+                volume_id="$(jq -r --arg name "$name" --arg location "$effective_region" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "$requery")"
               else
                 cat "$body" >&2
                 exit 1
@@ -257,7 +263,83 @@ jobs:
             volume_summary+="${role}:${name}:${volume_id}:${mount_path};"
           }
 
+          attach_volumes_to_server() {
+            local id body code action_id
+            for id in $(jq -r '.[]' <<< "$volume_ids_json"); do
+              body="$(mktemp)"
+              code="$(curl -sS -o "$body" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/volumes/${id}/actions/attach" "${auth[@]}" -d "$(jq -n --argjson server "$sid" '{server:$server, automount:false}')")"
+              if [[ "$code" == "201" ]]; then
+                action_id="$(jq -r '.action.id // empty' "$body")"
+                volume_attach_action_ids+="${action_id} "
+              elif [[ "$code" == "422" ]] && grep -qi 'already attached' "$body"; then
+                echo "Volume ${id} is already attached; continuing"
+              else
+                echo "Failed to attach volume ${id} to server ${sid}" >&2
+                cat "$body" >&2
+                exit 1
+              fi
+            done
+          }
+
           if [[ "${ACTION_NAME}" == "create" ]]; then
+            # Create the server first, then create/attach volumes in the final effective location.
+            # This avoids Hetzner placement failures caused by pre-created volumes constraining server placement.
+            create_server_in_location() {
+              local candidate_location="$1" body code payload err_code
+              payload="$(jq -n \
+                --arg name "$server_name" \
+                --arg server_type "$SERVER_TYPE" \
+                --arg image "$IMAGE" \
+                --arg location "$candidate_location" \
+                --rawfile user_data .tmp/user-data.yaml \
+                --argjson ssh_key_id "$SSH_KEY_ID" \
+                --arg project "$label_project" \
+                --arg host "$label_host" \
+                --arg role "$label_role" \
+                --arg layout "$label_layout" \
+                '{name:$name,server_type:$server_type,image:$image,location:$location,user_data:$user_data,ssh_keys:[$ssh_key_id],labels:{"platforminit.project":$project,"platforminit.host":$host,"platforminit.role":$role,"platforminit.volume_layout":$layout}}')"
+              body="$(mktemp)"
+              code="$(curl -sS -o "$body" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/servers" "${auth[@]}" -d "$payload")"
+              if [[ "$code" == "201" ]]; then
+                sid="$(jq -r '.server.id // empty' "$body")"
+                action_id="$(jq -r '.action.id // empty' "$body")"
+                [[ -n "$sid" ]] || { cat "$body" >&2; exit 1; }
+                effective_region="$candidate_location"
+                return 0
+              fi
+
+              err_code="$(jq -r '.error.code // empty' "$body" 2>/dev/null || true)"
+              if [[ "$err_code" == "resource_unavailable" ]]; then
+                echo "Hetzner placement unavailable in ${candidate_location}; trying next fallback location if available." >&2
+                return 2
+              fi
+
+              cat "$body" >&2
+              exit 1
+            }
+
+            tried_locations=()
+            location_candidates="$REGION"
+            if [[ -n "${FALLBACK_REGIONS:-}" ]]; then
+              location_candidates+=",${FALLBACK_REGIONS}"
+            fi
+
+            IFS=',' read -ra candidate_locations <<< "$location_candidates"
+            for candidate in "${candidate_locations[@]}"; do
+              candidate="$(printf '%s' "$candidate" | xargs)"
+              [[ -n "$candidate" ]] || continue
+              # de-duplicate candidates while preserving order
+              if printf '%s\n' "${tried_locations[@]:-}" | grep -qx "$candidate"; then
+                continue
+              fi
+              tried_locations+=("$candidate")
+              if create_server_in_location "$candidate"; then
+                break
+              fi
+            done
+
+            [[ -n "$sid" ]] || { echo "Failed to create server after trying locations: ${tried_locations[*]}" >&2; exit 1; }
+
             case "$VOLUME_LAYOUT" in
               none)
                 volume_ids_json="[]"
@@ -273,26 +355,10 @@ jobs:
               *) echo "Unsupported volume_layout=${VOLUME_LAYOUT}" >&2; exit 1 ;;
             esac
 
-            payload="$(jq -n \
-              --arg name "$server_name" \
-              --arg server_type "$SERVER_TYPE" \
-              --arg image "$IMAGE" \
-              --arg location "$REGION" \
-              --rawfile user_data .tmp/user-data.yaml \
-              --argjson ssh_key_id "$SSH_KEY_ID" \
-              --argjson volume_ids "$volume_ids_json" \
-              --arg project "$label_project" \
-              --arg host "$label_host" \
-              --arg role "$label_role" \
-              --arg layout "$label_layout" \
-              '{name:$name,server_type:$server_type,image:$image,location:$location,user_data:$user_data,ssh_keys:[$ssh_key_id],labels:{"platforminit.project":$project,"platforminit.host":$host,"platforminit.role":$role,"platforminit.volume_layout":$layout}} + (if ($volume_ids|length)>0 then {volumes:$volume_ids} else {} end)')"
+            if [[ "$(jq 'length' <<< "$volume_ids_json")" != "0" ]]; then
+              attach_volumes_to_server
+            fi
 
-            create_server_body="$(mktemp)"
-            create_server_code="$(curl -sS -o "${create_server_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/servers" "${auth[@]}" -d "${payload}")"
-            [[ "${create_server_code}" == "201" ]] || { cat "${create_server_body}" >&2; exit 1; }
-            sid="$(jq -r '.server.id // empty' "${create_server_body}")"
-            action_id="$(jq -r '.action.id // empty' "${create_server_body}")"
-            [[ -n "${sid}" ]] || { cat "${create_server_body}" >&2; exit 1; }
           else
             sid="${SERVER_ID_OVERRIDE:-}"
             sid="$(printf '%s' "${sid}" | tr -d '[:space:]' | sed 's/^#//')"
@@ -343,6 +409,8 @@ jobs:
           echo "server_name=${server_name}" >> "$GITHUB_OUTPUT"
           echo "volume_ids=${volume_ids_json}" >> "$GITHUB_OUTPUT"
           echo "volume_summary=${volume_summary}" >> "$GITHUB_OUTPUT"
+          echo "effective_region=${effective_region}" >> "$GITHUB_OUTPUT"
+          echo "volume_attach_action_ids=${volume_attach_action_ids}" >> "$GITHUB_OUTPUT"
 
       - name: Wait for Hetzner action to finish
         shell: bash
@@ -365,6 +433,30 @@ jobs:
           done
           echo "Timed out waiting for Hetzner action ${ACTION_ID}" >&2
           exit 1
+
+      - name: Wait for volume attach actions
+        if: ${{ steps.lifecycle.outputs.volume_attach_action_ids != '' }}
+        shell: bash
+        env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          ACTION_IDS: ${{ steps.lifecycle.outputs.volume_attach_action_ids }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
+          for action_id in ${ACTION_IDS}; do
+            [ -n "$action_id" ] || continue
+            for _ in $(seq 1 120); do
+              body="$(mktemp)"
+              code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/actions/${action_id}")"
+              [[ "${code}" == "200" ]] || { cat "${body}" >&2; exit 1; }
+              status="$(jq -r '.action.status // empty' "${body}")"
+              progress="$(jq -r '.action.progress // 0' "${body}")"
+              echo "Volume attach action=${action_id} status=${status} progress=${progress}%"
+              [[ "${status}" == "success" ]] && break
+              [[ "${status}" == "error" ]] && { cat "${body}" >&2; exit 1; }
+              sleep 5
+            done
+          done
 
       - name: Resolve server public IP
         id: server
@@ -492,7 +584,8 @@ jobs:
           volume_ids=${{ steps.lifecycle.outputs.volume_ids }}
           volume_summary=${{ steps.lifecycle.outputs.volume_summary }}
           ssh_key_id=${{ steps.sshkey.outputs.ssh_key_id }}
-          region=${{ inputs.region }}
+          requested_region=${{ inputs.region }}
+          effective_region=${{ steps.lifecycle.outputs.effective_region }}
           server_type=${{ inputs.server_type }}
           image=${{ inputs.image }}
           EOF
