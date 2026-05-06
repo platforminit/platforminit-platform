@@ -11,6 +11,14 @@ on:
         description: Observability artifact ID
         required: true
         type: string
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: homelab
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-homelab-01
       server_id_override:
         description: Optional server ID override
         required: false
@@ -44,6 +52,8 @@ jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
     with:
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
@@ -62,6 +72,8 @@ jobs:
         with:
           infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
+          project: ${{ inputs.project }}
+          host_name: ${{ inputs.host_name }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
 
@@ -130,16 +142,29 @@ jobs:
 
           [[ "${EUID}" -eq 0 ]] || { echo "ch05-remote.sh must run as root" >&2; exit 1; }
 
-          release_dir="/srv/platforminit/observability/${SHORT_SHA}"
-          tmp_dir="/tmp/platforminit-observability/${SHORT_SHA}"
+          if [[ -f /etc/platforminit/host-context.env ]]; then
+            # shellcheck disable=SC1091
+            source /etc/platforminit/host-context.env
+          fi
+          PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+
+          release_root="${PLATFORMINIT_OBSERVABILITY_PATH}/platforminit"
+          release_dir="${release_root}/${SHORT_SHA}"
+          tmp_root="/tmp/platforminit-observability"
+          tmp_dir="${tmp_root}/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
-          report_dir="/srv/platforminit/observability/reports"
+          report_dir="${release_root}/reports"
           run_log="${tmp_dir}/ch05-run-${SHORT_SHA}.log"
           run_pid="${tmp_dir}/ch05-run-${SHORT_SHA}.pid"
           run_status="${tmp_dir}/ch05-run-${SHORT_SHA}.status"
           run_done="${tmp_dir}/ch05-run-${SHORT_SHA}.done"
           validate_log="${tmp_dir}/ch05-validate-${SHORT_SHA}.log"
           report_file="${report_dir}/ch05-validate-${SHORT_SHA}.log"
+
+          cleanup_old_ch05_logs() {
+            find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+            find "$release_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -mtime +14 -exec rm -rf {} + 2>/dev/null || true
+          }
 
           ensure_owner_access() {
             mkdir -p "$tmp_dir"
@@ -154,7 +179,8 @@ jobs:
           }
 
           launch() {
-            mkdir -p "$tmp_dir"
+            mkdir -p "$tmp_dir" "$release_root"
+            cleanup_old_ch05_logs
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             ensure_owner_access
