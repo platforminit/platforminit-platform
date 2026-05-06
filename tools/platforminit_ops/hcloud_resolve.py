@@ -65,6 +65,19 @@ def resolve_by_labels(token: str, project: str, host_name: str) -> tuple[str, st
     return server_fields({"server": servers[0]})
 
 
+def resolve_by_role(token: str, project: str, role: str) -> tuple[str, str, dict]:
+    selector = f"platforminit.project={project},platforminit.role={role}"
+    query = urllib.parse.urlencode({"label_selector": selector})
+    payload = hcloud_get(token, f"servers?{query}")
+    servers = payload.get("servers") or []
+    if len(servers) != 1:
+        names = ", ".join(str(s.get("name")) for s in servers) or "none"
+        raise SystemExit(
+            f"Expected exactly one Hetzner server for labels {selector!r}, found {len(servers)}: {names}"
+        )
+    return server_fields({"server": servers[0]})
+
+
 def main() -> int:
     token = os.environ.get("INFRA_API_TOKEN", "")
     default_server_id = os.environ.get("INFRA_SERVER_ID", "")
@@ -72,6 +85,7 @@ def main() -> int:
     host_ipv4_override = os.environ.get("HOST_IPV4_OVERRIDE", "")
     project = os.environ.get("PLATFORMINIT_PROJECT", "").strip()
     host_name = os.environ.get("PLATFORMINIT_HOST_NAME", "").strip()
+    role = os.environ.get("PLATFORMINIT_ROLE", "").strip()
 
     if not token:
         raise SystemExit("Missing INFRA_API_TOKEN")
@@ -84,12 +98,15 @@ def main() -> int:
         resolution_mode = "server_id_override"
     elif project and host_name:
         server_id, public_ip, labels = resolve_by_labels(token, project, host_name)
-        resolution_mode = "label_discovery"
+        resolution_mode = "label_discovery_host"
+    elif project and role:
+        server_id, public_ip, labels = resolve_by_role(token, project, role)
+        resolution_mode = "label_discovery_role"
     elif fallback_server_id:
         server_id, public_ip, labels = resolve_by_id(token, fallback_server_id)
         resolution_mode = "legacy_infra_server_id"
     else:
-        raise SystemExit("Missing server selector: use server_id_override, or project + host_name, or INFRA_SERVER_ID fallback")
+        raise SystemExit("Missing server selector: use server_id_override, or project + host_name, or project + role, or INFRA_SERVER_ID fallback")
 
     if host_ipv4_override:
         try:
@@ -105,6 +122,7 @@ def main() -> int:
     write_output("project", labels.get("platforminit.project", project))
     write_output("host_name", labels.get("platforminit.host", host_name))
     write_output("volume_layout", labels.get("platforminit.volume_layout", "single"))
+    write_output("role", labels.get("platforminit.role", role or "primary"))
     return 0
 
 

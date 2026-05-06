@@ -11,6 +11,10 @@ on:
         description: Logical host name within the project
         required: false
         default: platforminit-homelab-01
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
       server_id_override:
         description: Optional Hetzner server ID override
         required: false
@@ -30,8 +34,9 @@ jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
     with:
-      project: ${{ inputs.project }}
-      host_name: ${{ inputs.host_name }}
+      project: ${{ inputs.project || 'homelab' }}
+      host_name: ${{ inputs.host_name || 'platforminit-homelab-01' }}
+      role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
@@ -41,6 +46,7 @@ jobs:
   apply:
     needs: grant
     runs-on: ubuntu-latest
+    environment: ${{ inputs.project || 'homelab' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,8 +56,9 @@ jobs:
         with:
           infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
-          project: ${{ inputs.project }}
-          host_name: ${{ inputs.host_name }}
+          project: ${{ inputs.project || 'homelab' }}
+          host_name: ${{ inputs.host_name || 'platforminit-homelab-01' }}
+          role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
 

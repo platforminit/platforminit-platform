@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -f /etc/platforminit/host-context.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/platforminit/host-context.env
+fi
+PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+
 ns="observability"
 
 pass() { echo "PASS | $1 | $2"; }
