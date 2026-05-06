@@ -24,6 +24,10 @@ inputs:
     description: PlatformInit host label used for automatic host discovery
     required: false
     default: ''
+  role:
+    description: Optional PlatformInit role label used for automatic host discovery when host_name is empty
+    required: false
+    default: ''
 outputs:
   server_id:
     description: Resolved Hetzner server id
@@ -43,6 +47,9 @@ outputs:
   volume_layout:
     description: Resolved PlatformInit volume layout label
     value: ${{ steps.resolve.outputs.volume_layout }}
+  role:
+    description: Resolved PlatformInit role label
+    value: ${{ steps.resolve.outputs.role }}
 runs:
   using: composite
   steps:
@@ -55,6 +62,7 @@ runs:
         HOST_IPV4_OVERRIDE: ${{ inputs.host_ipv4_override }}
         PLATFORMINIT_PROJECT: ${{ inputs.project }}
         PLATFORMINIT_HOST_NAME: ${{ inputs.host_name }}
+        PLATFORMINIT_ROLE: ${{ inputs.role }}
       run: |
         set -euo pipefail
         python3 "${{ github.action_path }}/../../../tools/platforminit_ops/hcloud_resolve.py"

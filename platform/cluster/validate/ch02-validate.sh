@@ -9,6 +9,18 @@ set -euo pipefail
 log() { echo "[VAL] $*"; }
 die() { echo "[VAL][FAIL] $*" >&2; exit 1; }
 
+if [[ -f /etc/platforminit/host-context.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/platforminit/host-context.env
+fi
+PLATFORMINIT_VOLUME_LAYOUT="${PLATFORMINIT_VOLUME_LAYOUT:-single}"
+if [[ "$PLATFORMINIT_VOLUME_LAYOUT" == "split" ]]; then
+  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
+else
+  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv}"
+fi
+K3S_DATA_DIR="${K3S_DATA_DIR:-${PLATFORMINIT_DATA_PATH}/k3s}"
+
 need() {
   command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"
 }
@@ -60,6 +72,12 @@ need systemctl
 
 log "k3s service active"
 systemctl is-active --quiet k3s || die "k3s.service not active"
+
+log "k3s data-dir path"
+[[ -d "$K3S_DATA_DIR" ]] || die "Missing k3s data-dir: $K3S_DATA_DIR"
+if [[ -f /etc/rancher/k3s/config.yaml ]]; then
+  grep -Fq "data-dir: ${K3S_DATA_DIR}" /etc/rancher/k3s/config.yaml || die "k3s config data-dir does not match expected path: $K3S_DATA_DIR"
+fi
 
 log "node Ready"
 kubectl wait --for=condition=Ready node --all --timeout=180s
