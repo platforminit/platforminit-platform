@@ -11,6 +11,14 @@ on:
         description: Cluster artifact ID
         required: true
         type: string
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: homelab
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-homelab-01
       server_id_override:
         description: Optional server ID override
         required: false
@@ -36,6 +44,8 @@ jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
     with:
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
@@ -53,6 +63,8 @@ jobs:
         with:
           infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
+          project: ${{ inputs.project }}
+          host_name: ${{ inputs.host_name }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
       - name: Download cluster artifact

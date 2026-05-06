@@ -6,7 +6,12 @@ set -euo pipefail
 ############################################
 
 K3S_VERSION="v1.29.3+k3s1"
-DATA_DIR="/srv/k3s"
+if [[ -f /etc/platforminit/host-context.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/platforminit/host-context.env
+fi
+PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv}"
+DATA_DIR="${K3S_DATA_DIR:-${PLATFORMINIT_DATA_PATH}/k3s}"
 TLS_DOMAIN="k3s.sysadminhomelab.hu"
 K3S_CONFIG="/etc/rancher/k3s/config.yaml"
 K3S_DROPIN_DIR="/etc/systemd/system/k3s.service.d"
