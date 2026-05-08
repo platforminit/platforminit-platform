@@ -18,7 +18,7 @@ on:
       host_name:
         description: Logical host name within the project
         required: false
-        default: platforminit-development-01
+        default: platforminit-dev-01
       role:
         description: Target host role used for label discovery when host_name is empty
         required: false
