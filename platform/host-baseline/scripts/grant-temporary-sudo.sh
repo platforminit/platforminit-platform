@@ -12,7 +12,7 @@ SUDO_FILE="/etc/sudoers.d/${USER_NAME}-temporary"
 scope_sudoers_content() {
   case "$1" in
     baseline)
-      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/apply-baseline-remote.sh *, /tmp/platforminit-run/collect-baseline-artifacts.sh *, /tmp/platforminit-run/ch02-remote.sh *
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch02-remote.sh *, /tmp/platforminit-run/apply-baseline-remote.sh *, /tmp/platforminit-run/collect-baseline-artifacts.sh *
 ' "$USER_NAME"
       ;;
     drift)
@@ -24,7 +24,7 @@ scope_sudoers_content() {
 ' "$USER_NAME"
       ;;
     security-apply)
-      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/security-os-apply.sh
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/security-os-apply.sh, /tmp/platforminit-run/security-patching-remote.sh *
 ' "$USER_NAME"
       ;;
     fim-check)
