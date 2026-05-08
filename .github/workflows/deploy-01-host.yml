@@ -11,9 +11,14 @@ name: 01 - Create or Rebuild Host
           - create
           - rebuild
       project:
-        description: PlatformInit project label / logical environment
+        description: PlatformInit project / Hetzner routing key
         required: true
         default: development
+        type: choice
+        options:
+          - development
+          - n8n
+          - platforminit
       host_name:
         description: Logical host name within the project
         required: true
@@ -89,17 +94,35 @@ jobs:
   host-lifecycle:
     runs-on: ubuntu-latest
     environment: ${{ inputs.project || 'development' }}
+    env:
+      HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+      HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+      HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+      AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
+      AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
+      INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install project resolver dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet pyyaml
+
+      - name: Resolve project config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/platforminit_ops/project_resolver.py "${{ inputs.project || 'development' }}" > /tmp/platforminit-project.env
+          grep -v '^HCLOUD_TOKEN=' /tmp/platforminit-project.env
+          cat /tmp/platforminit-project.env >> "$GITHUB_ENV"
+
       - name: Validate inputs and secrets
         shell: bash
         env:
-  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
-  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
-  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
-          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
-          INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
-          AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           PROJECT: ${{ inputs.project || 'development' }}
           HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
@@ -112,7 +135,7 @@ jobs:
           OBS_VOLUME_SIZE_GB: ${{ inputs.observability_volume_size_gb }}
         run: |
           set -euo pipefail
-          [ -n "${INFRA_API_TOKEN:-}" ] || { echo "Missing INFRA_API_TOKEN" >&2; exit 1; }
+          [ -n "${HCLOUD_TOKEN:-}" ] || { echo "Missing resolved HCLOUD_TOKEN" >&2; exit 1; }
           [ -n "${AUTOMATION_SSH_PUBLIC_KEY:-}" ] || { echo "Missing AUTOMATION_SSH_PUBLIC_KEY" >&2; exit 1; }
           [[ "${PROJECT}" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo "project contains unsupported characters" >&2; exit 1; }
           [[ "${HOST_NAME}" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo "host_name contains unsupported characters" >&2; exit 1; }
@@ -129,11 +152,10 @@ jobs:
         id: sshkey
         shell: bash
         env:
-          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}" -H "Content-Type: application/json")
+          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}" -H "Content-Type: application/json")
           pubkey_raw="$(printf '%s\n' "${AUTOMATION_SSH_PUBLIC_KEY}" | sed '/^[[:space:]]*$/d' | head -n1)"
           pubkey_norm="$(printf '%s\n' "${pubkey_raw}" | awk '{print $1" "$2}')"
           [ -n "${pubkey_norm}" ] || { echo "Normalized public key is empty" >&2; exit 1; }
@@ -156,7 +178,7 @@ jobs:
             exit 0
           fi
 
-          create_payload="$(jq -n --arg name "platforminit-automation" --arg public_key "${pubkey_raw}" '{name:$name,public_key:$public_key}')"
+          create_payload="$(jq -n --arg name "${SSH_KEY_NAME}" --arg public_key "${pubkey_raw}" '{name:$name,public_key:$public_key}')"
           create_body="$(mktemp)"
           create_code="$(curl -sS -o "${create_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/ssh_keys" "${auth[@]}" -d "${create_payload}")"
           [[ "${create_code}" == "201" ]] || { cat "${create_body}" >&2; exit 1; }
@@ -168,8 +190,6 @@ jobs:
         id: lifecycle
         shell: bash
         env:
-          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
-          INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           IMAGE: ${{ inputs.image }}
@@ -210,7 +230,7 @@ jobs:
           # Hetzner label values are intentionally conservative here.
           # Do not store raw filesystem paths (for example /srv/data) in labels:
           # the Hetzner API rejects values containing slashes as malformed labels.
-          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}" -H "Content-Type: application/json")
+          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}" -H "Content-Type: application/json")
           action_id=""
           sid=""
           server_name="${SERVER_NAME_INPUT:-$HOST_NAME}"
@@ -348,12 +368,12 @@ jobs:
                 volume_ids_json="[]"
                 ;;
               single)
-                ensure_volume "srv" "platforminit-${PROJECT}-${HOST_NAME}-srv" "$VOLUME_SIZE_GB" "/srv"
+                ensure_volume "srv" "${VOLUME_NAMESPACE}-${HOST_NAME}-srv" "$VOLUME_SIZE_GB" "/srv"
                 ;;
               split)
-                ensure_volume "data" "platforminit-${PROJECT}-${HOST_NAME}-data" "$DATA_VOLUME_SIZE_GB" "/srv/data"
-                ensure_volume "db" "platforminit-${PROJECT}-${HOST_NAME}-db" "$DB_VOLUME_SIZE_GB" "/srv/db"
-                ensure_volume "observability" "platforminit-${PROJECT}-${HOST_NAME}-observability" "$OBS_VOLUME_SIZE_GB" "/srv/observability"
+                ensure_volume "data" "${VOLUME_NAMESPACE}-${HOST_NAME}-data" "$DATA_VOLUME_SIZE_GB" "/srv/data"
+                ensure_volume "db" "${VOLUME_NAMESPACE}-${HOST_NAME}-db" "$DB_VOLUME_SIZE_GB" "/srv/db"
+                ensure_volume "observability" "${VOLUME_NAMESPACE}-${HOST_NAME}-observability" "$OBS_VOLUME_SIZE_GB" "/srv/observability"
                 ;;
               *) echo "Unsupported volume_layout=${VOLUME_LAYOUT}" >&2; exit 1 ;;
             esac
@@ -418,11 +438,10 @@ jobs:
       - name: Wait for Hetzner action to finish
         shell: bash
         env:
-          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           ACTION_ID: ${{ steps.lifecycle.outputs.action_id }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
+          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}")
           for _ in $(seq 1 120); do
             body="$(mktemp)"
             code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/actions/${ACTION_ID}")"
@@ -441,11 +460,10 @@ jobs:
         if: ${{ steps.lifecycle.outputs.volume_attach_action_ids != '' }}
         shell: bash
         env:
-          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           ACTION_IDS: ${{ steps.lifecycle.outputs.volume_attach_action_ids }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
+          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}")
           for action_id in ${ACTION_IDS}; do
             [ -n "$action_id" ] || continue
             for _ in $(seq 1 120); do
@@ -465,11 +483,10 @@ jobs:
         id: server
         shell: bash
         env:
-          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           SERVER_ID: ${{ steps.lifecycle.outputs.server_id }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
+          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}")
           for _ in $(seq 1 60); do
             body="$(mktemp)"
             code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/servers/${SERVER_ID}")"
@@ -486,8 +503,6 @@ jobs:
 
       - name: Setup SSH key
         shell: bash
-        env:
-          AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
