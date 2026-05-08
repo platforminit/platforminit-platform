@@ -32,6 +32,14 @@ load_host_context(){
   PLATFORMINIT_DB_PATH="${PLATFORMINIT_DB_PATH:-/srv/db}"
   PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
 }
+resolve_audit_dir_from_context(){
+  case "${PLATFORMINIT_VOLUME_LAYOUT:-single}" in
+    none) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/var/lib/platforminit/audit}" ;;
+    single) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/srv/platforminit/audit}" ;;
+    split) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-${PLATFORMINIT_DATA_PATH:-/srv/data}/platforminit/audit}" ;;
+    *) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/var/lib/platforminit/audit}" ;;
+  esac
+}
 mount_volume_by_id(){
   local role="$1" volume_id="$2" mount_path="$3" device="/dev/disk/by-id/scsi-0HC_Volume_${volume_id}" uuid
   if mountpoint -q "$mount_path"; then log "${mount_path} already mounted"; return 0; fi
@@ -45,6 +53,7 @@ mount_volume_by_id(){
 }
 ensure_srv_mount(){
   load_host_context
+  resolve_audit_dir_from_context
   if [[ -s /etc/platforminit/volume-layout.tsv ]]; then
     while IFS=$'\t' read -r role volume_id _name mount_path; do
       [[ -n "${role:-}" && -n "${volume_id:-}" && -n "${mount_path:-}" ]] || continue
@@ -92,5 +101,5 @@ write_audit_marker(){ cat > "$BOOTSTRAP_AUDIT_DIR/bootstrap-host-access.json" <<
 }
 EOFJSON
 audit "host_bootstrap_completed" "ok" "users=devops,itadmin"; }
-main(){ init_audit_dirs; ensure_srv_mount; init_audit_dirs; create_user devops; create_user itadmin; install_key devops; install_key itadmin; usermod -aG sudo devops; usermod -aG sudo itadmin; install_helpers; install_broker_policy; remove_standing_sudo; harden_ssh; write_audit_marker; }
+main(){ load_host_context; resolve_audit_dir_from_context; init_audit_dirs; ensure_srv_mount; init_audit_dirs; create_user devops; create_user itadmin; install_key devops; install_key itadmin; usermod -aG sudo devops; usermod -aG sudo itadmin; install_helpers; install_broker_policy; remove_standing_sudo; harden_ssh; write_audit_marker; }
 main "$@"

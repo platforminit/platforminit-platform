@@ -3,6 +3,23 @@ name: 02 - Apply Host Baseline
 on:
   workflow_dispatch:
     inputs:
+      project:
+        description: PlatformInit project / Hetzner project routing key
+        required: false
+        default: development
+        type: choice
+        options:
+          - development
+          - n8n
+          - platforminit
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-development-01
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
       artifact_run_id:
         description: Producing build workflow run ID
         required: true
@@ -20,20 +37,25 @@ on:
         required: false
         default: ''
       runtime_root:
-        description: Runtime root
+        description: Runtime root. Use auto to derive from volume layout.
         required: false
-        default: /srv/platforminit/ch01-runtime
+        default: auto
 
 permissions:
   contents: read
   actions: read
+
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
 
 jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
     with:
       project: ${{ inputs.project || 'development' }}
-      host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+      host_name: ${{ inputs.host_name || 'platforminit-development-01' }}
       role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
@@ -52,10 +74,10 @@ jobs:
         id: target
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ inputs.project == 'n8n' && secrets.HCLOUD_TOKEN_N8N || inputs.project == 'platforminit' && secrets.HCLOUD_TOKEN_PLATFORMINIT || secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
           project: ${{ inputs.project || 'development' }}
-          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          host_name: ${{ inputs.host_name || 'platforminit-development-01' }}
           role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
@@ -97,31 +119,6 @@ jobs:
           ssh-keyscan -H "${{ steps.target.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Render remote baseline script
-        run: |
-          set -euo pipefail
-          cat > /tmp/ch02-remote.sh <<'EOS'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          REMOTE_TMP="$1"
-          RUNTIME_ROOT="$2"
-          AUTOMATION_SSH_PUBLIC_KEY="$3"
-          if ! mountpoint -q /srv; then
-            echo "FATAL: /srv is not a mounted persistent volume. Run 01 with volume creation and 01.1 bootstrap again." >&2
-            exit 1
-          fi
-          install -d -m 755 /srv/platforminit/audit "$RUNTIME_ROOT" "$RUNTIME_ROOT/reports" "$RUNTIME_ROOT/state" "$RUNTIME_ROOT/work" "$RUNTIME_ROOT/secrets"
-          printf '%s\n' "$AUTOMATION_SSH_PUBLIC_KEY" > "$RUNTIME_ROOT/secrets/authorized_keys"
-          chmod 600 "$RUNTIME_ROOT/secrets/authorized_keys"
-          rm -rf "$REMOTE_TMP"
-          mkdir -p "$REMOTE_TMP"
-          tar -xzf "$REMOTE_TMP.tar.gz" -C "$REMOTE_TMP"
-          find "$REMOTE_TMP/platform/host-baseline" -type f -name "*.sh" -exec chmod +x {} \;
-          CH01_RUNTIME_ROOT="$RUNTIME_ROOT" PLATFORMINIT_AUDIT_DIR="/srv/platforminit/audit" AUTHORIZED_KEYS_FILE="$RUNTIME_ROOT/secrets/authorized_keys" "$REMOTE_TMP/platform/host-baseline/scripts/apply-policy-baseline.sh"
-          CH01_RUNTIME_ROOT="$RUNTIME_ROOT" PLATFORMINIT_AUDIT_DIR="/srv/platforminit/audit" REPORT_DIR="$RUNTIME_ROOT/reports" "$REMOTE_TMP/platform/host-baseline/validate/ch01-validate-host.sh"
-          EOS
-          chmod +x /tmp/ch02-remote.sh
-
       - name: Apply baseline
         env:
           HOST: ${{ steps.target.outputs.public_ip }}
@@ -135,10 +132,9 @@ jobs:
           remote_tmp="/tmp/host-baseline/${SHORTSHA}"
           ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/host-baseline /tmp/platforminit-run"
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:${remote_tmp}.tar.gz"
-          scp -i ~/.ssh/id_ed25519 /tmp/ch02-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch02-remote.sh"
+          scp -i ~/.ssh/id_ed25519 platform/host-baseline/remote/apply-baseline-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/apply-baseline-remote.sh"
           ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
-            "chmod +x /tmp/platforminit-run/ch02-remote.sh && sudo -n /tmp/platforminit-run/ch02-remote.sh '$remote_tmp' '$RUNTIME_ROOT' '$AUTOMATION_SSH_PUBLIC_KEY'"
-
+            "chmod +x /tmp/platforminit-run/apply-baseline-remote.sh && sudo -n /tmp/platforminit-run/apply-baseline-remote.sh '$remote_tmp' '$RUNTIME_ROOT' '$AUTOMATION_SSH_PUBLIC_KEY'"
 
       - name: Collect remote baseline artifacts
         if: always()
@@ -148,10 +144,13 @@ jobs:
           RUNTIME_ROOT: ${{ inputs.runtime_root }}
         run: |
           set -euo pipefail
-          mkdir -p baseline-artifacts
-          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p '$RUNTIME_ROOT/reports' /srv/platforminit/audit"
-          scp -i ~/.ssh/id_ed25519 -r "$HOST_LOGIN_USER@$HOST:$RUNTIME_ROOT/reports/." baseline-artifacts/reports/ || true
-          scp -i ~/.ssh/id_ed25519 -r "$HOST_LOGIN_USER@$HOST:/srv/platforminit/audit/." baseline-artifacts/audit/ || true
+          mkdir -p baseline-artifacts/reports baseline-artifacts/audit
+          scp -i ~/.ssh/id_ed25519 platform/host-baseline/remote/collect-baseline-artifacts.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/collect-baseline-artifacts.sh"
+          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "chmod +x /tmp/platforminit-run/collect-baseline-artifacts.sh && sudo -n /tmp/platforminit-run/collect-baseline-artifacts.sh '$RUNTIME_ROOT'"
+          scp -i ~/.ssh/id_ed25519 -r "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-baseline-collect/reports/." baseline-artifacts/reports/ || true
+          scp -i ~/.ssh/id_ed25519 -r "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-baseline-collect/audit/." baseline-artifacts/audit/ || true
+          scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-baseline-collect/runtime_root.txt" baseline-artifacts/runtime_root.txt || true
+          scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-baseline-collect/audit_dir.txt" baseline-artifacts/audit_dir.txt || true
           find baseline-artifacts -maxdepth 3 -type f | sort || true
 
       - name: Upload baseline artifact bundle
@@ -167,4 +166,3 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/platforminit_ops/evaluate_validation.py baseline-artifacts/reports
-
