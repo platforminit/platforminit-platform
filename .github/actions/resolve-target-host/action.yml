@@ -1,5 +1,6 @@
 name: Resolve target host
 description: Resolve Hetzner server id and public IPv4 through project-scoped Hetzner token routing
+
 inputs:
   infra_api_token:
     description: Legacy Hetzner Cloud API token override; prefer project-scoped HCLOUD_TOKEN_* secrets
@@ -22,13 +23,14 @@ inputs:
     required: false
     default: ''
   host_name:
-    description: PlatformInit host label used for automatic host discovery
+    description: Optional explicit PlatformInit host label used for automatic host discovery
     required: false
     default: ''
   role:
     description: Optional PlatformInit role label used for automatic host discovery when host_name is empty
     required: false
     default: ''
+
 outputs:
   server_id:
     description: Resolved Hetzner server id
@@ -51,6 +53,7 @@ outputs:
   role:
     description: Resolved PlatformInit role label
     value: ${{ steps.resolve.outputs.role }}
+
 runs:
   using: composite
   steps:
@@ -64,6 +67,37 @@ runs:
         PLATFORMINIT_PROJECT: ${{ inputs.project }}
         PLATFORMINIT_HOST_NAME: ${{ inputs.host_name }}
         PLATFORMINIT_ROLE: ${{ inputs.role }}
+
+        HCLOUD_TOKEN_DEVELOPMENT: ${{ env.HCLOUD_TOKEN_DEVELOPMENT }}
+        HCLOUD_TOKEN_N8N: ${{ env.HCLOUD_TOKEN_N8N }}
+        HCLOUD_TOKEN_PLATFORMINIT: ${{ env.HCLOUD_TOKEN_PLATFORMINIT }}
+
       run: |
         set -euo pipefail
-        python3 "${{ github.action_path }}/../../../tools/platforminit_ops/hcloud_resolve.py"
+
+        PROJECT="${PLATFORMINIT_PROJECT:-}"
+
+        if [ -n "$PROJECT" ] && [ -z "${PLATFORMINIT_HOST_NAME:-}" ]; then
+          PROJECT_FILE="${GITHUB_WORKSPACE}/platform/projects/${PROJECT}.yaml"
+
+          if [ ! -f "$PROJECT_FILE" ]; then
+            echo "Missing project registry file: $PROJECT_FILE" >&2
+            exit 1
+          fi
+
+          SERVER_PREFIX="$(python3 - "$PROJECT_FILE" <<'PY'
+        import sys
+        import yaml
+
+        with open(sys.argv[1], "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+
+        print(cfg["hetzner"]["server_prefix"])
+        PY
+        )"
+
+                  export PLATFORMINIT_HOST_NAME="${SERVER_PREFIX}-01"
+                  echo "Resolved host_name from project registry: ${PLATFORMINIT_HOST_NAME}"
+                fi
+
+                python3 "${{ github.action_path }}/../../../tools/platforminit_ops/hcloud_resolve.py"
