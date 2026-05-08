@@ -3,4 +3,4 @@
 artifacts/
 dist/
 __pycache__/
-.local_sercrets/
+.local_secrets/
