@@ -1,7 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ORG="platforminit"
-REPO="platforminit-platform"
-gh secret set HCLOUD_TOKEN_DEVELOPMENT --org "$ORG" --repos "$REPO" --body "$(cat .local-secrets/development_api_key)"
-gh secret set HCLOUD_TOKEN_N8N --org "$ORG" --repos "$REPO" --body "$(cat .local-secrets/n8n_api_key)"
-gh secret set HCLOUD_TOKEN_PLATFORMINIT --org "$ORG" --repos "$REPO" --body "$(cat .local-secrets/platforminit_api_key)"
+
+ORG="${ORG:-platforminit}"
+REPO="${REPO:-platforminit-platform}"
+REPO_SLUG="${ORG}/${REPO}"
+SECRETS_DIR="${SECRETS_DIR:-.local_secrets}"
+
+require_file() {
+  local path="$1"
+  if [[ ! -s "$path" ]]; then
+    echo "Missing or empty secret file: $path" >&2
+    exit 1
+  fi
+}
+
+gh auth status >/dev/null
+
+require_file "${SECRETS_DIR}/development_api_key"
+require_file "${SECRETS_DIR}/n8n_api_key"
+require_file "${SECRETS_DIR}/platforminit_api_key"
+
+gh secret set HCLOUD_TOKEN_DEVELOPMENT \
+  --repo "$REPO_SLUG" \
+  --body "$(tr -d '\r\n' < "${SECRETS_DIR}/development_api_key")"
+
+gh secret set HCLOUD_TOKEN_N8N \
+  --repo "$REPO_SLUG" \
+  --body "$(tr -d '\r\n' < "${SECRETS_DIR}/n8n_api_key")"
+
+gh secret set HCLOUD_TOKEN_PLATFORMINIT \
+  --repo "$REPO_SLUG" \
+  --body "$(tr -d '\r\n' < "${SECRETS_DIR}/platforminit_api_key")"
+
+echo "Uploaded Hetzner project tokens as repo secrets for ${REPO_SLUG}"
