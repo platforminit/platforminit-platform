@@ -10,7 +10,7 @@ on:
       host_name:
         description: Logical host name within the project
         required: false
-        default: platforminit-development-01
+        default: ""
       role:
         description: Target host role used for label discovery when host_name is empty
         required: false
@@ -47,7 +47,7 @@ jobs:
         with:
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
           project: ${{ inputs.project || 'development' }}
-          host_name: ${{ inputs.host_name || 'platforminit-development-01' }}
+          host_name: ${{ inputs.host_name }}
           role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}

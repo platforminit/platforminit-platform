@@ -23,11 +23,11 @@ inputs:
     required: false
     default: ''
   host_name:
-    description: Optional explicit PlatformInit host label used for automatic host discovery
+    description: Optional explicit PlatformInit host label; empty means registry default host for the selected project
     required: false
     default: ''
   role:
-    description: Optional PlatformInit role label used for automatic host discovery when host_name is empty
+    description: Optional PlatformInit role label used for automatic host discovery when host_name is empty and no registry default is available
     required: false
     default: ''
 
@@ -39,7 +39,7 @@ outputs:
     description: Resolved or overridden public IPv4
     value: ${{ steps.resolve.outputs.public_ip }}
   resolution_mode:
-    description: server_id_override, label_discovery, or legacy_infra_server_id
+    description: server_id_override, label_discovery_host, label_discovery_role, or legacy_infra_server_id
     value: ${{ steps.resolve.outputs.resolution_mode }}
   project:
     description: Resolved PlatformInit project label
@@ -67,37 +67,9 @@ runs:
         PLATFORMINIT_PROJECT: ${{ inputs.project }}
         PLATFORMINIT_HOST_NAME: ${{ inputs.host_name }}
         PLATFORMINIT_ROLE: ${{ inputs.role }}
-
         HCLOUD_TOKEN_DEVELOPMENT: ${{ env.HCLOUD_TOKEN_DEVELOPMENT }}
         HCLOUD_TOKEN_N8N: ${{ env.HCLOUD_TOKEN_N8N }}
         HCLOUD_TOKEN_PLATFORMINIT: ${{ env.HCLOUD_TOKEN_PLATFORMINIT }}
-
       run: |
         set -euo pipefail
-
-        PROJECT="${PLATFORMINIT_PROJECT:-}"
-
-        if [ -n "$PROJECT" ] && [ -z "${PLATFORMINIT_HOST_NAME:-}" ]; then
-          PROJECT_FILE="${GITHUB_WORKSPACE}/platform/projects/${PROJECT}.yaml"
-
-          if [ ! -f "$PROJECT_FILE" ]; then
-            echo "Missing project registry file: $PROJECT_FILE" >&2
-            exit 1
-          fi
-
-          SERVER_PREFIX="$(python3 - "$PROJECT_FILE" <<'PY'
-        import sys
-        import yaml
-
-        with open(sys.argv[1], "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-
-        print(cfg["hetzner"]["server_prefix"])
-        PY
-        )"
-
-                  export PLATFORMINIT_HOST_NAME="${SERVER_PREFIX}-01"
-                  echo "Resolved host_name from project registry: ${PLATFORMINIT_HOST_NAME}"
-                fi
-
-                python3 "${{ github.action_path }}/../../../tools/platforminit_ops/hcloud_resolve.py"
+        python3 "${{ github.action_path }}/../../../tools/platforminit_ops/hcloud_resolve.py"
