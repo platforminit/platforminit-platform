@@ -56,7 +56,7 @@ jobs:
     secrets: inherit
     with:
       project: ${{ inputs.project || 'development' }}
-      host_name: ${{ inputs.host_name }}
+      host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
       role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
@@ -76,7 +76,7 @@ jobs:
         with:
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
           project: ${{ inputs.project || 'development' }}
-          host_name: ${{ inputs.host_name }}
+          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
           role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
