@@ -13,11 +13,11 @@ name: 01 - Create or Rebuild Host
       project:
         description: PlatformInit project label / logical environment
         required: true
-        default: homelab
+        default: development
       host_name:
         description: Logical host name within the project
         required: true
-        default: platforminit-homelab-01
+        default: platforminit-development-01
       host_role:
         description: PlatformInit host role label
         required: true
@@ -88,18 +88,21 @@ permissions:
 jobs:
   host-lifecycle:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.project || 'homelab' }}
+    environment: ${{ inputs.project || 'development' }}
 
     steps:
       - name: Validate inputs and secrets
         shell: bash
         env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
           INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
-          PROJECT: ${{ inputs.project || 'homelab' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-homelab-01' }}
+          PROJECT: ${{ inputs.project || 'development' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
@@ -172,8 +175,8 @@ jobs:
           IMAGE: ${{ inputs.image }}
           SERVER_TYPE: ${{ inputs.server_type }}
           REGION: ${{ inputs.region }}
-          PROJECT: ${{ inputs.project || 'homelab' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-homelab-01' }}
+          PROJECT: ${{ inputs.project || 'development' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_NAME_INPUT: ${{ inputs.server_name }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
@@ -528,8 +531,8 @@ jobs:
         shell: bash
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
-          PROJECT: ${{ inputs.project || 'homelab' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-homelab-01' }}
+          PROJECT: ${{ inputs.project || 'development' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
         run: |
           set -euo pipefail
@@ -574,8 +577,8 @@ jobs:
           mkdir -p lifecycle-summary
           cat > lifecycle-summary/summary.txt <<EOF
           action=${{ inputs.action }}
-          project=${{ inputs.project || 'homelab' }}
-          host_name=${{ inputs.host_name || 'platforminit-homelab-01' }}
+          project=${{ inputs.project || 'development' }}
+          host_name=${{ inputs.host_name || 'platforminit-development-01' }}
           server_id=${{ steps.lifecycle.outputs.server_id }}
           server_name=${{ steps.lifecycle.outputs.server_name }}
           public_ip=${{ steps.server.outputs.public_ip }}
@@ -596,3 +599,5 @@ jobs:
           name: host-lifecycle-${{ github.run_id }}
           path: lifecycle-summary
           if-no-files-found: error
+
+# NOTE: project resolution handled via tools/platforminit_ops/project_resolver.py
