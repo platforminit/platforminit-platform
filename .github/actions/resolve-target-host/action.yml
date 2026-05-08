@@ -1,11 +1,11 @@
 name: Resolve target host
-description: Resolve Hetzner server id and public IPv4 by override, PlatformInit labels, or legacy INFRA_SERVER_ID fallback
+description: Resolve Hetzner server id and public IPv4 by override, PlatformInit labels, or optional INFRA_SERVER_ID fallback
 inputs:
   infra_api_token:
     description: Hetzner Cloud API token
     required: true
   infra_server_id:
-    description: Legacy/default Hetzner server id from secrets; fallback only
+    description: Optional Hetzner server id from secrets; fallback only
     required: false
     default: ''
   server_id_override:
@@ -56,7 +56,7 @@ runs:
     - id: resolve
       shell: bash
       env:
-        INFRA_API_TOKEN: ${{ inputs.infra_api_token }}
+        HCLOUD_TOKEN: ${{ inputs.infra_api_token }}
         INFRA_SERVER_ID: ${{ inputs.infra_server_id }}
         SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
         HOST_IPV4_OVERRIDE: ${{ inputs.host_ipv4_override }}

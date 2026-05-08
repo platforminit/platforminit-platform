@@ -6,11 +6,11 @@ on:
       project:
         description: PlatformInit project label / logical environment
         required: false
-        default: homelab
+        default: development
       host_name:
         description: Logical host name within the project
         required: false
-        default: platforminit-homelab-01
+        default: platforminit-dev-01
       role:
         description: Target host role used for label discovery when host_name is empty
         required: false
@@ -30,7 +30,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.project || 'homelab' }}
+    environment: ${{ inputs.project || 'development' }}
 
     steps:
       - name: Checkout
@@ -40,10 +40,10 @@ jobs:
         id: server
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
+          infra_api_token: ${{ inputs.project == 'n8n' && secrets.HCLOUD_TOKEN_N8N || inputs.project == 'platforminit' && secrets.HCLOUD_TOKEN_PLATFORMINIT || secrets.HCLOUD_TOKEN_DEVELOPMENT }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
-          project: ${{ inputs.project || 'homelab' }}
-          host_name: ${{ inputs.host_name || 'platforminit-homelab-01' }}
+          project: ${{ inputs.project || 'development' }}
+          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
           role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
