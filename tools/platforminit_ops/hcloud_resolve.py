@@ -79,7 +79,7 @@ def resolve_by_role(token: str, project: str, role: str) -> tuple[str, str, dict
 
 
 def main() -> int:
-    token = os.environ.get("INFRA_API_TOKEN", "")
+    token = os.environ.get("HCLOUD_TOKEN", "") or os.environ.get("INFRA_API_TOKEN", "")
     default_server_id = os.environ.get("INFRA_SERVER_ID", "")
     override_server_id = os.environ.get("SERVER_ID_OVERRIDE", "")
     host_ipv4_override = os.environ.get("HOST_IPV4_OVERRIDE", "")
@@ -88,7 +88,7 @@ def main() -> int:
     role = os.environ.get("PLATFORMINIT_ROLE", "").strip()
 
     if not token:
-        raise SystemExit("Missing INFRA_API_TOKEN")
+        raise SystemExit("Missing HCLOUD_TOKEN / infra_api_token")
 
     explicit_server_id = normalized_server_id(override_server_id)
     fallback_server_id = normalized_server_id(default_server_id)

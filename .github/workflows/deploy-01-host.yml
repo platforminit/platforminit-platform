@@ -22,7 +22,7 @@ name: 01 - Create or Rebuild Host
       host_name:
         description: Logical host name within the project
         required: true
-        default: platforminit-development-01
+        default: platforminit-dev-01
       host_role:
         description: PlatformInit host role label
         required: true
@@ -46,9 +46,9 @@ name: 01 - Create or Rebuild Host
           - cax31
           - cx43
       region:
-        description: Primary Hetzner location for create/volume
-        required: true
-        default: fsn1
+        description: Optional Hetzner location override; empty uses platform/projects/<project>.yaml
+        required: false
+        default: ""
       fallback_regions:
         description: Comma-separated fallback locations used only when Hetzner returns placement/resource_unavailable during host creation
         required: false
@@ -94,38 +94,37 @@ jobs:
   host-lifecycle:
     runs-on: ubuntu-latest
     environment: ${{ inputs.project || 'development' }}
-    env:
-      HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
-      HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
-      HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
-      AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
-      AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
-      INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install project resolver dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --disable-pip-version-check --quiet pyyaml
 
       - name: Resolve project config
         shell: bash
+        env:
+          HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+          HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+          HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
         run: |
           set -euo pipefail
-          python tools/platforminit_ops/project_resolver.py "${{ inputs.project || 'development' }}" > /tmp/platforminit-project.env
-          grep -v '^HCLOUD_TOKEN=' /tmp/platforminit-project.env
-          cat /tmp/platforminit-project.env >> "$GITHUB_ENV"
+          python3 tools/platforminit_ops/project_resolver.py "${{ inputs.project }}" > project.env
+          cat project.env >> "$GITHUB_ENV"
+          sed -E 's/^(HCLOUD_TOKEN=).*/\1***redacted***/' project.env
+
+      - name: Apply region override
+        if: ${{ inputs.region != '' }}
+        shell: bash
+        run: |
+          echo "REGION=${{ inputs.region }}" >> "$GITHUB_ENV"
 
       - name: Validate inputs and secrets
         shell: bash
         env:
+          INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
+          AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
@@ -190,13 +189,14 @@ jobs:
         id: lifecycle
         shell: bash
         env:
+          INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           IMAGE: ${{ inputs.image }}
           SERVER_TYPE: ${{ inputs.server_type }}
-          REGION: ${{ inputs.region }}
+          FALLBACK_REGIONS: ${{ inputs.fallback_regions }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_NAME_INPUT: ${{ inputs.server_name }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
@@ -503,6 +503,8 @@ jobs:
 
       - name: Setup SSH key
         shell: bash
+        env:
+          AUTOMATION_SSH_PRIVATE_KEY: ${{ secrets.AUTOMATION_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -547,7 +549,7 @@ jobs:
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
         run: |
           set -euo pipefail
@@ -593,7 +595,7 @@ jobs:
           cat > lifecycle-summary/summary.txt <<EOF
           action=${{ inputs.action }}
           project=${{ inputs.project || 'development' }}
-          host_name=${{ inputs.host_name || 'platforminit-development-01' }}
+          host_name=${{ inputs.host_name || 'platforminit-dev-01' }}
           server_id=${{ steps.lifecycle.outputs.server_id }}
           server_name=${{ steps.lifecycle.outputs.server_name }}
           public_ip=${{ steps.server.outputs.public_ip }}
