@@ -38,6 +38,7 @@ env:
 jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
+    secrets: inherit
     with:
       project: ${{ inputs.project || 'development' }}
       host_name: ${{ inputs.host_name || 'platforminit-development-01' }}
@@ -46,7 +47,6 @@ jobs:
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
       mode: fim-check
-    secrets: inherit
 
   run:
     needs: grant
@@ -59,7 +59,6 @@ jobs:
         id: server
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
           project: ${{ inputs.project || 'development' }}
           host_name: ${{ inputs.host_name || 'platforminit-development-01' }}

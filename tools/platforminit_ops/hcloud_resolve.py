@@ -104,7 +104,7 @@ def resolve_project_token(project: str) -> tuple[str, str]:
     return os.environ.get(token_env, ""), token_env
 
 def main() -> int:
-    token = os.environ.get("INFRA_API_TOKEN", "")
+    legacy_token = os.environ.get("INFRA_API_TOKEN", "")
     default_server_id = os.environ.get("INFRA_SERVER_ID", "")
     override_server_id = os.environ.get("SERVER_ID_OVERRIDE", "")
     host_ipv4_override = os.environ.get("HOST_IPV4_OVERRIDE", "")
@@ -112,12 +112,20 @@ def main() -> int:
     host_name = os.environ.get("PLATFORMINIT_HOST_NAME", "").strip()
     role = os.environ.get("PLATFORMINIT_ROLE", "").strip()
 
-    if not token:
+    token = ""
+    token_env = ""
+    if project:
         token, token_env = resolve_project_token(project)
         if token:
             sys.stderr.write(f"Resolved Hetzner token from project registry: {token_env}\n")
+
+    if not token and legacy_token:
+        token = legacy_token
+        token_env = "INFRA_API_TOKEN"
+        sys.stderr.write("Using legacy INFRA_API_TOKEN fallback; migrate this workflow to project-scoped HCLOUD_TOKEN_* secrets.\n")
+
     if not token:
-        raise SystemExit("Missing Hetzner token: set INFRA_API_TOKEN or project-scoped HCLOUD_TOKEN_* secret")
+        raise SystemExit("Missing Hetzner token: set project-scoped HCLOUD_TOKEN_* secret for the selected project")
 
     explicit_server_id = normalized_server_id(override_server_id)
     fallback_server_id = normalized_server_id(default_server_id)

@@ -1,9 +1,10 @@
 name: Resolve target host
-description: Resolve Hetzner server id and public IPv4 by override, PlatformInit labels, or legacy INFRA_SERVER_ID fallback
+description: Resolve Hetzner server id and public IPv4 through project-scoped Hetzner token routing
 inputs:
   infra_api_token:
-    description: Hetzner Cloud API token
-    required: true
+    description: Legacy Hetzner Cloud API token override; prefer project-scoped HCLOUD_TOKEN_* secrets
+    required: false
+    default: ''
   infra_server_id:
     description: Legacy/default Hetzner server id from secrets; fallback only
     required: false
