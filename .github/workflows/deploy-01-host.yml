@@ -11,18 +11,13 @@ name: 01 - Create or Rebuild Host
           - create
           - rebuild
       project:
-        description: PlatformInit project / Hetzner routing key
+        description: PlatformInit project label / logical environment
         required: true
         default: development
-        type: choice
-        options:
-          - development
-          - n8n
-          - platforminit
       host_name:
         description: Logical host name within the project
         required: true
-        default: platforminit-dev-01
+        default: platforminit-development-01
       host_role:
         description: PlatformInit host role label
         required: true
@@ -46,9 +41,9 @@ name: 01 - Create or Rebuild Host
           - cax31
           - cx43
       region:
-        description: Optional Hetzner location override; empty uses platform/projects/<project>.yaml
-        required: false
-        default: ""
+        description: Primary Hetzner location for create/volume
+        required: true
+        default: fsn1
       fallback_regions:
         description: Comma-separated fallback locations used only when Hetzner returns placement/resource_unavailable during host creation
         required: false
@@ -90,41 +85,26 @@ name: 01 - Create or Rebuild Host
 permissions:
   contents: read
 
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+
 jobs:
   host-lifecycle:
     runs-on: ubuntu-latest
     environment: ${{ inputs.project || 'development' }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Resolve project config
-        shell: bash
-        env:
-          HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
-          HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
-          HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
-        run: |
-          set -euo pipefail
-          python3 tools/platforminit_ops/project_resolver.py "${{ inputs.project }}" > project.env
-          cat project.env >> "$GITHUB_ENV"
-          sed -E 's/^(HCLOUD_TOKEN=).*/\1***redacted***/' project.env
-
-      - name: Apply region override
-        if: ${{ inputs.region != '' }}
-        shell: bash
-        run: |
-          echo "REGION=${{ inputs.region }}" >> "$GITHUB_ENV"
-
       - name: Validate inputs and secrets
         shell: bash
         env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
@@ -134,7 +114,18 @@ jobs:
           OBS_VOLUME_SIZE_GB: ${{ inputs.observability_volume_size_gb }}
         run: |
           set -euo pipefail
-          [ -n "${HCLOUD_TOKEN:-}" ] || { echo "Missing resolved HCLOUD_TOKEN" >&2; exit 1; }
+          resolve_hcloud_token() {
+            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
+            case "${PROJECT:-development}" in
+              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
+              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
+              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
+              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
+            esac
+            export INFRA_API_TOKEN
+          }
+          resolve_hcloud_token
+          [ -n "${INFRA_API_TOKEN:-}" ] || { echo "Missing Hetzner token for project ${PROJECT}" >&2; exit 1; }
           [ -n "${AUTOMATION_SSH_PUBLIC_KEY:-}" ] || { echo "Missing AUTOMATION_SSH_PUBLIC_KEY" >&2; exit 1; }
           [[ "${PROJECT}" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo "project contains unsupported characters" >&2; exit 1; }
           [[ "${HOST_NAME}" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo "host_name contains unsupported characters" >&2; exit 1; }
@@ -151,10 +142,23 @@ jobs:
         id: sshkey
         shell: bash
         env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          PROJECT: ${{ inputs.project || 'development' }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}" -H "Content-Type: application/json")
+          resolve_hcloud_token() {
+            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
+            case "${PROJECT:-development}" in
+              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
+              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
+              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
+              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
+            esac
+            export INFRA_API_TOKEN
+          }
+          resolve_hcloud_token
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}" -H "Content-Type: application/json")
           pubkey_raw="$(printf '%s\n' "${AUTOMATION_SSH_PUBLIC_KEY}" | sed '/^[[:space:]]*$/d' | head -n1)"
           pubkey_norm="$(printf '%s\n' "${pubkey_raw}" | awk '{print $1" "$2}')"
           [ -n "${pubkey_norm}" ] || { echo "Normalized public key is empty" >&2; exit 1; }
@@ -177,7 +181,7 @@ jobs:
             exit 0
           fi
 
-          create_payload="$(jq -n --arg name "${SSH_KEY_NAME}" --arg public_key "${pubkey_raw}" '{name:$name,public_key:$public_key}')"
+          create_payload="$(jq -n --arg name "platforminit-automation" --arg public_key "${pubkey_raw}" '{name:$name,public_key:$public_key}')"
           create_body="$(mktemp)"
           create_code="$(curl -sS -o "${create_body}" -w '%{http_code}' -X POST "https://api.hetzner.cloud/v1/ssh_keys" "${auth[@]}" -d "${create_payload}")"
           [[ "${create_code}" == "201" ]] || { cat "${create_body}" >&2; exit 1; }
@@ -189,14 +193,15 @@ jobs:
         id: lifecycle
         shell: bash
         env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           INFRA_SERVER_ID: ${{ secrets.INFRA_SERVER_ID }}
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           IMAGE: ${{ inputs.image }}
           SERVER_TYPE: ${{ inputs.server_type }}
-          FALLBACK_REGIONS: ${{ inputs.fallback_regions }}
+          REGION: ${{ inputs.region }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_NAME_INPUT: ${{ inputs.server_name }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
@@ -208,6 +213,17 @@ jobs:
           SSH_KEY_ID: ${{ steps.sshkey.outputs.ssh_key_id }}
         run: |
           set -euo pipefail
+          resolve_hcloud_token() {
+            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
+            case "${PROJECT:-development}" in
+              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
+              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
+              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
+              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
+            esac
+            export INFRA_API_TOKEN
+          }
+          resolve_hcloud_token
 
           mkdir -p .tmp
           cat > .tmp/user-data.yaml <<EOF
@@ -230,7 +246,7 @@ jobs:
           # Hetzner label values are intentionally conservative here.
           # Do not store raw filesystem paths (for example /srv/data) in labels:
           # the Hetzner API rejects values containing slashes as malformed labels.
-          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}" -H "Content-Type: application/json")
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}" -H "Content-Type: application/json")
           action_id=""
           sid=""
           server_name="${SERVER_NAME_INPUT:-$HOST_NAME}"
@@ -368,12 +384,12 @@ jobs:
                 volume_ids_json="[]"
                 ;;
               single)
-                ensure_volume "srv" "${VOLUME_NAMESPACE}-${HOST_NAME}-srv" "$VOLUME_SIZE_GB" "/srv"
+                ensure_volume "srv" "platforminit-${PROJECT}-${HOST_NAME}-srv" "$VOLUME_SIZE_GB" "/srv"
                 ;;
               split)
-                ensure_volume "data" "${VOLUME_NAMESPACE}-${HOST_NAME}-data" "$DATA_VOLUME_SIZE_GB" "/srv/data"
-                ensure_volume "db" "${VOLUME_NAMESPACE}-${HOST_NAME}-db" "$DB_VOLUME_SIZE_GB" "/srv/db"
-                ensure_volume "observability" "${VOLUME_NAMESPACE}-${HOST_NAME}-observability" "$OBS_VOLUME_SIZE_GB" "/srv/observability"
+                ensure_volume "data" "platforminit-${PROJECT}-${HOST_NAME}-data" "$DATA_VOLUME_SIZE_GB" "/srv/data"
+                ensure_volume "db" "platforminit-${PROJECT}-${HOST_NAME}-db" "$DB_VOLUME_SIZE_GB" "/srv/db"
+                ensure_volume "observability" "platforminit-${PROJECT}-${HOST_NAME}-observability" "$OBS_VOLUME_SIZE_GB" "/srv/observability"
                 ;;
               *) echo "Unsupported volume_layout=${VOLUME_LAYOUT}" >&2; exit 1 ;;
             esac
@@ -438,10 +454,23 @@ jobs:
       - name: Wait for Hetzner action to finish
         shell: bash
         env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          PROJECT: ${{ inputs.project || 'development' }}
           ACTION_ID: ${{ steps.lifecycle.outputs.action_id }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}")
+          resolve_hcloud_token() {
+            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
+            case "${PROJECT:-development}" in
+              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
+              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
+              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
+              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
+            esac
+            export INFRA_API_TOKEN
+          }
+          resolve_hcloud_token
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
           for _ in $(seq 1 120); do
             body="$(mktemp)"
             code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/actions/${ACTION_ID}")"
@@ -460,10 +489,23 @@ jobs:
         if: ${{ steps.lifecycle.outputs.volume_attach_action_ids != '' }}
         shell: bash
         env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
+          PROJECT: ${{ inputs.project || 'development' }}
           ACTION_IDS: ${{ steps.lifecycle.outputs.volume_attach_action_ids }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}")
+          resolve_hcloud_token() {
+            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
+            case "${PROJECT:-development}" in
+              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
+              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
+              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
+              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
+            esac
+            export INFRA_API_TOKEN
+          }
+          resolve_hcloud_token
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
           for action_id in ${ACTION_IDS}; do
             [ -n "$action_id" ] || continue
             for _ in $(seq 1 120); do
@@ -483,10 +525,22 @@ jobs:
         id: server
         shell: bash
         env:
+          INFRA_API_TOKEN: ${{ secrets.INFRA_API_TOKEN }}
           SERVER_ID: ${{ steps.lifecycle.outputs.server_id }}
         run: |
           set -euo pipefail
-          auth=(-H "Authorization: Bearer ${HCLOUD_TOKEN}")
+          resolve_hcloud_token() {
+            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
+            case "${PROJECT:-development}" in
+              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
+              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
+              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
+              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
+            esac
+            export INFRA_API_TOKEN
+          }
+          resolve_hcloud_token
+          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
           for _ in $(seq 1 60); do
             body="$(mktemp)"
             code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/servers/${SERVER_ID}")"
@@ -549,7 +603,7 @@ jobs:
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
         run: |
           set -euo pipefail
@@ -595,7 +649,7 @@ jobs:
           cat > lifecycle-summary/summary.txt <<EOF
           action=${{ inputs.action }}
           project=${{ inputs.project || 'development' }}
-          host_name=${{ inputs.host_name || 'platforminit-dev-01' }}
+          host_name=${{ inputs.host_name || 'platforminit-development-01' }}
           server_id=${{ steps.lifecycle.outputs.server_id }}
           server_name=${{ steps.lifecycle.outputs.server_name }}
           public_ip=${{ steps.server.outputs.public_ip }}

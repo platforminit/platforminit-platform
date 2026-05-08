@@ -78,8 +78,33 @@ def resolve_by_role(token: str, project: str, role: str) -> tuple[str, str, dict
     return server_fields({"server": servers[0]})
 
 
+
+def resolve_project_token(project: str) -> tuple[str, str]:
+    """Resolve Hetzner token from platform/projects/<project>.yaml token_secret.
+
+    Avoids a hard dependency on PyYAML in GitHub Actions by parsing the simple
+    token_secret line used by the project registry.
+    """
+    if not project:
+        return "", ""
+    cfg_path = os.path.join(os.getcwd(), "platform", "projects", f"{project}.yaml")
+    token_env = ""
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if stripped.startswith("token_secret:"):
+                    token_env = stripped.split(":", 1)[1].strip().strip('"\'')
+                    break
+    except FileNotFoundError:
+        token_env = ""
+    if not token_env:
+        # Compatibility fallback for older project names/configs.
+        token_env = f"HCLOUD_TOKEN_{project.upper().replace('-', '_')}"
+    return os.environ.get(token_env, ""), token_env
+
 def main() -> int:
-    token = os.environ.get("HCLOUD_TOKEN", "") or os.environ.get("INFRA_API_TOKEN", "")
+    token = os.environ.get("INFRA_API_TOKEN", "")
     default_server_id = os.environ.get("INFRA_SERVER_ID", "")
     override_server_id = os.environ.get("SERVER_ID_OVERRIDE", "")
     host_ipv4_override = os.environ.get("HOST_IPV4_OVERRIDE", "")
@@ -88,7 +113,11 @@ def main() -> int:
     role = os.environ.get("PLATFORMINIT_ROLE", "").strip()
 
     if not token:
-        raise SystemExit("Missing HCLOUD_TOKEN / infra_api_token")
+        token, token_env = resolve_project_token(project)
+        if token:
+            sys.stderr.write(f"Resolved Hetzner token from project registry: {token_env}\n")
+    if not token:
+        raise SystemExit("Missing Hetzner token: set INFRA_API_TOKEN or project-scoped HCLOUD_TOKEN_* secret")
 
     explicit_server_id = normalized_server_id(override_server_id)
     fallback_server_id = normalized_server_id(default_server_id)

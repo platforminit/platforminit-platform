@@ -10,7 +10,7 @@ on:
       host_name:
         description: Logical host name within the project
         required: false
-        default: platforminit-dev-01
+        default: platforminit-development-01
       role:
         description: Target host role used for label discovery when host_name is empty
         required: false
@@ -27,6 +27,11 @@ on:
 permissions:
   contents: read
 
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
@@ -38,10 +43,10 @@ jobs:
         id: server
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ inputs.project == 'n8n' && secrets.HCLOUD_TOKEN_N8N || inputs.project == 'platforminit' && secrets.HCLOUD_TOKEN_PLATFORMINIT || secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
           project: ${{ inputs.project || 'development' }}
-          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          host_name: ${{ inputs.host_name || 'platforminit-development-01' }}
           role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
