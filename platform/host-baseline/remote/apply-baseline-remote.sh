@@ -1,8 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
-REMOTE_TMP="$1"
-RUNTIME_ROOT_INPUT="$2"
-AUTOMATION_SSH_PUBLIC_KEY="$3"
+
+REMOTE_TMP="${1:?remote tmp path is required}"
+RUNTIME_ROOT_INPUT="${2:-auto}"
+AUTOMATION_SSH_PUBLIC_KEY="${3:?automation public key is required}"
+COLLECT_DIR="/tmp/platforminit-baseline-collect"
+RUNTIME_ROOT=""
+AUDIT_DIR=""
+
+collect_artifacts_on_exit() {
+  local rc="$1"
+  set +e
+
+  rm -rf "$COLLECT_DIR"
+  install -d -m 755 "$COLLECT_DIR" "$COLLECT_DIR/reports" "$COLLECT_DIR/audit" "$COLLECT_DIR/diagnostics"
+
+  {
+    printf 'exit_status=%s\n' "$rc"
+    printf 'runtime_root=%s\n' "${RUNTIME_ROOT:-unresolved}"
+    printf 'audit_dir=%s\n' "${AUDIT_DIR:-unresolved}"
+    printf 'timestamp=%s\n' "$(date -u +%FT%TZ)"
+  } > "$COLLECT_DIR/diagnostics/ch02-remote-context.env"
+
+  if [[ -n "${RUNTIME_ROOT:-}" && -d "${RUNTIME_ROOT}/reports" ]]; then
+    cp -a "${RUNTIME_ROOT}/reports/." "$COLLECT_DIR/reports/"
+  fi
+
+  if [[ -n "${AUDIT_DIR:-}" && -d "${AUDIT_DIR}" ]]; then
+    cp -a "${AUDIT_DIR}/." "$COLLECT_DIR/audit/"
+  fi
+
+  find "$COLLECT_DIR" -type d -exec chmod 755 {} +
+  find "$COLLECT_DIR" -type f -exec chmod 644 {} +
+
+  exit "$rc"
+}
+trap 'collect_artifacts_on_exit "$?"' EXIT
 
 load_host_context() {
   if [[ -f /etc/platforminit/host-context.env ]]; then

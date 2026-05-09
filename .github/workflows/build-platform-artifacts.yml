@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/platforminit_ops/check_host_name_contract.py
+          python3 tools/platforminit_ops/check_host_name_contract.py .
 
       - name: Package ${{ matrix.component_name }}
         id: pkg
