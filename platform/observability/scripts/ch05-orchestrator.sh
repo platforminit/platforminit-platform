@@ -92,7 +92,28 @@ install_repos() {
 
 deploy_vm_stack() {
   log "Deploying VictoriaMetrics stack (mode=${DEPLOY_MODE})"
-  helm upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack     --namespace "${NAMESPACE}"     --version "${VM_STACK_CHART_VERSION}"     -f /tmp/ch05-vm-values.yaml     --wait --timeout 15m
+
+  local helm_args=(
+    upgrade --install observability-vmstack vm/victoria-metrics-k8s-stack
+    --namespace "${NAMESPACE}"
+    --version "${VM_STACK_CHART_VERSION}"
+    -f /tmp/ch05-vm-values.yaml
+    --wait --timeout 15m
+  )
+
+  # CH05 owns the Grafana Helm release. After CH06.1 enables SSO, reconcile mode
+  # must preserve the existing Grafana auth overlay instead of resetting the
+  # release to the base observability values only.
+  if [[ "${DEPLOY_MODE}" == "reconcile" ]] && helm -n "${NAMESPACE}" status observability-vmstack >/dev/null 2>&1; then
+    log "Using --reuse-values to preserve post-CH05 overlays such as Grafana SSO"
+    helm_args+=(--reuse-values)
+  fi
+
+  if [[ "${DEPLOY_MODE}" == "baseline" ]] && kubectl -n "${NAMESPACE}" get secret grafana-authentik-oauth >/dev/null 2>&1; then
+    log "Grafana SSO secret detected; baseline mode may reset Grafana OAuth Helm values. Run 06.1 after CH05 baseline if SSO disappears."
+  fi
+
+  helm "${helm_args[@]}"
 }
 
 wait_for_vm_crds() {
