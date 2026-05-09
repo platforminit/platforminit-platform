@@ -143,17 +143,24 @@ jobs:
           RUNTIME_ROOT: ${{ inputs.runtime_root }}
         run: |
           set -euo pipefail
+          mkdir -p baseline-artifacts
+
+          # Collection must use the same host-context-aware runtime resolution as
+          # apply-baseline-remote.sh.  A hardcoded /srv/data path breaks after
+          # recreate when the host is using the single-volume /srv layout.
+          scp -i ~/.ssh/id_ed25519 \
+            platform/host-baseline/remote/collect-baseline-artifacts.sh \
+            "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/collect-baseline-artifacts.sh"
+
+          ssh -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
+            "chmod +x /tmp/platforminit-run/collect-baseline-artifacts.sh && sudo -n /tmp/platforminit-run/collect-baseline-artifacts.sh '$RUNTIME_ROOT'" || true
+
+          scp -i ~/.ssh/id_ed25519 -r \
+            "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-baseline-collect/." \
+            baseline-artifacts/ || true
+
           mkdir -p baseline-artifacts/reports baseline-artifacts/audit
-          # Keep artifact collection unprivileged. The baseline entrypoint creates
-          # reports/audit paths with readable permissions; sudo collection would
-          # require an extra grant scope and breaks older synced host tooling.
-          if [ "$RUNTIME_ROOT" = "auto" ]; then
-            # Derive the same default used by apply-baseline-remote.sh for split layout.
-            # This is intentionally conservative for the current development host.
-            RUNTIME_ROOT="/srv/data/platforminit/ch01-runtime"
-          fi
-          scp -i ~/.ssh/id_ed25519 -r "$HOST_LOGIN_USER@$HOST:$RUNTIME_ROOT/reports/." baseline-artifacts/reports/ || true
-          scp -i ~/.ssh/id_ed25519 -r "$HOST_LOGIN_USER@$HOST:/srv/platforminit/audit/." baseline-artifacts/audit/ || true
+          echo "Collected baseline artifacts:"
           find baseline-artifacts -maxdepth 3 -type f | sort || true
 
       - name: Upload baseline artifact bundle
