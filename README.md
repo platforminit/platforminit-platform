@@ -130,3 +130,8 @@ This repository defines:
 - CH12 – Identity & Access Platform
 - CH13 – Data / AI Ops
 - CH14 – Internal Developer Platform
+
+
+## CH06 - Identity & SSO Foundation
+
+CH06 adds an Authentik-based identity layer under `platform/identity`, deployed by workflow `06 - Deploy Identity Stack` and exposed as `https://auth.<PLATFORM_BASE_DOMAIN>`. Grafana and Argo CD OIDC integration templates are provided, but local admin access remains the break-glass path until SSO is explicitly enabled and tested.
