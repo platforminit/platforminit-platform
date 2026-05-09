@@ -1,4 +1,4 @@
-name: 05 - Deploy Observability Stack
+name: 06.1 - Enable Grafana SSO
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       artifact_id:
-        description: Observability artifact ID
+        description: Identity artifact ID
         required: true
         type: string
       project:
@@ -31,22 +31,16 @@ on:
         description: Optional explicit IPv4 override for break-glass/debug
         required: false
         default: ''
-      deploy_mode:
-        description: baseline or reconcile deployment mode
+      grafana_provider_slug:
+        description: Authentik OAuth provider slug for Grafana
         required: true
-        default: baseline
-        type: choice
-        options:
-          - baseline
-          - reconcile
-      issuer_mode:
-        description: staging or prod issuer selection
+        default: grafana
+        type: string
+      vm_stack_chart_version:
+        description: VictoriaMetrics k8s stack Helm chart version pin
         required: true
-        default: staging
-        type: choice
-        options:
-          - staging
-          - prod
+        default: '0.72.5'
+        type: string
 
 permissions:
   contents: read
@@ -67,8 +61,8 @@ jobs:
       role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
-      duration_minutes: '15'
-      mode: observability
+      duration_minutes: '20'
+      mode: identity
 
   deploy:
     needs: grant
@@ -88,7 +82,7 @@ jobs:
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
 
-      - name: Download observability artifact
+      - name: Download identity artifact
         uses: actions/download-artifact@v4
         with:
           run-id: ${{ inputs.artifact_run_id }}
@@ -101,10 +95,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive_path="$(find ./downloaded-artifacts -type f -name 'platforminit-observability-*.tar.gz' | sort | head -n1)"
+          archive_path="$(find ./downloaded-artifacts -type f -name 'platforminit-identity-*.tar.gz' | sort | head -n1)"
           [ -n "$archive_path" ] || { find ./downloaded-artifacts -type f | sort >&2; exit 1; }
           filename="$(basename "$archive_path")"
-          short_sha="${filename#platforminit-observability-}"
+          short_sha="${filename#platforminit-identity-}"
           short_sha="${short_sha%.tar.gz}"
           echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
@@ -128,54 +122,48 @@ jobs:
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Render remote observability script
+      - name: Render remote Grafana SSO script
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/ch05-remote.sh <<'EOS'
+          cat > /tmp/ch06-remote.sh <<'EOS'
           #!/usr/bin/env bash
           set -euo pipefail
 
           usage() {
-            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE ISSUER_MODE PLATFORM_BASE_DOMAIN GRAFANA_ADMIN_PASSWORD OWNER_USER" >&2
+            echo "Usage: $0 <launch|run> SHORT_SHA BASE_DOMAIN GRAFANA_PROVIDER_SLUG VM_STACK_CHART_VERSION OWNER_USER" >&2
             exit 2
           }
 
-          [[ $# -ge 7 ]] || usage
+          [[ $# -ge 6 ]] || usage
 
           ACTION="$1"
           SHORT_SHA="$2"
-          DEPLOY_MODE="$3"
-          ISSUER_MODE="$4"
-          PLATFORM_BASE_DOMAIN="$5"
-          GRAFANA_ADMIN_PASSWORD="$6"
-          OWNER_USER="$7"
+          BASE_DOMAIN="$3"
+          GRAFANA_PROVIDER_SLUG="$4"
+          VM_STACK_CHART_VERSION="$5"
+          OWNER_USER="$6"
 
-          [[ "${EUID}" -eq 0 ]] || { echo "ch05-remote.sh must run as root" >&2; exit 1; }
+          [[ "${EUID}" -eq 0 ]] || { echo "ch06-remote.sh must run as root" >&2; exit 1; }
 
           if [[ -f /etc/platforminit/host-context.env ]]; then
             # shellcheck disable=SC1091
             source /etc/platforminit/host-context.env
           fi
-          PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+          PLATFORMINIT_IDENTITY_PATH="${PLATFORMINIT_IDENTITY_PATH:-/srv/identity}"
 
-          release_root="${PLATFORMINIT_OBSERVABILITY_PATH}/platforminit"
+          release_root="${PLATFORMINIT_IDENTITY_PATH}/platforminit"
           release_dir="${release_root}/${SHORT_SHA}"
-          tmp_root="/tmp/platforminit-observability"
+          tmp_root="/tmp/platforminit-grafana-sso"
           tmp_dir="${tmp_root}/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
           report_dir="${release_root}/reports"
-          run_log="${tmp_dir}/ch05-run-${SHORT_SHA}.log"
-          run_pid="${tmp_dir}/ch05-run-${SHORT_SHA}.pid"
-          run_status="${tmp_dir}/ch05-run-${SHORT_SHA}.status"
-          run_done="${tmp_dir}/ch05-run-${SHORT_SHA}.done"
-          validate_log="${tmp_dir}/ch05-validate-${SHORT_SHA}.log"
-          report_file="${report_dir}/ch05-validate-${SHORT_SHA}.log"
-
-          cleanup_old_ch05_logs() {
-            find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
-            find "$release_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -mtime +14 -exec rm -rf {} + 2>/dev/null || true
-          }
+          run_log="${tmp_dir}/ch06-grafana-sso-run-${SHORT_SHA}.log"
+          run_pid="${tmp_dir}/ch06-grafana-sso-run-${SHORT_SHA}.pid"
+          run_status="${tmp_dir}/ch06-grafana-sso-run-${SHORT_SHA}.status"
+          run_done="${tmp_dir}/ch06-grafana-sso-run-${SHORT_SHA}.done"
+          validate_log="${tmp_dir}/ch06-grafana-sso-validate-${SHORT_SHA}.log"
+          report_file="${report_dir}/ch06-grafana-sso-validate-${SHORT_SHA}.log"
 
           ensure_owner_access() {
             mkdir -p "$tmp_dir"
@@ -191,11 +179,10 @@ jobs:
 
           launch() {
             mkdir -p "$tmp_dir" "$release_root"
-            cleanup_old_ch05_logs
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             ensure_owner_access
-            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$ISSUER_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
+            nohup "$0" run "$SHORT_SHA" "$BASE_DOMAIN" "$GRAFANA_PROVIDER_SLUG" "$VM_STACK_CHART_VERSION" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
             echo $! > "$run_pid"
             ensure_owner_access
             echo "launched pid=$(cat "$run_pid")"
@@ -206,15 +193,15 @@ jobs:
 
             mkdir -p "$release_dir" "$unpack_dir" "$report_dir" "$tmp_dir"
             rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
-            tar -xzf "${tmp_dir}/observability-release.tar.gz" -C "$unpack_dir"
+            tar -xzf "${tmp_dir}/identity-release.tar.gz" -C "$unpack_dir"
 
-            test -d "$unpack_dir/platform/observability" || {
-              echo "Missing platform/observability in artifact" >&2
+            test -d "$unpack_dir/platform/identity" || {
+              echo "Missing platform/identity in artifact" >&2
               find "$unpack_dir" -maxdepth 4 -print >&2
               exit 1
             }
 
-            rsync -a --delete "$unpack_dir/platform/observability/" "$release_dir/"
+            rsync -a --delete "$unpack_dir/platform/identity/" "$release_dir/"
             find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
 
             export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
@@ -225,13 +212,13 @@ jobs:
 
             env \
               KUBECONFIG="$KUBECONFIG" \
-              DEPLOY_MODE="$DEPLOY_MODE" \
-              ISSUER_MODE="$ISSUER_MODE" \
-              BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
-              GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
-              "$release_dir/scripts/ch05-orchestrator.sh"
+              BASE_DOMAIN="$BASE_DOMAIN" \
+              GRAFANA_OIDC_PROVIDER_SLUG="$GRAFANA_PROVIDER_SLUG" \
+              VM_STACK_CHART_VERSION="$VM_STACK_CHART_VERSION" \
+              "$release_dir/scripts/ch06-enable-grafana-sso.sh"
 
-            env KUBECONFIG="$KUBECONFIG" "$release_dir/validate/ch05-validate-observability.sh" | tee "$validate_log"
+            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$BASE_DOMAIN" GRAFANA_OIDC_PROVIDER_SLUG="$GRAFANA_PROVIDER_SLUG" \
+              "$release_dir/validate/ch06-validate-grafana-sso.sh" | tee "$validate_log"
             cp "$validate_log" "$report_file" || true
             ensure_owner_access
           }
@@ -242,34 +229,32 @@ jobs:
             *) usage ;;
           esac
           EOS
-          chmod +x /tmp/ch05-remote.sh
+          chmod +x /tmp/ch06-remote.sh
 
-      - name: Upload and launch observability deploy
+      - name: Upload and launch Grafana SSO enablement
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
-          DEPLOY_MODE: ${{ inputs.deploy_mode }}
-          ISSUER_MODE: ${{ inputs.issuer_mode }}
           PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
-          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          GRAFANA_OIDC_PROVIDER_SLUG: ${{ inputs.grafana_provider_slug }}
+          VM_STACK_CHART_VERSION: ${{ inputs.vm_stack_chart_version }}
         shell: bash
         run: |
           set -euo pipefail
 
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-observability/${SHORTSHA} /tmp/platforminit-run"
-          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-observability/${SHORTSHA}/observability-release.tar.gz"
-          scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
-
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-grafana-sso/${SHORTSHA} /tmp/platforminit-run"
+          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-grafana-sso/${SHORTSHA}/identity-release.tar.gz"
+          scp -i ~/.ssh/id_ed25519 /tmp/ch06-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch06-remote.sh"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
-            chmod +x /tmp/platforminit-run/ch05-remote.sh
-            sudo -n /tmp/platforminit-run/ch05-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${ISSUER_MODE}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_ADMIN_PASSWORD}' '${HOST_LOGIN_USER}'
+            chmod +x /tmp/platforminit-run/ch06-remote.sh
+            sudo -n /tmp/platforminit-run/ch06-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_OIDC_PROVIDER_SLUG}' '${VM_STACK_CHART_VERSION}' '${HOST_LOGIN_USER}'
           "
-          echo "Remote observability deploy launched."
+          echo "Remote Grafana SSO enablement launched."
 
-      - name: Poll observability deploy
+      - name: Poll Grafana SSO enablement
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
@@ -277,65 +262,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          remote_tmp_dir="/tmp/platforminit-observability/${SHORTSHA}"
-          remote_run_log="${remote_tmp_dir}/ch05-run-${SHORTSHA}.log"
-          remote_run_status="${remote_tmp_dir}/ch05-run-${SHORTSHA}.status"
-          remote_run_done="${remote_tmp_dir}/ch05-run-${SHORTSHA}.done"
+          remote_tmp_dir="/tmp/platforminit-grafana-sso/${SHORTSHA}"
+          remote_run_log="${remote_tmp_dir}/ch06-grafana-sso-run-${SHORTSHA}.log"
+          remote_run_status="${remote_tmp_dir}/ch06-grafana-sso-run-${SHORTSHA}.status"
+          remote_run_done="${remote_tmp_dir}/ch06-grafana-sso-run-${SHORTSHA}.done"
 
-          max_attempts=80
-          sleep_seconds=15
+          max_attempts=60
+          sleep_seconds=10
 
           for attempt in $(seq 1 "${max_attempts}"); do
             if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
               break
             fi
 
-            echo "[poll] CH05 still running (attempt ${attempt}/${max_attempts})"
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 20 '${remote_run_log}' 2>/dev/null || true"
+            echo "[poll] CH06.1 Grafana SSO still running (attempt ${attempt}/${max_attempts})"
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 30 '${remote_run_log}' 2>/dev/null || true"
             sleep "${sleep_seconds}"
           done
 
           if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
-            echo "Timed out waiting for CH05 deploy to finish." >&2
+            echo "Timed out waiting for CH06.1 Grafana SSO to finish." >&2
             ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
             exit 1
           fi
 
-          status=""
-          for retry in $(seq 1 10); do
-            status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
-              "if [ -s '${remote_run_status}' ]; then cat '${remote_run_status}'; elif [ -f '${remote_run_status}' ]; then echo '__EMPTY_STATUS__'; else echo '__NO_STATUS__'; fi" \
-              | tr -d '\r[:space:]')"
-
-            case "${status}" in
-              __NO_STATUS__|__EMPTY_STATUS__|"")
-                echo "[poll] Remote CH05 status not ready yet (retry ${retry}/10)"
-                sleep 2
-                ;;
-              *)
-                break
-                ;;
-            esac
-          done
-
-          echo "Remote CH05 exit status: ${status}"
+          status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "cat '${remote_run_status}' 2>/dev/null || echo '__NO_STATUS__'" | tr -d '\r[:space:]')"
+          echo "Remote CH06.1 Grafana SSO exit status: ${status}"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
-
-          if [[ "${status}" == "__NO_STATUS__" ]]; then
-            echo "Remote CH05 status file does not exist." >&2
-            exit 1
-          fi
-
-          if [[ "${status}" == "__EMPTY_STATUS__" || -z "${status}" ]]; then
-            echo "Remote CH05 status file is empty." >&2
-            exit 1
-          fi
-
-          if [[ ! "${status}" =~ ^[0-9]+$ ]]; then
-            echo "Remote CH05 status is not numeric: ${status}" >&2
-            exit 1
-          fi
-
+          [[ "${status}" =~ ^[0-9]+$ ]] || exit 1
           [ "${status}" = "0" ] || exit "${status}"
 
       - name: Fetch validation report
@@ -347,25 +301,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ./observability-reports
-          remote_tmp_dir="/tmp/platforminit-observability/${SHORTSHA}"
-
-          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-validate-${SHORTSHA}.log'"; then
-            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-validate-${SHORTSHA}.log" "./observability-reports/ch05-validate-${SHORTSHA}.log"
-          else
-            echo "No validation report found; deploy failed before validation step"
-          fi
-
-          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-run-${SHORTSHA}.log'"; then
-            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-run-${SHORTSHA}.log" "./observability-reports/ch05-run-${SHORTSHA}.log"
-          fi
+          mkdir -p ./identity-reports
+          remote_tmp_dir="/tmp/platforminit-grafana-sso/${SHORTSHA}"
+          for file in \
+            "ch06-grafana-sso-validate-${SHORTSHA}.log" \
+            "ch06-grafana-sso-run-${SHORTSHA}.log"
+          do
+            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/${file}'"; then
+              scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/${file}" "./identity-reports/${file}"
+            fi
+          done
 
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ch05-observability-validate-${{ steps.artifact.outputs.short_sha }}
-          path: ./observability-reports/
+          name: ch06-grafana-sso-validate-${{ steps.artifact.outputs.short_sha }}
+          path: ./identity-reports/
           if-no-files-found: warn
           retention-days: 14
 
@@ -374,9 +326,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "CH05 run completed"
+            echo "CH06.1 Grafana SSO run completed"
             echo "artifact_run_id=${{ inputs.artifact_run_id }}"
             echo "artifact_id=${{ inputs.artifact_id }}"
             echo "short_sha=${{ steps.artifact.outputs.short_sha }}"
             echo "host_public_ip=${{ steps.server.outputs.public_ip }}"
+            echo "public_url=https://grafana.${{ secrets.PLATFORM_BASE_DOMAIN }}/login"
           }

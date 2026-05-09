@@ -47,3 +47,12 @@ platform/identity/integrations/argocd/argocd-authentik-oidc-cm.yaml.tpl
 3. Enable Argo CD SSO second.
 4. Confirm local Argo CD admin still works.
 5. Only then consider Traefik ForwardAuth for services without native OIDC.
+
+
+## CH06.1 - Grafana SSO implementation policy
+
+Grafana SSO is configured by the `06.1 - Enable Grafana SSO` workflow. The workflow does not click through the Grafana UI. It applies a Helm values overlay to the existing `observability-vmstack` release and stores the OAuth client ID/secret in the Kubernetes secret `observability/grafana-authentik-oauth`.
+
+The Authentik provider/application is reconciled through the Authentik API using the bootstrap token stored in `identity/authentik-bootstrap`. `GRAFANA_OIDC_CLIENT_ID` and `GRAFANA_OIDC_CLIENT_SECRET` are intentionally not GitHub secrets in the normal path.
+
+Because Grafana is deployed by CH05, CH05 remains the owner of the base `observability-vmstack` release. CH06.1 owns the SSO overlay. If CH05 is rerun in `baseline` mode after SSO is enabled, rerun CH06.1 afterwards. If CH05 is rerun in `reconcile` mode, the workflow preserves post-CH05 overlays with Helm `--reuse-values`.
