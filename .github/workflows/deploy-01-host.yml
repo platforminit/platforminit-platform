@@ -17,7 +17,7 @@ name: 01 - Create or Rebuild Host
       host_name:
         description: Logical host name within the project
         required: true
-        default: platforminit-development-01
+        default: platforminit-dev-01
       host_role:
         description: PlatformInit host role label
         required: true
@@ -103,7 +103,7 @@ jobs:
           AUTOMATION_SSH_PUBLIC_KEY: ${{ secrets.AUTOMATION_SSH_PUBLIC_KEY }}
           ACTION_NAME: ${{ inputs.action }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
@@ -198,7 +198,7 @@ jobs:
           SERVER_TYPE: ${{ inputs.server_type }}
           REGION: ${{ inputs.region }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           HOST_ROLE: ${{ inputs.host_role }}
           SERVER_NAME_INPUT: ${{ inputs.server_name }}
           SERVER_ID_OVERRIDE: ${{ inputs.server_id_override }}
@@ -597,7 +597,7 @@ jobs:
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           PROJECT: ${{ inputs.project || 'development' }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-development-01' }}
+          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           VOLUME_LAYOUT: ${{ inputs.volume_layout }}
         run: |
           set -euo pipefail
@@ -643,7 +643,7 @@ jobs:
           cat > lifecycle-summary/summary.txt <<EOF
           action=${{ inputs.action }}
           project=${{ inputs.project || 'development' }}
-          host_name=${{ inputs.host_name || 'platforminit-development-01' }}
+          host_name=${{ inputs.host_name || 'platforminit-dev-01' }}
           server_id=${{ steps.lifecycle.outputs.server_id }}
           server_name=${{ steps.lifecycle.outputs.server_name }}
           public_ip=${{ steps.server.outputs.public_ip }}
