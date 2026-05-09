@@ -12,6 +12,12 @@
 - `DNS_API_TOKEN`
 - `PLATFORM_BASE_DOMAIN`
 - `TLS_CONTACT_EMAIL`
+- `GRAFANA_ADMIN_PASSWORD`
+- `AUTHENTIK_SECRET_KEY`
+- `AUTHENTIK_POSTGRESQL_PASSWORD`
+- `AUTHENTIK_BOOTSTRAP_PASSWORD`
+- `AUTHENTIK_BOOTSTRAP_EMAIL` (optional)
+- `AUTHENTIK_BOOTSTRAP_TOKEN` (optional)
 
 ## Secret model rules
 
@@ -29,3 +35,14 @@
 3. `INFRA_SERVER_ID` fallback for the original single-host setup
 
 Do not create one secret per host unless there is a specific break-glass reason. Prefer Hetzner labels and the shared resolver action.
+
+
+## CH06 identity / SSO secrets
+
+- `AUTHENTIK_SECRET_KEY`: Authentik cryptographic secret key. Generate once and never rotate without a planned Authentik migration.
+- `AUTHENTIK_POSTGRESQL_PASSWORD`: Password for the embedded development PostgreSQL database used by the CH06 baseline.
+- `AUTHENTIK_BOOTSTRAP_PASSWORD`: Initial `akadmin` password. Used only during first bootstrap if Authentik has not already been initialized.
+- `AUTHENTIK_BOOTSTRAP_EMAIL`: Optional bootstrap email; defaults to `admin@PLATFORM_BASE_DOMAIN` when empty.
+- `AUTHENTIK_BOOTSTRAP_TOKEN`: Optional API bootstrap token; preserved from the existing cluster secret when empty, otherwise generated once during first deployment.
+
+Do not commit any generated Authentik secret values. Store them as GitHub repository or environment secrets.

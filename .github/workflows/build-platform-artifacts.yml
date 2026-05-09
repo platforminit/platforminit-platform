@@ -35,6 +35,9 @@ jobs:
           - component_name: observability
             source_dir: platform/observability
             artifact_prefix: platforminit-observability
+          - component_name: identity
+            source_dir: platform/identity
+            artifact_prefix: platforminit-identity
 
     steps:
       - name: Checkout

@@ -55,6 +55,10 @@ scope_sudoers_content() {
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch05-remote.sh *
 ' "$USER_NAME"
       ;;
+    identity)
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch06-remote.sh *
+' "$USER_NAME"
+      ;;
     interactive-elevation)
       printf '%s ALL=(ALL) NOPASSWD:ALL
 ' "$USER_NAME"

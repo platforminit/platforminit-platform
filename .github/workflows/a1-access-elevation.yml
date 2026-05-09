@@ -47,6 +47,7 @@ on:
           - cluster
           - platform
           - observability
+          - identity
           - interactive-elevation
           - automation-admin-shell
   workflow_call:
