@@ -18,6 +18,7 @@ ARGOCD_ADMIN_GROUP="${ARGOCD_ADMIN_GROUP:-PlatformInit Admins}"
 AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-https://auth.${BASE_DOMAIN}}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
+ARGOCD_CONFIG_CHANGED=0
 
 ensure_runtime_deps() {
   export DEBIAN_FRONTEND=noninteractive
@@ -259,8 +260,21 @@ render_and_apply_argocd_config() {
     -e "s|__ARGOCD_ADMIN_GROUP__|${ARGOCD_ADMIN_GROUP}|g" \
     "${REPO_ROOT}/integrations/argocd/argocd-authentik-rbac-cm.yaml.tpl" > "${tmp_dir}/argocd-authentik-rbac-cm.yaml"
 
-  kubectl apply -f "${tmp_dir}/argocd-authentik-oidc-cm.yaml"
-  kubectl apply -f "${tmp_dir}/argocd-authentik-rbac-cm.yaml"
+  local cm_apply_output=""
+  local rbac_apply_output=""
+
+  cm_apply_output="$(kubectl apply -f "${tmp_dir}/argocd-authentik-oidc-cm.yaml")"
+  rbac_apply_output="$(kubectl apply -f "${tmp_dir}/argocd-authentik-rbac-cm.yaml")"
+  echo "${cm_apply_output}"
+  echo "${rbac_apply_output}"
+
+  if echo "${cm_apply_output}
+${rbac_apply_output}" | grep -Eq ' configured| created'; then
+    ARGOCD_CONFIG_CHANGED=1
+  else
+    ARGOCD_CONFIG_CHANGED=0
+  fi
+
   rm -rf "${tmp_dir}"
 }
 
@@ -271,39 +285,64 @@ diagnose_argocd_server_rollout() {
   kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o wide || true
 }
 
-force_delete_terminating_argocd_server_pods() {
-  local terminating_pods=""
-  terminating_pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o json | python3 -c 'import json, sys; data=json.load(sys.stdin); [print(item["metadata"]["name"]) for item in data.get("items", []) if item.get("metadata", {}).get("deletionTimestamp")]')"
+collect_argocd_server_crash_logs() {
+  log "Collecting Argo CD server crash diagnostics"
+  kubectl -n "${ARGOCD_NAMESPACE}" describe deploy argocd-server || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get events --sort-by=.lastTimestamp | tail -80 || true
 
-  if [[ -z "${terminating_pods}" ]]; then
-    log "No terminating Argo CD server pods found after rollout timeout"
-    return 1
-  fi
-
-  log "Force deleting terminating Argo CD server pods to unblock rollout: ${terminating_pods}"
+  local pods=""
+  pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o jsonpath='{range .items[*]}{.metadata.name}{"
+"}{end}' 2>/dev/null || true)"
   while IFS= read -r pod_name; do
     [[ -n "${pod_name}" ]] || continue
-    kubectl -n "${ARGOCD_NAMESPACE}" delete pod "${pod_name}" --grace-period=0 --force --wait=false || true
-  done <<< "${terminating_pods}"
+    log "Last logs for ${pod_name}"
+    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --tail=120 || true
+    log "Previous logs for ${pod_name}"
+    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --previous --tail=120 || true
+  done <<< "${pods}"
+}
+
+repair_argocd_server_rollout() {
+  log "Attempting Argo CD server rollout repair"
+  diagnose_argocd_server_rollout
+  collect_argocd_server_crash_logs || true
+
+  log "Rolling back argocd-server to the previous stable ReplicaSet revision"
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout undo deploy/argocd-server || true
+
+  if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s; then
+    log "Argo CD server rollback/repair completed"
+    return 0
+  fi
+
+  diagnose_argocd_server_rollout || true
+  return 1
 }
 
 restart_argocd_server() {
-  log "Restarting Argo CD server to load OIDC config"
+  if [[ "${ARGOCD_CONFIG_CHANGED}" != "1" ]]; then
+    log "Argo CD OIDC/RBAC config unchanged; skipping unnecessary rollout restart"
+    if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null 2>&1; then
+      return 0
+    fi
+
+    log "Argo CD config is unchanged, but the existing rollout is degraded; running repair path"
+    repair_argocd_server_rollout || die "Argo CD server rollout is degraded and repair failed"
+    return 0
+  fi
+
+  log "Restarting Argo CD server to load changed OIDC config"
   kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null
 
-  if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=300s; then
+  if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s; then
     return 0
   fi
 
-  log "Argo CD server rollout did not complete within primary timeout; attempting terminating-pod cleanup"
-  diagnose_argocd_server_rollout
-
-  if force_delete_terminating_argocd_server_pods; then
-    kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s
-    return 0
-  fi
-
-  die "Argo CD server rollout failed and no safe terminating-pod cleanup was possible"
+  log "Argo CD server rollout failed after changed SSO config; collecting diagnostics and rolling back to protect the control plane"
+  collect_argocd_server_crash_logs || true
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout undo deploy/argocd-server || true
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s || true
+  die "Argo CD server failed to start with the reconciled SSO config; see collected pod logs above"
 }
 
 main() {
