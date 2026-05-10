@@ -285,18 +285,19 @@ ${rbac_apply_output}" | grep -Eq ' configured| created'; then
 }
 
 restore_previous_argocd_config() {
-  if [[ -n "${ARGOCD_PREVIOUS_CM_FILE}" && -s "${ARGOCD_PREVIOUS_CM_FILE}" ]]; then
-    log "Restoring previous argocd-cm before rollout repair"
-    kubectl apply -f "${ARGOCD_PREVIOUS_CM_FILE}" >/dev/null || true
-  else
-    log "No previous argocd-cm backup found; removing oidc.config as emergency recovery"
-    kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
-  fi
+  # Do not use `kubectl apply` with full live-object backups here. Those
+  # backups contain resourceVersion/uid/last-applied metadata and can conflict
+  # with a ConfigMap modified by a later reconciliation attempt. Recovery must
+  # be conflict-free and field-scoped. The only argocd-cm field introduced by
+  # CH06.2 that can crash argocd-server startup is oidc.config, so remove that
+  # key explicitly instead of trying to replace the full ConfigMap object.
+  log "Restoring Argo CD config with conflict-free field cleanup"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
+    -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
 
-  if [[ -n "${ARGOCD_PREVIOUS_RBAC_FILE}" && -s "${ARGOCD_PREVIOUS_RBAC_FILE}" ]]; then
-    log "Restoring previous argocd-rbac-cm before rollout repair"
-    kubectl apply -f "${ARGOCD_PREVIOUS_RBAC_FILE}" >/dev/null || true
-  fi
+  # RBAC settings do not participate in argocd-server OIDC provider startup.
+  # Keep them as-is during emergency recovery to avoid ConfigMap resourceVersion
+  # conflicts and unnecessary pod-template churn.
 }
 
 remove_argocd_oidc_config_for_recovery() {
@@ -318,8 +319,33 @@ delete_unhealthy_argocd_server_pods() {
 }
 
 clear_argocd_server_restart_annotation() {
-  log "Clearing argocd-server rollout restart annotation so the deployment can converge to the stable ReplicaSet"
-  kubectl -n "${ARGOCD_NAMESPACE}" patch deployment argocd-server --type=json     -p='[{"op":"remove","path":"/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt"}]'     >/dev/null 2>&1 || true
+  # Removing the restartedAt annotation mutates the pod template and can create
+  # yet another ReplicaSet. Keep this helper only for cases where no stable
+  # ReplicaSet revision can be identified. Prefer explicit rollback to the
+  # revision that currently has a ready pod.
+  log "Clearing argocd-server rollout restart annotation as fallback recovery"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch deployment argocd-server --type=json \
+    -p='[{"op":"remove","path":"/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt"}]' \
+    >/dev/null 2>&1 || true
+}
+
+rollback_argocd_server_to_ready_revision() {
+  local stable_revision=""
+
+  stable_revision="$(kubectl -n "${ARGOCD_NAMESPACE}" get rs -l app.kubernetes.io/name=argocd-server \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.deployment\.kubernetes\.io/revision}{"\t"}{.spec.replicas}{"\t"}{.status.readyReplicas}{"\n"}{end}' 2>/dev/null \
+    | awk '$3 > 0 && $4 == $3 {print $2}' \
+    | sort -n \
+    | head -1 || true)"
+
+  if [[ -z "${stable_revision}" ]]; then
+    log "No ready argocd-server ReplicaSet revision found for explicit rollback"
+    return 1
+  fi
+
+  log "Rolling argocd-server back explicitly to ready ReplicaSet revision ${stable_revision}"
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout undo deploy/argocd-server --to-revision="${stable_revision}" >/dev/null || return 1
+  return 0
 }
 
 wait_for_existing_stable_argocd_server() {
@@ -380,7 +406,9 @@ repair_argocd_server_rollout() {
   log "Repairing argocd-server by removing bad OIDC config and clearing degraded rollout state"
   restore_previous_argocd_config || true
   remove_argocd_oidc_config_for_recovery || true
-  clear_argocd_server_restart_annotation || true
+  if ! rollback_argocd_server_to_ready_revision; then
+    clear_argocd_server_restart_annotation || true
+  fi
   scale_down_unready_argocd_replicasets || true
   delete_unhealthy_argocd_server_pods || true
 
@@ -422,7 +450,9 @@ restart_argocd_server() {
   collect_argocd_server_crash_logs || true
   restore_previous_argocd_config || true
   remove_argocd_oidc_config_for_recovery || true
-  clear_argocd_server_restart_annotation || true
+  if ! rollback_argocd_server_to_ready_revision; then
+    clear_argocd_server_restart_annotation || true
+  fi
   scale_down_unready_argocd_replicasets || true
   delete_unhealthy_argocd_server_pods || true
   kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=90s || true
