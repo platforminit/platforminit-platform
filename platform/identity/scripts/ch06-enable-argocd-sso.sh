@@ -313,22 +313,87 @@ render_and_apply_argocd_config() {
     -e "s|__ARGOCD_ADMIN_GROUP__|${ARGOCD_ADMIN_GROUP}|g" \
     "${REPO_ROOT}/integrations/argocd/argocd-authentik-rbac-cm.yaml.tpl" > "${tmp_dir}/argocd-authentik-rbac-cm.yaml"
 
-  local cm_apply_output=""
-  local rbac_apply_output=""
+  local previous_oidc=""
+  local previous_url=""
+  local previous_dex=""
+  local next_oidc=""
+  local argocd_url="https://argocd.${BASE_DOMAIN}"
 
-  cm_apply_output="$(kubectl apply -f "${tmp_dir}/argocd-authentik-oidc-cm.yaml")"
+  previous_oidc="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null || true)"
+  previous_url="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.url}' 2>/dev/null || true)"
+  previous_dex="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.dex\.config}' 2>/dev/null || true)"
+  next_oidc="$(python3 - "${tmp_dir}/argocd-authentik-oidc-cm.yaml" <<'PYCODE'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = "  oidc.config: |\n"
+if marker not in text:
+    raise SystemExit("template did not render oidc.config")
+body = text.split(marker, 1)[1]
+lines = []
+for line in body.splitlines():
+    if line.startswith("    "):
+        lines.append(line[4:])
+    elif line.strip() == "":
+        lines.append("")
+    else:
+        break
+print("\n".join(lines).rstrip() + "\n")
+PYCODE
+)"
+
+  [[ -n "${next_oidc}" ]] || die "Rendered Argo CD OIDC config is empty"
+
+  log "Applying Argo CD OIDC config with field-scoped merge patch"
+  local cm_patch_payload=""
+  cm_patch_payload="$(ARGOCD_URL="${argocd_url}" OIDC_CONFIG="${next_oidc}" python3 - <<'PYCODE'
+import json
+import os
+print(json.dumps({"data": {"url": os.environ["ARGOCD_URL"], "oidc.config": os.environ["OIDC_CONFIG"]}}))
+PYCODE
+)"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=merge -p "${cm_patch_payload}" >/dev/null
+
+  # Argo CD direct OIDC mode must not compete with a Dex connector config in
+  # the same argocd-cm. The stock install runs the Dex deployment, but direct
+  # Authentik SSO uses oidc.config and should not leave dex.config active.
+  if [[ -n "${previous_dex}" ]]; then
+    log "Removing existing dex.config because CH06.2 uses direct Argo CD OIDC"
+    kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
+      -p='[{"op":"remove","path":"/data/dex.config"}]' >/dev/null 2>&1 || true
+  fi
+
+  local rbac_apply_output=""
   rbac_apply_output="$(kubectl apply -f "${tmp_dir}/argocd-authentik-rbac-cm.yaml")"
-  echo "${cm_apply_output}"
+  echo "configmap/argocd-cm field-patched"
   echo "${rbac_apply_output}"
 
-  if echo "${cm_apply_output}
-${rbac_apply_output}" | grep -Eq ' configured| created'; then
+  if [[ "${previous_oidc}" != "${next_oidc}" || "${previous_url}" != "${argocd_url}" || -n "${previous_dex}" ]] \
+    || echo "${rbac_apply_output}" | grep -Eq ' configured| created'; then
     ARGOCD_CONFIG_CHANGED=1
   else
     ARGOCD_CONFIG_CHANGED=0
   fi
 
+  print_argocd_oidc_config_summary || true
   # Keep tmp_dir until the rollout path completes so rollback can restore the previous ConfigMaps.
+}
+
+print_argocd_oidc_config_summary() {
+  log "Current Argo CD OIDC runtime config summary"
+  echo "--- argocd-cm data keys ---"
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{range $k,$v := .data}{"- "}{$k}{"\n"}{end}' 2>/dev/null || true
+  echo "--- oidc.config redacted ---"
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null \
+    | sed -E 's/(clientSecret:[[:space:]]*).*/\1<redacted>/' || true
+  echo
+  echo "--- argocd-secret OIDC secret key presence ---"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
+    echo "argocd-secret key oidc.authentik.clientSecret: present"
+  else
+    echo "argocd-secret key oidc.authentik.clientSecret: MISSING"
+  fi
 }
 
 restore_previous_argocd_config() {
@@ -430,19 +495,23 @@ diagnose_argocd_server_rollout() {
 
 collect_argocd_server_crash_logs() {
   log "Collecting Argo CD server crash diagnostics"
-  kubectl -n "${ARGOCD_NAMESPACE}" describe deploy argocd-server || true
-  kubectl -n "${ARGOCD_NAMESPACE}" get events --sort-by=.lastTimestamp | tail -80 || true
+  print_argocd_oidc_config_summary || true
 
   local pods=""
-  pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o jsonpath='{range .items[*]}{.metadata.name}{"
-"}{end}' 2>/dev/null || true)"
+  pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
   while IFS= read -r pod_name; do
     [[ -n "${pod_name}" ]] || continue
-    log "Last logs for ${pod_name}"
-    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --tail=120 || true
+    log "Current logs for ${pod_name}"
+    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --tail=200 || true
     log "Previous logs for ${pod_name}"
-    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --previous --tail=120 || true
+    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --previous --tail=200 || true
   done <<< "${pods}"
+
+  log "Compact rollout diagnostics"
+  kubectl -n "${ARGOCD_NAMESPACE}" get deploy argocd-server -o wide || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get rs -l app.kubernetes.io/name=argocd-server -o wide || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o wide || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get events --sort-by=.lastTimestamp | tail -60 || true
 }
 
 repair_argocd_server_rollout() {
