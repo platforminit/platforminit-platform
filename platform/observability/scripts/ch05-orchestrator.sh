@@ -143,13 +143,54 @@ deploy_alloy() {
 
 apply_post_vm_manifests() {
   log "Applying vmagent additional scrape config"
-  kubectl create configmap vmagent-additional-scrape     --namespace "${NAMESPACE}"     --from-file=additional-scrape.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml"     --dry-run=client -o yaml | kubectl apply -f -
+  kubectl create configmap vmagent-additional-scrape \
+    --namespace "${NAMESPACE}" \
+    --from-file=additional-scrape.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  if [[ -f "${REPO_ROOT}/manifests/metrics/platform-k3s-core-vmservicescrapes.yaml" ]]; then
+    log "Applying k3s core VMServiceScrape objects"
+    kubectl apply -f "${REPO_ROOT}/manifests/metrics/platform-k3s-core-vmservicescrapes.yaml"
+  fi
 
   log "Applying alert rules"
   kubectl apply -f "${REPO_ROOT}/manifests/alerts/platform-vmrule.yaml"
 
+  if [[ -d "${REPO_ROOT}/manifests/dashboards" ]]; then
+    log "Applying PlatformInit Grafana dashboards"
+    kubectl apply -f "${REPO_ROOT}/manifests/dashboards"
+  fi
+
   log "Provisioning Grafana datasources"
   bash "${REPO_ROOT}/scripts/provision-grafana-datasources.sh"
+
+  log "Requesting VMAgent reconciliation after scrape config changes"
+  kubectl -n "${NAMESPACE}" annotate vmagent --all \
+    platforminit.io/reloaded-at="$(date -u +%Y%m%dT%H%M%SZ)" \
+    --overwrite >/dev/null 2>&1 || true
+
+  # The VictoriaMetrics operator normally reconciles the VMAgent automatically,
+  # but deleting the pod is a safe idempotent nudge after ConfigMap changes and
+  # avoids a false-green deploy with an old scrape config still loaded.
+  kubectl -n "${NAMESPACE}" delete pod \
+    -l app.kubernetes.io/name=vmagent \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
+wait_for_metric_pipeline() {
+  log "Waiting for VMAgent and core exporters"
+
+  kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod \
+    -l app.kubernetes.io/name=vmagent \
+    --timeout=300s >/dev/null 2>&1 || true
+
+  kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod \
+    -l app.kubernetes.io/name=kube-state-metrics \
+    --timeout=300s >/dev/null 2>&1 || true
+
+  kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod \
+    -l app.kubernetes.io/name=prometheus-node-exporter \
+    --timeout=300s >/dev/null 2>&1 || true
 }
 
 restart_if_needed() {
@@ -167,6 +208,7 @@ main() {
   deploy_vm_stack
   wait_for_vm_crds
   apply_post_vm_manifests
+  wait_for_metric_pipeline
   deploy_loki
   deploy_alloy
   restart_if_needed
