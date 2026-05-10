@@ -52,8 +52,11 @@ validate_prerequisites() {
   # ProgressDeadlineExceeded state from a previous restart. CH06.2 is allowed
   # to repair/restart argocd-server after reconciling the OIDC config.
   if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null 2>&1; then
-    log "WARN: Argo CD server is not currently healthy; continuing so the SSO repair/restart path can run"
+    log "WARN: Argo CD server is not currently healthy before SSO reconciliation"
     diagnose_argocd_server_rollout || true
+    log "Repairing existing Argo CD rollout before applying any SSO config"
+    repair_argocd_server_rollout || die "Argo CD server is degraded before SSO reconciliation; run CH04 platform baseline repair and retry CH06.2"
+    die "Argo CD baseline was repaired before SSO reconciliation; rerun CH06.2 from a clean argocd-server state"
   fi
 }
 
