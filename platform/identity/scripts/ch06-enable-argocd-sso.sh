@@ -19,6 +19,8 @@ AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-https://auth.${BASE_DOMAIN}}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
 ARGOCD_CONFIG_CHANGED=0
+ARGOCD_PREVIOUS_CM_FILE=""
+ARGOCD_PREVIOUS_RBAC_FILE=""
 
 ensure_runtime_deps() {
   export DEBIAN_FRONTEND=noninteractive
@@ -249,6 +251,10 @@ PY
 render_and_apply_argocd_config() {
   local tmp_dir=""
   tmp_dir="$(mktemp -d)"
+  ARGOCD_PREVIOUS_CM_FILE="${tmp_dir}/argocd-cm.previous.yaml"
+  ARGOCD_PREVIOUS_RBAC_FILE="${tmp_dir}/argocd-rbac-cm.previous.yaml"
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o yaml > "${ARGOCD_PREVIOUS_CM_FILE}" 2>/dev/null || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm -o yaml > "${ARGOCD_PREVIOUS_RBAC_FILE}" 2>/dev/null || true
 
   sed \
     -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g" \
@@ -275,7 +281,53 @@ ${rbac_apply_output}" | grep -Eq ' configured| created'; then
     ARGOCD_CONFIG_CHANGED=0
   fi
 
-  rm -rf "${tmp_dir}"
+  # Keep tmp_dir until the rollout path completes so rollback can restore the previous ConfigMaps.
+}
+
+restore_previous_argocd_config() {
+  if [[ -n "${ARGOCD_PREVIOUS_CM_FILE}" && -s "${ARGOCD_PREVIOUS_CM_FILE}" ]]; then
+    log "Restoring previous argocd-cm before rollout repair"
+    kubectl apply -f "${ARGOCD_PREVIOUS_CM_FILE}" >/dev/null || true
+  else
+    log "No previous argocd-cm backup found; removing oidc.config as emergency recovery"
+    kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "${ARGOCD_PREVIOUS_RBAC_FILE}" && -s "${ARGOCD_PREVIOUS_RBAC_FILE}" ]]; then
+    log "Restoring previous argocd-rbac-cm before rollout repair"
+    kubectl apply -f "${ARGOCD_PREVIOUS_RBAC_FILE}" >/dev/null || true
+  fi
+}
+
+remove_argocd_oidc_config_for_recovery() {
+  log "Removing Argo CD OIDC config for emergency control-plane recovery"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
+}
+
+delete_unhealthy_argocd_server_pods() {
+  local bad_pods=""
+  bad_pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server     -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\t"}{.status.phase}{"\t"}{.status.containerStatuses[0].state.waiting.reason}{"\n"}{end}' 2>/dev/null | awk '$2 != "true" || $4 == "CrashLoopBackOff" {print $1}' || true)"
+
+  if [[ -n "${bad_pods}" ]]; then
+    log "Deleting unhealthy argocd-server pods only"
+    while IFS= read -r pod_name; do
+      [[ -n "${pod_name}" ]] || continue
+      kubectl -n "${ARGOCD_NAMESPACE}" delete pod "${pod_name}" --grace-period=0 --force >/dev/null 2>&1 || true
+    done <<< "${bad_pods}"
+  fi
+}
+
+scale_down_unready_argocd_replicasets() {
+  local bad_rs=""
+  bad_rs="$(kubectl -n "${ARGOCD_NAMESPACE}" get rs -l app.kubernetes.io/name=argocd-server     -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.replicas}{"\t"}{.status.readyReplicas}{"\n"}{end}' 2>/dev/null | awk '$2 > 0 && ($3 == "" || $3 < $2) {print $1}' || true)"
+
+  if [[ -n "${bad_rs}" ]]; then
+    log "Scaling down unready argocd-server ReplicaSets"
+    while IFS= read -r rs_name; do
+      [[ -n "${rs_name}" ]] || continue
+      kubectl -n "${ARGOCD_NAMESPACE}" scale rs "${rs_name}" --replicas=0 >/dev/null 2>&1 || true
+    done <<< "${bad_rs}"
+  fi
 }
 
 diagnose_argocd_server_rollout() {
@@ -307,11 +359,15 @@ repair_argocd_server_rollout() {
   diagnose_argocd_server_rollout
   collect_argocd_server_crash_logs || true
 
-  log "Rolling back argocd-server to the previous stable ReplicaSet revision"
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout undo deploy/argocd-server || true
+  log "Repairing argocd-server by removing bad OIDC config and clearing degraded rollout state"
+  restore_previous_argocd_config || true
+  remove_argocd_oidc_config_for_recovery || true
+  scale_down_unready_argocd_replicasets || true
+  delete_unhealthy_argocd_server_pods || true
 
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null || true
   if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s; then
-    log "Argo CD server rollback/repair completed"
+    log "Argo CD server repair completed"
     return 0
   fi
 
@@ -338,11 +394,15 @@ restart_argocd_server() {
     return 0
   fi
 
-  log "Argo CD server rollout failed after changed SSO config; collecting diagnostics and rolling back to protect the control plane"
+  log "Argo CD server rollout failed after changed SSO config; restoring/removing SSO config to protect the control plane"
   collect_argocd_server_crash_logs || true
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout undo deploy/argocd-server || true
+  restore_previous_argocd_config || true
+  remove_argocd_oidc_config_for_recovery || true
+  scale_down_unready_argocd_replicasets || true
+  delete_unhealthy_argocd_server_pods || true
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null || true
   kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s || true
-  die "Argo CD server failed to start with the reconciled SSO config; see collected pod logs above"
+  die "Argo CD server failed to start with the reconciled SSO config; SSO config was removed/restored for recovery"
 }
 
 main() {
