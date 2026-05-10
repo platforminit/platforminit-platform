@@ -17,7 +17,8 @@ kubectl get ns "$ns" >/dev/null 2>&1 && pass "NAMESPACE" "observability namespac
 
 kubectl -n "$ns" get pods >/dev/null 2>&1 && pass "POD_LIST" "pods listed" || fail "POD_LIST" "no pods"
 
-kubectl -n "$ns" get deploy observability-vmstack-grafana >/dev/null 2>&1 &&   pass "GRAFANA" "grafana deployment exists" || fail "GRAFANA" "missing"
+kubectl -n "$ns" get deploy observability-vmstack-grafana >/dev/null 2>&1 && \
+  pass "GRAFANA" "grafana deployment exists" || fail "GRAFANA" "missing"
 
 if kubectl -n "$ns" get vmsingle >/dev/null 2>&1; then
   pass "VM_SINGLE" "VMSingle CR exists"
@@ -25,6 +26,30 @@ elif kubectl -n "$ns" get pods -l app.kubernetes.io/name=victoria-metrics-single
   pass "VM_SINGLE" "VictoriaMetrics pod present"
 else
   fail "VM_SINGLE" "VictoriaMetrics not detected"
+fi
+
+if kubectl -n "$ns" get vmagent >/dev/null 2>&1; then
+  pass "VMAGENT_CR" "VMAgent CR exists"
+else
+  fail "VMAGENT_CR" "VMAgent CR missing"
+fi
+
+if kubectl -n "$ns" get pods -l app.kubernetes.io/name=vmagent --no-headers 2>/dev/null | grep -q .; then
+  pass "VMAGENT_POD" "VMAgent pod exists"
+else
+  fail "VMAGENT_POD" "VMAgent pod missing"
+fi
+
+if kubectl -n "$ns" get pods -l app.kubernetes.io/name=kube-state-metrics --no-headers 2>/dev/null | grep -q .; then
+  pass "KUBE_STATE_METRICS" "kube-state-metrics pod exists"
+else
+  fail "KUBE_STATE_METRICS" "kube-state-metrics pod missing"
+fi
+
+if kubectl -n "$ns" get pods -l app.kubernetes.io/name=prometheus-node-exporter --no-headers 2>/dev/null | grep -q .; then
+  pass "NODE_EXPORTER" "node-exporter pod exists"
+else
+  fail "NODE_EXPORTER" "node-exporter pod missing"
 fi
 
 if kubectl -n "$ns" get ingress grafana >/dev/null 2>&1; then
@@ -39,7 +64,6 @@ else
   fail "GRAFANA_TLS" "grafana certificate missing"
 fi
 
-
 # CH06.1 may enable Grafana SSO after the CH05 baseline deploy. CH05 itself does
 # not require SSO, but it should make auth overlay drift visible when the OAuth
 # credential secret exists and Grafana no longer renders the Generic OAuth block.
@@ -51,3 +75,85 @@ if kubectl -n "$ns" get secret grafana-authentik-oauth >/dev/null 2>&1; then
     warn "GRAFANA_SSO_OVERLAY" "grafana-authentik-oauth secret exists, but Grafana Generic OAuth is not enabled; run 06.1 after CH05 baseline"
   fi
 fi
+
+find_vm_service() {
+  kubectl -n "$ns" get svc --no-headers 2>/dev/null \
+    | awk '/vmsingle|victoria-metrics-single|vmselect/ { print $1; exit }'
+}
+
+vm_query_nonempty() {
+  local query="$1"
+  local body=""
+  body="$(curl -fsSG --max-time 10 --data-urlencode "query=${query}" "http://127.0.0.1:${VM_LOCAL_PORT}/api/v1/query")" || return 1
+  python3 -c '
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+result = payload.get("data", {}).get("result", [])
+sys.exit(0 if result else 1)
+' <<<"$body"
+}
+
+validate_metric_data() {
+  local svc=""
+  local svc_port=""
+  local pf_pid=""
+
+  svc="$(find_vm_service || true)"
+  if [[ -z "$svc" ]]; then
+    fail "VM_QUERY_SERVICE" "could not discover VictoriaMetrics service"
+  fi
+  pass "VM_QUERY_SERVICE" "using service ${svc}"
+
+  svc_port="$(kubectl -n "$ns" get svc "$svc" -o jsonpath='{.spec.ports[0].port}')"
+  if [[ -z "$svc_port" ]]; then
+    fail "VM_QUERY_SERVICE_PORT" "could not discover VictoriaMetrics service port"
+  fi
+
+  export VM_LOCAL_PORT="18428"
+  kubectl -n "$ns" port-forward "svc/${svc}" "${VM_LOCAL_PORT}:${svc_port}" >/tmp/ch05-vm-port-forward.log 2>&1 &
+  pf_pid="$!"
+  trap 'kill "$pf_pid" >/dev/null 2>&1 || true' RETURN
+
+  for _ in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:${VM_LOCAL_PORT}/health" >/dev/null 2>&1 || \
+       curl -fsS "http://127.0.0.1:${VM_LOCAL_PORT}/api/v1/status/buildinfo" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+  done
+
+  if vm_query_nonempty 'up'; then
+    pass "VM_QUERY_UP" "VictoriaMetrics has scrape target data"
+  else
+    fail "VM_QUERY_UP" "VictoriaMetrics has no up{} series; scrape pipeline is not working"
+  fi
+
+  if vm_query_nonempty 'node_uname_info or node_cpu_seconds_total'; then
+    pass "VM_QUERY_NODE" "node-exporter/system metrics are present"
+  else
+    fail "VM_QUERY_NODE" "node-exporter/system metrics are missing"
+  fi
+
+  if vm_query_nonempty 'kube_node_info or kube_pod_info'; then
+    pass "VM_QUERY_KSM" "kube-state-metrics Kubernetes object metrics are present"
+  else
+    fail "VM_QUERY_KSM" "kube-state-metrics data is missing"
+  fi
+
+  if vm_query_nonempty 'container_cpu_usage_seconds_total'; then
+    pass "VM_QUERY_CADVISOR" "cAdvisor/container metrics are present"
+  else
+    warn "VM_QUERY_CADVISOR" "cAdvisor/container metrics are missing; k3s node proxy permissions may need review"
+  fi
+
+  if vm_query_nonempty 'apiserver_request_total'; then
+    pass "VM_QUERY_APISERVER" "API server metrics are present"
+  else
+    warn "VM_QUERY_APISERVER" "API server metrics are missing; some generic Kubernetes control-plane dashboards may show No data on k3s"
+  fi
+}
+
+validate_metric_data
