@@ -1,0 +1,163 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-platform-logs-overview
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: platforminit
+    app.kubernetes.io/component: observability
+    platforminit.io/dashboard-tier: beginner
+data:
+  platform-logs-overview.json: |
+    {
+      "uid": "platform-logs-overview",
+      "title": "PlatformInit / Logs Overview",
+      "tags": [
+        "platforminit",
+        "logs",
+        "beginner",
+        "loki",
+        "alloy"
+      ],
+      "timezone": "utc",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "type": "query",
+            "datasource": {
+              "type": "loki",
+              "uid": "loki"
+            },
+            "query": "label_values(namespace)",
+            "refresh": 1,
+            "includeAll": true,
+            "multi": true,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "Purpose",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 2
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "Loki and Alloy do not need public WebUIs. Use Grafana Explore or this dashboard for daily log checks. Start broad, then filter by namespace/pod/container."
+          }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Log lines / second by namespace",
+          "gridPos": {
+            "x": 0,
+            "y": 2,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "targets": [
+            {
+              "expr": "sum by(namespace) (rate({cluster=\"platforminit-homelab\", namespace=~\"$namespace\"}[5m]))",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Warning/error-like log lines / second",
+          "gridPos": {
+            "x": 12,
+            "y": 2,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "targets": [
+            {
+              "expr": "sum by(namespace) (rate({cluster=\"platforminit-homelab\", namespace=~\"$namespace\"} |~ \"(?i)(error|warn|fail|exception)\"[5m]))",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "logs",
+          "title": "Recent logs",
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 24,
+            "h": 12
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "targets": [
+            {
+              "expr": "{cluster=\"platforminit-homelab\", namespace=~\"$namespace\"}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          }
+        }
+      ]
+    }

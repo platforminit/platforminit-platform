@@ -65,6 +65,30 @@ else
   fail "NODE_EXPORTER" "node-exporter pod missing"
 fi
 
+
+PLATFORM_DASHBOARDS=(
+  grafana-dashboard-platform-start-here
+  grafana-dashboard-platform-cluster-overview
+  grafana-dashboard-platform-node-overview
+  grafana-dashboard-platform-logs-overview
+)
+for dashboard_cm in "${PLATFORM_DASHBOARDS[@]}"; do
+  if kubectl -n "$ns" get configmap "$dashboard_cm" >/dev/null 2>&1; then
+    pass "PLATFORM_DASHBOARD" "$dashboard_cm exists"
+  else
+    fail "PLATFORM_DASHBOARD" "$dashboard_cm missing"
+  fi
+done
+
+noise_dashboards="$(kubectl -n "$ns" get configmap \
+  -l 'grafana_dashboard=1,app.kubernetes.io/part-of notin (platforminit)' \
+  --no-headers 2>/dev/null | awk '{print $1}' | tr '\n' ' ' || true)"
+if [[ -n "${noise_dashboards// }" ]]; then
+  fail "DASHBOARD_NOISE_POLICY" "non-PlatformInit dashboard ConfigMaps still present: ${noise_dashboards}"
+else
+  pass "DASHBOARD_NOISE_POLICY" "only PlatformInit beginner dashboards are provisioned"
+fi
+
 if kubectl -n "$ns" get ingress grafana >/dev/null 2>&1; then
   pass "GRAFANA_INGRESS" "grafana ingress exists"
 else
