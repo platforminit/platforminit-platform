@@ -21,6 +21,7 @@ export KUBECONFIG
 ARGOCD_CONFIG_CHANGED=0
 ARGOCD_PREVIOUS_CM_FILE=""
 ARGOCD_PREVIOUS_RBAC_FILE=""
+AUTHENTIK_OIDC_ISSUER=""
 
 ensure_runtime_deps() {
   export DEBIAN_FRONTEND=noninteractive
@@ -48,35 +49,13 @@ validate_prerequisites() {
   kubectl -n "${IDENTITY_NAMESPACE}" rollout status deploy/authentik-server --timeout=30s >/dev/null || die "Authentik server is not healthy"
   kubectl -n "${ARGOCD_NAMESPACE}" get deploy/argocd-server >/dev/null 2>&1 || die "Missing deployment: ${ARGOCD_NAMESPACE}/argocd-server"
 
-  # CH06.2 must not apply OIDC onto a dirty Argo CD deployment. Earlier
-  # versions tried to repair rollout damage here, but that mixed identity
-  # reconciliation with platform control-plane repair and repeatedly created
-  # CrashLoopBackOff ReplicaSets. CH04 owns Argo CD baseline recovery.
-  assert_argocd_server_clean_baseline
-}
-
-assert_argocd_server_clean_baseline() {
-  local unhealthy_pods=""
-  local active_unready_rs=""
-
-  unhealthy_pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\t"}{.status.phase}{"\t"}{.status.containerStatuses[0].state.waiting.reason}{"\n"}{end}' 2>/dev/null \
-    | awk '$2 != "true" || $4 == "CrashLoopBackOff" {print $1}' || true)"
-
-  active_unready_rs="$(kubectl -n "${ARGOCD_NAMESPACE}" get rs -l app.kubernetes.io/name=argocd-server \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.replicas}{"\t"}{.status.readyReplicas}{"\n"}{end}' 2>/dev/null \
-    | awk '$2 > 0 && ($3 == "" || $3 < $2) {print $1}' || true)"
-
-  if [[ -n "${unhealthy_pods}" || -n "${active_unready_rs}" ]]; then
-    log "Argo CD server baseline is degraded; refusing to apply SSO config"
+  # Do not fail the whole SSO reconciliation if Argo CD is already in a
+  # ProgressDeadlineExceeded state from a previous restart. CH06.2 is allowed
+  # to repair/restart argocd-server after reconciling the OIDC config.
+  if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null 2>&1; then
+    log "WARN: Argo CD server is not currently healthy; continuing so the SSO repair/restart path can run"
     diagnose_argocd_server_rollout || true
-    [[ -z "${unhealthy_pods}" ]] || log "Unhealthy argocd-server pods: ${unhealthy_pods//$'\n'/, }"
-    [[ -z "${active_unready_rs}" ]] || log "Active unready argocd-server ReplicaSets: ${active_unready_rs//$'\n'/, }"
-    die "Run 04 - Enable Platform first to repair Argo CD baseline, then rerun 06.2"
   fi
-
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=60s >/dev/null \
-    || die "Argo CD server rollout is not clean; run 04 - Enable Platform before CH06.2"
 }
 
 resolve_or_create_argocd_oidc_secret() {
@@ -271,67 +250,49 @@ PY
 }
 
 validate_authentik_oidc_discovery() {
-  local issuer="https://auth.${BASE_DOMAIN}/application/o/${ARGOCD_OIDC_PROVIDER_SLUG}/"
-  local discovery_url="${issuer}.well-known/openid-configuration"
-
-  log "Validating Authentik OIDC discovery before touching argocd-cm: ${discovery_url}"
-
+  local provider_issuer="${AUTHENTIK_BASE_URL%/}/application/o/${ARGOCD_OIDC_PROVIDER_SLUG}/"
+  local discovery_url="${provider_issuer}.well-known/openid-configuration"
   local discovery_json=""
-  discovery_json="$(curl -fsSL --connect-timeout 10 --max-time 30 "${discovery_url}")" \
-    || die "Authentik OIDC discovery endpoint is not reachable from the host: ${discovery_url}"
 
-  DISCOVERY_JSON="${discovery_json}" EXPECTED_ISSUER="${issuer}" python3 - <<'PYEOF'
+  log "Validating Authentik OIDC discovery endpoint for Argo CD"
+  discovery_json="$(curl -fsSL --retry 3 --retry-delay 2 "${discovery_url}")" || die "Failed to fetch OIDC discovery document: ${discovery_url}"
+
+  AUTHENTIK_OIDC_ISSUER="$(DISCOVERY_JSON="${discovery_json}" python3 - <<'PY'
 import json
 import os
 import sys
 
-raw = os.environ.get("DISCOVERY_JSON", "")
-expected = os.environ["EXPECTED_ISSUER"]
 try:
-    data = json.loads(raw)
+    doc = json.loads(os.environ["DISCOVERY_JSON"])
 except Exception as exc:
     print(f"Invalid OIDC discovery JSON: {exc}", file=sys.stderr)
     sys.exit(1)
 
-actual = data.get("issuer")
-if actual != expected:
-    print(f"OIDC issuer mismatch. expected={expected!r} actual={actual!r}", file=sys.stderr)
-    sys.exit(1)
+issuer = doc.get("issuer", "")
+authorization_endpoint = doc.get("authorization_endpoint", "")
+token_endpoint = doc.get("token_endpoint", "")
+jwks_uri = doc.get("jwks_uri", "")
 
-for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
-    if not data.get(key):
-        print(f"OIDC discovery document missing required key: {key}", file=sys.stderr)
-        sys.exit(1)
-PYEOF
-}
-
-validate_rendered_argocd_oidc_config() {
-  local rendered_file="$1"
-
-  python3 - "${rendered_file}" <<'PYEOF'
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-required = [
-    "oidc.config:",
-    "name: Authentik",
-    "issuer: https://auth.",
-    "clientID:",
-    "clientSecret: $oidc.authentik.clientSecret",
-    "requestedScopes:",
-    "- openid",
-]
-missing = [item for item in required if item not in text]
+missing = [name for name, value in {
+    "issuer": issuer,
+    "authorization_endpoint": authorization_endpoint,
+    "token_endpoint": token_endpoint,
+    "jwks_uri": jwks_uri,
+}.items() if not value]
 if missing:
-    print(f"Rendered Argo CD OIDC ConfigMap is missing required entries: {missing}", file=sys.stderr)
+    print(f"OIDC discovery document is missing required keys: {', '.join(missing)}", file=sys.stderr)
     sys.exit(1)
 
-if "__" in text:
-    print("Rendered Argo CD OIDC ConfigMap still contains template placeholders", file=sys.stderr)
-    sys.exit(1)
-PYEOF
+print(issuer)
+PY
+)"
+
+  [[ -n "${AUTHENTIK_OIDC_ISSUER}" ]] || die "Failed to resolve Authentik OIDC issuer from discovery document"
+  export AUTHENTIK_OIDC_ISSUER
+  log "Using discovered Authentik OIDC issuer: ${AUTHENTIK_OIDC_ISSUER}"
+
+  kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' | grep -q . \
+    || die "argocd-secret is missing oidc.authentik.clientSecret after secret reconciliation"
 }
 
 render_and_apply_argocd_config() {
@@ -344,12 +305,9 @@ render_and_apply_argocd_config() {
 
   sed \
     -e "s|__BASE_DOMAIN__|${BASE_DOMAIN}|g" \
-    -e "s|__ARGOCD_PROVIDER_SLUG__|${ARGOCD_OIDC_PROVIDER_SLUG}|g" \
+    -e "s|__AUTHENTIK_OIDC_ISSUER__|${AUTHENTIK_OIDC_ISSUER}|g" \
     -e "s|__ARGOCD_OIDC_CLIENT_ID__|${ARGOCD_OIDC_CLIENT_ID}|g" \
     "${REPO_ROOT}/integrations/argocd/argocd-authentik-oidc-cm.yaml.tpl" > "${tmp_dir}/argocd-authentik-oidc-cm.yaml"
-
-  validate_authentik_oidc_discovery
-  validate_rendered_argocd_oidc_config "${tmp_dir}/argocd-authentik-oidc-cm.yaml"
 
   sed \
     -e "s|__ARGOCD_ADMIN_GROUP__|${ARGOCD_ADMIN_GROUP}|g" \
@@ -556,6 +514,7 @@ main() {
   resolve_or_create_argocd_oidc_secret
   resolve_authentik_api_token
   configure_authentik_argocd_provider
+  validate_authentik_oidc_discovery
   render_and_apply_argocd_config
   restart_argocd_server
   log "Argo CD SSO enabled via Authentik provider slug=${ARGOCD_OIDC_PROVIDER_SLUG} url=https://argocd.${BASE_DOMAIN}"

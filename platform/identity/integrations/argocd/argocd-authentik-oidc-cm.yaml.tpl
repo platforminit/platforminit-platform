@@ -4,13 +4,13 @@ metadata:
   name: argocd-cm
   namespace: argocd
 data:
+  url: https://argocd.__BASE_DOMAIN__
   oidc.config: |
     name: Authentik
-    issuer: https://auth.__BASE_DOMAIN__/application/o/__ARGOCD_PROVIDER_SLUG__/
+    issuer: __AUTHENTIK_OIDC_ISSUER__
     clientID: __ARGOCD_OIDC_CLIENT_ID__
     clientSecret: $oidc.authentik.clientSecret
-    requestedScopes:
-      - openid
-      - profile
-      - email
-      - groups
+    requestedScopes: ["openid", "profile", "email"]
+    requestedIDTokenClaims:
+      groups:
+        essential: false
