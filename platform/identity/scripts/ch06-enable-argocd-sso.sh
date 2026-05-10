@@ -256,10 +256,46 @@ render_and_apply_argocd_config() {
   rm -rf "${tmp_dir}"
 }
 
+diagnose_argocd_server_rollout() {
+  log "Collecting Argo CD server rollout diagnostics"
+  kubectl -n "${ARGOCD_NAMESPACE}" get deploy argocd-server -o wide || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get rs -l app.kubernetes.io/name=argocd-server -o wide || true
+  kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o wide || true
+}
+
+force_delete_terminating_argocd_server_pods() {
+  local terminating_pods=""
+  terminating_pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o json | python3 -c 'import json, sys; data=json.load(sys.stdin); [print(item["metadata"]["name"]) for item in data.get("items", []) if item.get("metadata", {}).get("deletionTimestamp")]')"
+
+  if [[ -z "${terminating_pods}" ]]; then
+    log "No terminating Argo CD server pods found after rollout timeout"
+    return 1
+  fi
+
+  log "Force deleting terminating Argo CD server pods to unblock rollout: ${terminating_pods}"
+  while IFS= read -r pod_name; do
+    [[ -n "${pod_name}" ]] || continue
+    kubectl -n "${ARGOCD_NAMESPACE}" delete pod "${pod_name}" --grace-period=0 --force --wait=false || true
+  done <<< "${terminating_pods}"
+}
+
 restart_argocd_server() {
   log "Restarting Argo CD server to load OIDC config"
   kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=300s
+
+  if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=300s; then
+    return 0
+  fi
+
+  log "Argo CD server rollout did not complete within primary timeout; attempting terminating-pod cleanup"
+  diagnose_argocd_server_rollout
+
+  if force_delete_terminating_argocd_server_pods; then
+    kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s
+    return 0
+  fi
+
+  die "Argo CD server rollout failed and no safe terminating-pod cleanup was possible"
 }
 
 main() {
