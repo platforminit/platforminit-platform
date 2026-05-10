@@ -82,3 +82,18 @@ Credential ownership model:
 - No `GRAFANA_OIDC_CLIENT_ID` or `GRAFANA_OIDC_CLIENT_SECRET` GitHub secrets are required for the normal path.
 
 Default Authentik provider/application slug: `grafana`.
+
+## CH06.2 Argo CD SSO
+
+After Authentik is reachable and Grafana SSO has been validated, use `06.2 - Enable Argo CD SSO` to configure Argo CD OIDC from code. This keeps the local Argo CD `admin` account available as a break-glass path and stores the OIDC client secret in Kubernetes, not in GitHub secrets.
+
+Credential ownership model:
+
+- The workflow reads `identity/authentik-bootstrap` for the Authentik API token.
+- The workflow creates or reuses `argocd/argocd-authentik-oidc`.
+- The workflow patches `argocd/argocd-secret` with `oidc.authentik.clientSecret`.
+- No `ARGOCD_OIDC_CLIENT_ID` or `ARGOCD_OIDC_CLIENT_SECRET` GitHub secrets are required for the normal path.
+
+Default Authentik provider/application slug: `argocd`.
+Default admin group mapping: `PlatformInit Admins` → `role:admin`.
+

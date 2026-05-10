@@ -56,3 +56,12 @@ Grafana SSO is configured by the `06.1 - Enable Grafana SSO` workflow. The workf
 The Authentik provider/application is reconciled through the Authentik API using the bootstrap token stored in `identity/authentik-bootstrap`. `GRAFANA_OIDC_CLIENT_ID` and `GRAFANA_OIDC_CLIENT_SECRET` are intentionally not GitHub secrets in the normal path.
 
 Because Grafana is deployed by CH05, CH05 remains the owner of the base `observability-vmstack` release. CH06.1 owns the SSO overlay. If CH05 is rerun in `baseline` mode after SSO is enabled, rerun CH06.1 afterwards. If CH05 is rerun in `reconcile` mode, the workflow preserves post-CH05 overlays with Helm `--reuse-values`.
+
+## CH06.2 - Argo CD SSO implementation policy
+
+Argo CD SSO is configured by the `06.2 - Enable Argo CD SSO` workflow. The workflow reconciles the Authentik provider/application through the Authentik API, stores the generated client credentials in Kubernetes, patches `argocd-secret`, applies `argocd-cm` OIDC configuration and applies `argocd-rbac-cm` group mapping.
+
+`ARGOCD_OIDC_CLIENT_ID` and `ARGOCD_OIDC_CLIENT_SECRET` are intentionally not GitHub secrets in the normal path. The local Argo CD admin account must remain available as a break-glass path during CH06.2.
+
+The default admin group is `PlatformInit Admins`. Change it only if the Authentik group name is already standardized differently.
+
