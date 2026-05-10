@@ -43,7 +43,15 @@ validate_prerequisites() {
   kubectl get ns "${IDENTITY_NAMESPACE}" >/dev/null 2>&1 || die "Missing namespace: ${IDENTITY_NAMESPACE}; deploy CH06 first"
   kubectl get ns "${ARGOCD_NAMESPACE}" >/dev/null 2>&1 || die "Missing namespace: ${ARGOCD_NAMESPACE}; deploy CH04 first"
   kubectl -n "${IDENTITY_NAMESPACE}" rollout status deploy/authentik-server --timeout=30s >/dev/null || die "Authentik server is not healthy"
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null || die "Argo CD server is not healthy"
+  kubectl -n "${ARGOCD_NAMESPACE}" get deploy/argocd-server >/dev/null 2>&1 || die "Missing deployment: ${ARGOCD_NAMESPACE}/argocd-server"
+
+  # Do not fail the whole SSO reconciliation if Argo CD is already in a
+  # ProgressDeadlineExceeded state from a previous restart. CH06.2 is allowed
+  # to repair/restart argocd-server after reconciling the OIDC config.
+  if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null 2>&1; then
+    log "WARN: Argo CD server is not currently healthy; continuing so the SSO repair/restart path can run"
+    diagnose_argocd_server_rollout || true
+  fi
 }
 
 resolve_or_create_argocd_oidc_secret() {
