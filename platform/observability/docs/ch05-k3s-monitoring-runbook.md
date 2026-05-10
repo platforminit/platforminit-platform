@@ -67,7 +67,7 @@ curl -G 'http://127.0.0.1:18428/api/v1/query' --data-urlencode 'query=kube_node_
 Start with:
 
 ```text
-PlatformInit / Node Overview
+PlatformInit / 00 - Start Here
 ```
 
 This dashboard uses the PlatformInit baseline queries instead of the upstream control-plane dashboards.
@@ -91,3 +91,15 @@ kubectl -n observability get secret vmagent-additional-scrape
 kubectl -n observability get vmagent
 kubectl -n observability get pods -o wide | grep -i vmagent
 ```
+
+
+## Beginner dashboard set
+
+CH05 now provisions only the PlatformInit dashboard set by default:
+
+- `PlatformInit / 00 - Start Here`
+- `PlatformInit / Cluster Overview`
+- `PlatformInit / Node Overview`
+- `PlatformInit / Logs Overview`
+
+The workflow prunes non-PlatformInit Grafana dashboard ConfigMaps so the default Grafana view stays focused and beginner-friendly.

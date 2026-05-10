@@ -153,7 +153,21 @@ apply_pre_vm_manifests() {
     --dry-run=client -o yaml | kubectl apply -f -
 }
 
+prune_noise_dashboard_configmaps() {
+  # Keep Grafana focused on the PlatformInit operational dashboards. The
+  # VictoriaMetrics chart can create many upstream dashboards for generic
+  # Kubernetes control-plane layouts. On single-node k3s these are noisy and
+  # can show expected No data panels. PlatformInit dashboards are preserved via
+  # app.kubernetes.io/part-of=platforminit.
+  log "Pruning non-PlatformInit Grafana dashboard ConfigMaps"
+  kubectl -n "${NAMESPACE}" delete configmap \
+    -l 'grafana_dashboard=1,app.kubernetes.io/part-of notin (platforminit)' \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
 apply_post_vm_manifests() {
+  prune_noise_dashboard_configmaps
+
   if [[ -f "${REPO_ROOT}/manifests/metrics/platform-k3s-core-vmservicescrapes.yaml" ]]; then
     log "Applying k3s core VMServiceScrape objects"
     kubectl apply -f "${REPO_ROOT}/manifests/metrics/platform-k3s-core-vmservicescrapes.yaml"
