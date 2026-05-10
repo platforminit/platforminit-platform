@@ -65,18 +65,32 @@ resolve_or_create_argocd_oidc_secret() {
     ARGOCD_OIDC_CLIENT_SECRET="$(openssl rand -hex 48)"
   fi
 
+  [[ -n "${ARGOCD_OIDC_CLIENT_ID}" ]] || die "Failed to resolve Argo CD OIDC client id"
+  [[ -n "${ARGOCD_OIDC_CLIENT_SECRET}" ]] || die "Failed to resolve Argo CD OIDC client secret"
+  export ARGOCD_OIDC_CLIENT_ID ARGOCD_OIDC_CLIENT_SECRET
+
   kubectl -n "${ARGOCD_NAMESPACE}" create secret generic argocd-authentik-oidc \
     --from-literal=ARGOCD_OIDC_CLIENT_ID="${ARGOCD_OIDC_CLIENT_ID}" \
     --from-literal=ARGOCD_OIDC_CLIENT_SECRET="${ARGOCD_OIDC_CLIENT_SECRET}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-  kubectl -n "${ARGOCD_NAMESPACE}" patch secret argocd-secret --type='merge' \
-    -p "$(python3 - <<PY
-import base64, json, os
-secret = os.environ["ARGOCD_OIDC_CLIENT_SECRET"].encode()
-print(json.dumps({"data": {"oidc.authentik.clientSecret": base64.b64encode(secret).decode()}}))
+  local patch_payload=""
+  patch_payload="$(python3 - <<'PY'
+import base64
+import json
+import os
+import sys
+
+secret = os.environ.get("ARGOCD_OIDC_CLIENT_SECRET", "")
+if not secret:
+    print("ARGOCD_OIDC_CLIENT_SECRET is empty; refusing to render argocd-secret patch", file=sys.stderr)
+    sys.exit(1)
+
+print(json.dumps({"data": {"oidc.authentik.clientSecret": base64.b64encode(secret.encode()).decode()}}))
 PY
-)" >/dev/null
+)"
+
+  kubectl -n "${ARGOCD_NAMESPACE}" patch secret argocd-secret --type='merge' -p "${patch_payload}" >/dev/null
 }
 
 resolve_authentik_api_token() {
