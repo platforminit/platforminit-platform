@@ -141,13 +141,19 @@ deploy_alloy() {
   helm upgrade --install alloy grafana/alloy     --namespace "${NAMESPACE}"     --version "${ALLOY_CHART_VERSION}"     -f "${REPO_ROOT}/values/alloy-values.yaml"     --wait --timeout 15m
 }
 
-apply_post_vm_manifests() {
-  log "Applying vmagent additional scrape config"
-  kubectl create configmap vmagent-additional-scrape \
+apply_pre_vm_manifests() {
+  # The VictoriaMetrics Operator expects VMAgent additionalScrapeConfigs as a
+  # SecretKeySelector, not a ConfigMap. This must exist before the Helm release
+  # creates/reconciles the VMAgent CR, otherwise the operator may create the CR
+  # but never materialize a healthy VMAgent workload.
+  log "Applying vmagent additional scrape Secret before VM stack deploy"
+  kubectl create secret generic vmagent-additional-scrape \
     --namespace "${NAMESPACE}" \
     --from-file=additional-scrape.yaml="${REPO_ROOT}/manifests/metrics/vmagent-additional-scrape.yaml" \
     --dry-run=client -o yaml | kubectl apply -f -
+}
 
+apply_post_vm_manifests() {
   if [[ -f "${REPO_ROOT}/manifests/metrics/platform-k3s-core-vmservicescrapes.yaml" ]]; then
     log "Applying k3s core VMServiceScrape objects"
     kubectl apply -f "${REPO_ROOT}/manifests/metrics/platform-k3s-core-vmservicescrapes.yaml"
@@ -164,25 +170,47 @@ apply_post_vm_manifests() {
   log "Provisioning Grafana datasources"
   bash "${REPO_ROOT}/scripts/provision-grafana-datasources.sh"
 
-  log "Requesting VMAgent reconciliation after scrape config changes"
+  log "Requesting VMAgent reconciliation after scrape Secret changes"
   kubectl -n "${NAMESPACE}" annotate vmagent --all \
     platforminit.io/reloaded-at="$(date -u +%Y%m%dT%H%M%SZ)" \
     --overwrite >/dev/null 2>&1 || true
 
-  # The VictoriaMetrics operator normally reconciles the VMAgent automatically,
-  # but deleting the pod is a safe idempotent nudge after ConfigMap changes and
-  # avoids a false-green deploy with an old scrape config still loaded.
-  kubectl -n "${NAMESPACE}" delete pod \
-    -l app.kubernetes.io/name=vmagent \
-    --ignore-not-found >/dev/null 2>&1 || true
+  # Delete any existing VMAgent pod using a broad name selector. The chart and
+  # operator labels can differ between versions, while generated pod names keep
+  # vmagent in the name. This is intentionally best-effort and idempotent.
+  kubectl -n "${NAMESPACE}" get pods -o name 2>/dev/null \
+    | grep -E '/.*vmagent.*' \
+    | xargs -r kubectl -n "${NAMESPACE}" delete --ignore-not-found >/dev/null 2>&1 || true
+}
+
+wait_for_named_pod_ready() {
+  local regex="$1"
+  local label="$2"
+  local timeout_seconds="${3:-300}"
+  local deadline=$((SECONDS + timeout_seconds))
+  local pod=""
+
+  while (( SECONDS < deadline )); do
+    pod="$(kubectl -n "${NAMESPACE}" get pods -o name 2>/dev/null | grep -E "$regex" | head -n1 || true)"
+    if [[ -n "$pod" ]]; then
+      if kubectl -n "${NAMESPACE}" wait --for=condition=Ready "$pod" --timeout=30s >/dev/null 2>&1; then
+        log "${label} ready: ${pod#pod/}"
+        return 0
+      fi
+    fi
+    sleep 5
+  done
+
+  echo "WARN: ${label} pod did not become Ready within ${timeout_seconds}s" >&2
+  kubectl -n "${NAMESPACE}" get pods -o wide >&2 || true
+  kubectl -n "${NAMESPACE}" get vmagent -o yaml >&2 || true
+  return 1
 }
 
 wait_for_metric_pipeline() {
   log "Waiting for VMAgent and core exporters"
 
-  kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod \
-    -l app.kubernetes.io/name=vmagent \
-    --timeout=300s >/dev/null 2>&1 || true
+  wait_for_named_pod_ready '/.*vmagent.*' 'VMAgent' 300 || true
 
   kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod \
     -l app.kubernetes.io/name=kube-state-metrics \
@@ -191,6 +219,10 @@ wait_for_metric_pipeline() {
   kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod \
     -l app.kubernetes.io/name=prometheus-node-exporter \
     --timeout=300s >/dev/null 2>&1 || true
+
+  # Give VMAgent a short warm-up window so that the first scrape cycle can land
+  # before PromQL-based validation starts.
+  sleep 30
 }
 
 restart_if_needed() {
@@ -205,6 +237,7 @@ main() {
   ensure_namespace
   prepare_values
   install_repos
+  apply_pre_vm_manifests
   deploy_vm_stack
   wait_for_vm_crds
   apply_post_vm_manifests

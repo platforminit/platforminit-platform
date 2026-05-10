@@ -34,9 +34,22 @@ else
   fail "VMAGENT_CR" "VMAgent CR missing"
 fi
 
-if kubectl -n "$ns" get pods -l app.kubernetes.io/name=vmagent --no-headers 2>/dev/null | grep -q .; then
-  pass "VMAGENT_POD" "VMAgent pod exists"
+if kubectl -n "$ns" get secret vmagent-additional-scrape >/dev/null 2>&1; then
+  pass "VMAGENT_SCRAPE_SECRET" "vmagent additional scrape Secret exists"
 else
+  fail "VMAGENT_SCRAPE_SECRET" "vmagent additional scrape Secret missing"
+fi
+
+vmagent_pod="$(kubectl -n "$ns" get pods -o name 2>/dev/null | grep -E '/.*vmagent.*' | head -n1 || true)"
+if [[ -n "$vmagent_pod" ]]; then
+  if kubectl -n "$ns" get "$vmagent_pod" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q True; then
+    pass "VMAGENT_POD" "VMAgent pod is Ready (${vmagent_pod#pod/})"
+  else
+    fail "VMAGENT_POD" "VMAgent pod exists but is not Ready (${vmagent_pod#pod/})"
+  fi
+else
+  kubectl -n "$ns" get pods -o wide >&2 || true
+  kubectl -n "$ns" get vmagent -o yaml >&2 || true
   fail "VMAGENT_POD" "VMAgent pod missing"
 fi
 

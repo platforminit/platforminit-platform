@@ -39,7 +39,7 @@ This is not enough to declare CH05 healthy. CH05 health is based on the validati
 kubectl -n observability get pods -o wide
 kubectl -n observability get vmagent,vmsingle,vmservicescrape
 kubectl -n observability logs deploy/observability-vmstack-grafana --tail=50
-kubectl -n observability get configmap vmagent-additional-scrape -o yaml
+kubectl -n observability get secret vmagent-additional-scrape -o yaml
 ```
 
 Discover VictoriaMetrics service:
@@ -75,3 +75,19 @@ This dashboard uses the PlatformInit baseline queries instead of the upstream co
 ## Expected workflow behavior
 
 `05 - Deploy Observability Stack` must fail if there is no `up{}` data or no node/kube-state-metrics data. This prevents false-green observability deployments where Grafana is reachable but the metric pipeline is empty.
+
+## 2026-05 VMAgent Secret Contract
+
+`vmagent.spec.additionalScrapeConfigs` is treated as a Secret-backed selector.
+CH05 must create `observability/vmagent-additional-scrape` as a Kubernetes Secret
+before `observability-vmstack` is installed or upgraded. A ConfigMap with the same
+name is not sufficient and can leave the VMAgent CR present while no VMAgent pod is
+materialized by the VictoriaMetrics Operator.
+
+Expected quick checks:
+
+```bash
+kubectl -n observability get secret vmagent-additional-scrape
+kubectl -n observability get vmagent
+kubectl -n observability get pods -o wide | grep -i vmagent
+```
