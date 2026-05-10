@@ -51,7 +51,7 @@ Each deploy workflow accepts the producing build workflow run ID and the specifi
 | Public operational UI | Grafana |
 | Public identity UI | Authentik |
 
-The stale host name `platforminit-development-01` must not be used.
+Deprecated development host aliases must not be used; the only valid development host contract is `platforminit-dev-01`.
 
 ## CH05 observability UX
 
