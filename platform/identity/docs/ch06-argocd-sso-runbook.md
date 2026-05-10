@@ -79,3 +79,7 @@ https://argocd.<PLATFORM_BASE_DOMAIN>/login
 ```
 
 Expected result: the login page shows an Authentik login option, while the local Argo CD admin account remains available for break-glass access.
+
+## Emergency recovery note
+
+If Argo CD SSO configuration causes `argocd-server` to enter `CrashLoopBackOff`, CH06.2 now removes the temporary OIDC configuration and clears the `kubectl.kubernetes.io/restartedAt` pod-template annotation. This avoids repeatedly creating new broken ReplicaSets and lets the Deployment converge back to the last known stable server pod/template instead of relying on Kubernetes revision history alone.

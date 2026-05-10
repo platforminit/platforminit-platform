@@ -317,6 +317,24 @@ delete_unhealthy_argocd_server_pods() {
   fi
 }
 
+clear_argocd_server_restart_annotation() {
+  log "Clearing argocd-server rollout restart annotation so the deployment can converge to the stable ReplicaSet"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch deployment argocd-server --type=json     -p='[{"op":"remove","path":"/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt"}]'     >/dev/null 2>&1 || true
+}
+
+wait_for_existing_stable_argocd_server() {
+  log "Checking whether an existing stable argocd-server pod is still serving the control plane"
+  local ready_pods=""
+  ready_pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server     -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | awk '$2 == "true" {print $1}' || true)"
+
+  if [[ -n "${ready_pods}" ]]; then
+    log "Existing ready argocd-server pod detected; treating control-plane availability as preserved"
+    return 0
+  fi
+
+  return 1
+}
+
 scale_down_unready_argocd_replicasets() {
   local bad_rs=""
   bad_rs="$(kubectl -n "${ARGOCD_NAMESPACE}" get rs -l app.kubernetes.io/name=argocd-server     -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.replicas}{"\t"}{.status.readyReplicas}{"\n"}{end}' 2>/dev/null | awk '$2 > 0 && ($3 == "" || $3 < $2) {print $1}' || true)"
@@ -362,12 +380,18 @@ repair_argocd_server_rollout() {
   log "Repairing argocd-server by removing bad OIDC config and clearing degraded rollout state"
   restore_previous_argocd_config || true
   remove_argocd_oidc_config_for_recovery || true
+  clear_argocd_server_restart_annotation || true
   scale_down_unready_argocd_replicasets || true
   delete_unhealthy_argocd_server_pods || true
 
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null || true
-  if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s; then
+  if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=90s; then
     log "Argo CD server repair completed"
+    return 0
+  fi
+
+  if wait_for_existing_stable_argocd_server; then
+    log "Argo CD deployment status is still degraded, but a stable server pod remains available after recovery cleanup"
+    diagnose_argocd_server_rollout || true
     return 0
   fi
 
@@ -398,11 +422,12 @@ restart_argocd_server() {
   collect_argocd_server_crash_logs || true
   restore_previous_argocd_config || true
   remove_argocd_oidc_config_for_recovery || true
+  clear_argocd_server_restart_annotation || true
   scale_down_unready_argocd_replicasets || true
   delete_unhealthy_argocd_server_pods || true
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null || true
-  kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s || true
-  die "Argo CD server failed to start with the reconciled SSO config; SSO config was removed/restored for recovery"
+  kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=90s || true
+  wait_for_existing_stable_argocd_server || true
+  die "Argo CD server failed to start with the reconciled SSO config; SSO config was removed/restored and restart annotation was cleared for recovery"
 }
 
 main() {
