@@ -26,7 +26,7 @@ on:
       target_user:
         description: User to elevate temporarily
         required: false
-        default: ''
+        default: devops
       duration_minutes:
         description: Time-bound elevation window in minutes
         required: true
@@ -75,7 +75,7 @@ on:
       target_user:
         required: false
         type: string
-        default: ''
+        default: devops
       duration_minutes:
         required: false
         type: string
@@ -135,13 +135,21 @@ jobs:
           HOST: ${{ steps.target.outputs.public_ip }}
           BROKER_USER: itadmin
           INPUT_TARGET_USER: ${{ inputs.target_user }}
-          DEFAULT_TARGET_USER: ${{ secrets.HOST_LOGIN_USER }}
           DURATION_MINUTES: ${{ inputs.duration_minutes }}
           SCOPE: ${{ inputs.mode }}
           RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
-          TARGET_USER="${INPUT_TARGET_USER:-$DEFAULT_TARGET_USER}"
-          [ -n "$TARGET_USER" ] || { echo "Missing target user (input or HOST_LOGIN_USER secret)" >&2; exit 1; }
-          ssh -i ~/.ssh/id_ed25519 "$BROKER_USER@$HOST"             "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"
+          TARGET_USER="${INPUT_TARGET_USER:-devops}"
+          [ -n "$TARGET_USER" ] || { echo "Missing target user" >&2; exit 1; }
+
+          echo "Granting temporary sudo: user=${TARGET_USER} scope=${SCOPE} duration=${DURATION_MINUTES}m host=${HOST}"
+          ssh -i ~/.ssh/id_ed25519 "$BROKER_USER@$HOST" \
+            "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"
+
+          if [[ "$SCOPE" == "interactive-elevation" ]]; then
+            echo "Validating interactive sudo as ${TARGET_USER}"
+            ssh -i ~/.ssh/id_ed25519 "$TARGET_USER@$HOST" \
+              "sudo -n true && sudo -n -l | sed -n '1,20p'"
+          fi
