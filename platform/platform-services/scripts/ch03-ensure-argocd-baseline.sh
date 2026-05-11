@@ -38,6 +38,27 @@ ensure_core_configmaps_exist() {
   kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cmd-params-cm >/dev/null
 }
 
+ensure_argocd_server_secretkey() {
+  log "Ensuring argocd-secret contains a stable server.secretkey"
+
+  local existing_key=""
+  existing_key="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null || true)"
+  if [[ -n "${existing_key}" ]]; then
+    log "argocd-secret server.secretkey already present"
+    return 0
+  fi
+
+  local raw_key=""
+  local encoded_key=""
+  raw_key="$(openssl rand -base64 32)"
+  encoded_key="$(printf '%s' "${raw_key}" | base64 -w0)"
+
+  kubectl -n "${ARGOCD_NAMESPACE}" patch secret argocd-secret --type=merge \
+    -p "{\"data\":{\"server.secretkey\":\"${encoded_key}\"}}" >/dev/null
+
+  log "Created stable argocd-secret server.secretkey for Argo CD session/token verification"
+}
+
 patch_argocd_baseline_fields() {
   log "Applying safe Argo CD baseline fields"
 
@@ -121,6 +142,7 @@ validate_baseline_objects() {
   kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm >/dev/null
   kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cmd-params-cm >/dev/null
   kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret >/dev/null
+  kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' | grep -q . || die "argocd-secret is missing server.secretkey"
   kubectl -n "${ARGOCD_NAMESPACE}" get deploy argocd-server >/dev/null
 
   if kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null | grep -q .; then
@@ -134,6 +156,7 @@ ensure_argocd_namespace
 apply_argocd_install_baseline
 ensure_core_configmaps_exist
 patch_argocd_baseline_fields
+ensure_argocd_server_secretkey
 cleanup_unhealthy_argocd_server_state
 validate_or_recover_argocd_server
 validate_baseline_objects

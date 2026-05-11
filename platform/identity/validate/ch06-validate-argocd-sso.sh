@@ -19,9 +19,11 @@ kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc >/dev/null 2>&
 
 client_id_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc -o jsonpath='{.data.ARGOCD_OIDC_CLIENT_ID}' 2>/dev/null || true)"
 client_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc -o jsonpath='{.data.ARGOCD_OIDC_CLIENT_SECRET}' 2>/dev/null || true)"
+server_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null || true)"
 argocd_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null || true)"
 [[ -n "${client_id_present}" ]] && pass "ARGOCD_CLIENT_ID" "client ID is stored in Kubernetes secret" || fail "ARGOCD_CLIENT_ID" "missing client ID"
 [[ -n "${client_secret_present}" ]] && pass "ARGOCD_CLIENT_SECRET" "client secret is stored in Kubernetes secret" || fail "ARGOCD_CLIENT_SECRET" "missing client secret"
+[[ -n "${server_secret_present}" ]] && pass "ARGOCD_SERVER_SECRETKEY" "argocd-secret contains stable server.secretkey" || fail "ARGOCD_SERVER_SECRETKEY" "missing argocd-secret server.secretkey"
 [[ -n "${argocd_secret_present}" ]] && pass "ARGOCD_SECRET_REFERENCE" "argocd-secret contains oidc.authentik.clientSecret" || fail "ARGOCD_SECRET_REFERENCE" "missing argocd-secret OIDC clientSecret key"
 
 kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=10s >/dev/null 2>&1 && \

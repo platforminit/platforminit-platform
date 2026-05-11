@@ -99,3 +99,15 @@ After changing OIDC config, clear stale browser cookies for `argocd.<domain>` an
 
 If the browser shows `failed to verify the token` after a successful CH06.2 rollout, clear cookies/session storage for both `argocd.<domain>` and `auth.<domain>` before retesting. The workflow creates and attaches a dedicated Authentik `groups` scope mapping for Argo CD, but stale callback/session state from previous failed OIDC attempts can keep the browser on an old invalid token flow.
 
+
+### Token verification failures
+
+If the browser shows `failed to verify the token` after the Authentik login callback, verify that `argocd/argocd-secret` contains a stable `server.secretkey`. Argo CD uses this key for callback state/session token verification. CH04 and CH06.2 now create it when missing before SSO is enabled.
+
+Manual check:
+
+```bash
+kubectl -n argocd get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' | wc -c
+```
+
+A zero-length result means the Argo CD session signing key is missing and OIDC callback verification can fail even when the OAuth provider and rollout are otherwise healthy.

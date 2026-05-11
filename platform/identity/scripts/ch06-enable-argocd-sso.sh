@@ -58,6 +58,27 @@ validate_prerequisites() {
   fi
 }
 
+ensure_argocd_server_secretkey() {
+  log "Ensuring argocd-secret contains stable server.secretkey before SSO login"
+
+  local existing_key=""
+  existing_key="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null || true)"
+  if [[ -n "${existing_key}" ]]; then
+    log "argocd-secret server.secretkey already present"
+    return 0
+  fi
+
+  local raw_key=""
+  local encoded_key=""
+  raw_key="$(openssl rand -base64 32)"
+  encoded_key="$(printf '%s' "${raw_key}" | base64 -w0)"
+
+  kubectl -n "${ARGOCD_NAMESPACE}" patch secret argocd-secret --type=merge \
+    -p "{\"data\":{\"server.secretkey\":\"${encoded_key}\"}}" >/dev/null
+
+  log "Created stable argocd-secret server.secretkey for OIDC state/session token verification"
+}
+
 resolve_or_create_argocd_oidc_secret() {
   local existing_id=""
   local existing_secret=""
@@ -443,7 +464,12 @@ print_argocd_oidc_config_summary() {
   kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null \
     | sed -E 's/(clientSecret:[[:space:]]*).*/\1<redacted>/' || true
   echo
-  echo "--- argocd-secret OIDC secret key presence ---"
+  echo "--- argocd-secret key presence ---"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null | grep -q .; then
+    echo "argocd-secret key server.secretkey: present"
+  else
+    echo "argocd-secret key server.secretkey: MISSING"
+  fi
   if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
     echo "argocd-secret key oidc.authentik.clientSecret: present"
   else
@@ -644,6 +670,7 @@ main() {
   ensure_runtime_deps
   ensure_cluster_ready
   validate_prerequisites
+  ensure_argocd_server_secretkey
   resolve_or_create_argocd_oidc_secret
   resolve_authentik_api_token
   configure_authentik_argocd_provider
