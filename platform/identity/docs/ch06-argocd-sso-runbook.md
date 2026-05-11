@@ -111,3 +111,7 @@ kubectl -n argocd get secret argocd-secret -o jsonpath='{.data.server\.secretkey
 ```
 
 A zero-length result means the Argo CD session signing key is missing and OIDC callback verification can fail even when the OAuth provider and rollout are otherwise healthy.
+
+### Token verification hardening
+
+CH06.2 renders explicit `allowedAudiences` with the Argo CD OIDC client ID and enables `skipAudienceCheckWhenTokenHasNoAudience` for Authentik compatibility. This keeps Argo CD token verification deterministic even when the provider emits non-standard or temporarily audience-less ID tokens during rebuild/testing scenarios.

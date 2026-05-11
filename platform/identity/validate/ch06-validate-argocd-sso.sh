@@ -42,6 +42,13 @@ echo "${config_text}" | grep -q "issuer: https://auth.${BASE_DOMAIN}/application
 echo "${config_text}" | grep -q 'clientSecret: \$oidc.authentik.clientSecret' && \
   pass "ARGOCD_CLIENT_SECRET_REF" "clientSecret uses argocd-secret reference" || fail "ARGOCD_CLIENT_SECRET_REF" "clientSecret reference mismatch"
 
+client_id_value="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc -o jsonpath='{.data.ARGOCD_OIDC_CLIENT_ID}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+echo "${config_text}" | grep -A3 'allowedAudiences:' | grep -q -- "- ${client_id_value}" && \
+  pass "ARGOCD_ALLOWED_AUDIENCE" "OIDC allowedAudiences includes client ID" || fail "ARGOCD_ALLOWED_AUDIENCE" "OIDC allowedAudiences does not include client ID"
+
+echo "${config_text}" | grep -q 'skipAudienceCheckWhenTokenHasNoAudience: true' && \
+  pass "ARGOCD_AUDIENCE_COMPAT" "audience compatibility flag is enabled" || fail "ARGOCD_AUDIENCE_COMPAT" "missing audience compatibility flag"
+
 echo "${config_text}" | grep -q -- '- groups' && \
   pass "ARGOCD_GROUP_SCOPE" "groups scope is requested" || fail "ARGOCD_GROUP_SCOPE" "groups scope missing"
 
