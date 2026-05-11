@@ -101,15 +101,30 @@ cleanup_unhealthy_argocd_server_state() {
   fi
 }
 
-restart_and_validate_argocd_server() {
-  log "Restarting argocd-server after baseline repair"
+ready_argocd_server_pods() {
+  kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server     -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\t"}{.status.phase}{"\n"}{end}' 2>/dev/null     | awk '$2 == "true" && $3 == "Running" {print $1}' || true
+}
+
+validate_or_recover_argocd_server() {
+  local ready_pods=""
+
+  ready_pods="$(ready_argocd_server_pods)"
+
+  if [[ -n "${ready_pods}" ]]; then
+    log "Existing ready argocd-server pod detected; preserving control-plane availability"
+    log "Skipping rollout restart during CH04 baseline repair to avoid creating another CrashLoopBackOff ReplicaSet"
+    cleanup_unhealthy_argocd_server_state
+    return 0
+  fi
+
+  log "No ready argocd-server pod detected; attempting controlled rollout recovery"
   kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deployment/argocd-server >/dev/null
 
-  if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=300s; then
+  if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=180s; then
     log "Argo CD server rollout failed after baseline repair"
     kubectl -n "${ARGOCD_NAMESPACE}" get deploy,rs,pods -l app.kubernetes.io/name=argocd-server -o wide || true
     kubectl -n "${ARGOCD_NAMESPACE}" get events --sort-by=.metadata.creationTimestamp | tail -n 80 || true
-    die "Argo CD baseline repair did not converge"
+    die "Argo CD baseline repair did not converge and no ready argocd-server pod is available"
   fi
 }
 
@@ -133,5 +148,5 @@ apply_argocd_install_if_baseline_missing
 ensure_core_configmaps_exist
 patch_argocd_baseline_fields
 cleanup_unhealthy_argocd_server_state
-restart_and_validate_argocd_server
+validate_or_recover_argocd_server
 validate_baseline_objects
