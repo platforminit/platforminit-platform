@@ -10,6 +10,9 @@ data:
     issuer: __AUTHENTIK_OIDC_ISSUER__
     clientID: __ARGOCD_OIDC_CLIENT_ID__
     clientSecret: $oidc.authentik.clientSecret
+    allowedAudiences:
+      - __ARGOCD_OIDC_CLIENT_ID__
+    skipAudienceCheckWhenTokenHasNoAudience: true
     requestedScopes:
       - openid
       - profile
