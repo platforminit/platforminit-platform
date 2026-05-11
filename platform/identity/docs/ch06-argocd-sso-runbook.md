@@ -83,3 +83,8 @@ Expected result: the login page shows an Authentik login option, while the local
 ## Emergency recovery note
 
 If Argo CD SSO configuration causes `argocd-server` to enter `CrashLoopBackOff`, CH06.2 now removes the temporary OIDC configuration and clears the `kubectl.kubernetes.io/restartedAt` pod-template annotation. This avoids repeatedly creating new broken ReplicaSets and lets the Deployment converge back to the last known stable server pod/template instead of relying on Kubernetes revision history alone.
+
+
+## Current hardening note
+
+CH06.2 validates the Authentik OIDC discovery document before writing `oidc.config` into `argocd-cm`. The rendered Argo CD issuer is taken from the discovery document instead of being guessed from the provider slug. This prevents repeated `argocd-server` CrashLoopBackOff rollouts caused by malformed or incompatible OIDC startup configuration.
