@@ -186,12 +186,24 @@ def default_scope_pks():
         "authentik default OAuth Mapping: OpenID 'openid'",
         "authentik default OAuth Mapping: OpenID 'email'",
         "authentik default OAuth Mapping: OpenID 'profile'",
+        "authentik default OAuth Mapping: OpenID 'groups'",
         "authentik default OAuth Mapping: OpenID 'entitlements'",
     }
     results = paginated_results("/api/v3/propertymappings/provider/scope/?page_size=200")
-    found = [item["pk"] for item in results if item.get("name") in wanted]
-    if len(found) < 3:
-        print("WARN: fewer default scope mappings found than expected; continuing with available mappings", file=sys.stderr)
+    found = []
+    seen = set()
+    for item in results:
+        name = item.get("name", "")
+        # Authentik versions differ slightly in the display name of default
+        # scope mappings. Keep exact matches, and also accept any default
+        # OpenID mapping whose name clearly references the requested scope.
+        normalized = name.lower()
+        is_expected = name in wanted or any(f"'{scope}'" in normalized for scope in ("openid", "email", "profile", "groups"))
+        if is_expected and item.get("pk") not in seen:
+            found.append(item["pk"])
+            seen.add(item["pk"])
+    if len(found) < 4:
+        print("WARN: fewer default OIDC scope mappings found than expected; continuing with available mappings", file=sys.stderr)
     return found
 
 request("GET", "/api/v3/core/users/me/")

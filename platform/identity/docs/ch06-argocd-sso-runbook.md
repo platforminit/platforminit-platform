@@ -88,3 +88,9 @@ If Argo CD SSO configuration causes `argocd-server` to enter `CrashLoopBackOff`,
 ## Current hardening note
 
 CH06.2 validates the Authentik OIDC discovery document before writing `oidc.config` into `argocd-cm`. The rendered Argo CD issuer is taken from the discovery document instead of being guessed from the provider slug. This prevents repeated `argocd-server` CrashLoopBackOff rollouts caused by malformed or incompatible OIDC startup configuration.
+
+## Group scope requirement
+
+CH06.2 requests the `groups` OIDC scope explicitly and requires the Authentik groups scope mapping to be attached to the Argo CD OAuth provider. This is required for the `PlatformInit Admins -> role:admin` RBAC mapping to work reliably.
+
+After changing OIDC config, clear stale browser cookies for `argocd.<domain>` and retry the login flow if the browser shows `failed to verify the token`.
