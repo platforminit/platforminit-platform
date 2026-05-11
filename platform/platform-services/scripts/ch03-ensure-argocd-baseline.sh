@@ -10,6 +10,7 @@ ARGOCD_DOMAIN="${ARGOCD_DOMAIN:-argocd.${BASE_DOMAIN}}"
 ARGOCD_URL="${ARGOCD_URL:-https://${ARGOCD_DOMAIN}}"
 ARGO_VERSION="${ARGO_VERSION:-v2.8.4}"
 ARGO_INSTALL_URL="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
+BASELINE_REAPPLIED="0"
 
 need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 need kubectl
@@ -18,41 +19,23 @@ ensure_argocd_namespace() {
   kubectl create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
-apply_argocd_install_if_baseline_missing() {
-  local missing=0
-
-  for obj in \
-    "configmap/argocd-cm" \
-    "configmap/argocd-rbac-cm" \
-    "configmap/argocd-cmd-params-cm" \
-    "secret/argocd-secret" \
-    "deployment/argocd-server"; do
-    if ! kubectl -n "${ARGOCD_NAMESPACE}" get "${obj}" >/dev/null 2>&1; then
-      log "Missing ${ARGOCD_NAMESPACE}/${obj}; Argo CD install baseline will be re-applied"
-      missing=1
-    fi
-  done
-
-  if [[ "${missing}" == "1" ]]; then
-    log "Re-applying Argo CD ${ARGO_VERSION} install manifest to restore missing core objects"
-    kubectl apply -n "${ARGOCD_NAMESPACE}" -f "${ARGO_INSTALL_URL}" >/dev/null
-  fi
+apply_argocd_install_baseline() {
+  # Always re-apply the pinned upstream Argo CD install baseline during CH04
+  # recovery. A minimal hand-created argocd-cm can exist in Kubernetes while
+  # argocd-server still crashes or serves stale settings with:
+  #   configmap "argocd-cm" not found
+  # Re-applying the pinned baseline restores the complete set of ConfigMaps,
+  # Secrets, RBAC, Services and Deployments expected by Argo CD v2.8.4.
+  log "Re-applying pinned Argo CD ${ARGO_VERSION} install baseline"
+  kubectl apply -n "${ARGOCD_NAMESPACE}" -f "${ARGO_INSTALL_URL}" >/dev/null
+  BASELINE_REAPPLIED="1"
 }
 
 ensure_core_configmaps_exist() {
-  log "Ensuring Argo CD core ConfigMaps exist"
-
-  kubectl -n "${ARGOCD_NAMESPACE}" create configmap argocd-cm \
-    --from-literal=url="${ARGOCD_URL}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-  kubectl -n "${ARGOCD_NAMESPACE}" create configmap argocd-rbac-cm \
-    --from-literal=policy.default="role:readonly" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-  kubectl -n "${ARGOCD_NAMESPACE}" create configmap argocd-cmd-params-cm \
-    --from-literal=server.insecure="true" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  log "Verifying Argo CD core ConfigMaps exist after pinned baseline apply"
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm >/dev/null
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm >/dev/null
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cmd-params-cm >/dev/null
 }
 
 patch_argocd_baseline_fields() {
@@ -110,14 +93,18 @@ validate_or_recover_argocd_server() {
 
   ready_pods="$(ready_argocd_server_pods)"
 
-  if [[ -n "${ready_pods}" ]]; then
-    log "Existing ready argocd-server pod detected; preserving control-plane availability"
-    log "Skipping rollout restart during CH04 baseline repair to avoid creating another CrashLoopBackOff ReplicaSet"
+  if [[ -n "${ready_pods}" && "${BASELINE_REAPPLIED}" != "1" ]]; then
+    log "Existing ready argocd-server pod detected and baseline was not changed; preserving control-plane availability"
     cleanup_unhealthy_argocd_server_state
     return 0
   fi
 
-  log "No ready argocd-server pod detected; attempting controlled rollout recovery"
+  if [[ -n "${ready_pods}" && "${BASELINE_REAPPLIED}" == "1" ]]; then
+    log "Pinned Argo CD baseline was re-applied; performing controlled argocd-server restart to clear stale runtime settings"
+  else
+    log "No ready argocd-server pod detected; attempting controlled rollout recovery"
+  fi
+
   kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deployment/argocd-server >/dev/null
 
   if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=180s; then
@@ -144,7 +131,7 @@ validate_baseline_objects() {
 }
 
 ensure_argocd_namespace
-apply_argocd_install_if_baseline_missing
+apply_argocd_install_baseline
 ensure_core_configmaps_exist
 patch_argocd_baseline_fields
 cleanup_unhealthy_argocd_server_state
