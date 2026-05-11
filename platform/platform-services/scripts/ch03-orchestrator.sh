@@ -26,6 +26,8 @@ log "Apply issuers"
 ISSUER_SET="$ISSUER_SET" LETSENCRYPT_EMAIL="$LETSENCRYPT_EMAIL" bash "$ROOT_DIR/scripts/ch03-apply-issuers.sh"
 log "Wait for ClusterIssuer ${CLUSTER_ISSUER} Ready"
 kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True clusterissuer/${CLUSTER_ISSUER} --timeout=300s || true
+log "Ensure Argo CD baseline is recoverable before TLS/SSO layers"
+BASE_DOMAIN="$BASE_DOMAIN" bash "$ROOT_DIR/scripts/ch03-ensure-argocd-baseline.sh"
 log "Apply Argo CD TLS manifests using issuer ${CLUSTER_ISSUER}"
 CLUSTER_ISSUER="$CLUSTER_ISSUER" bash "$ROOT_DIR/scripts/ch03-apply-argocd-tls.sh"
 log "Validate"
