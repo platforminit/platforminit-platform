@@ -17,4 +17,4 @@ data:
       - groups
     requestedIDTokenClaims:
       groups:
-        essential: true
+        essential: false

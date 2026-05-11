@@ -94,3 +94,8 @@ CH06.2 validates the Authentik OIDC discovery document before writing `oidc.conf
 CH06.2 requests the `groups` OIDC scope explicitly and requires the Authentik groups scope mapping to be attached to the Argo CD OAuth provider. This is required for the `PlatformInit Admins -> role:admin` RBAC mapping to work reliably.
 
 After changing OIDC config, clear stale browser cookies for `argocd.<domain>` and retry the login flow if the browser shows `failed to verify the token`.
+
+## Token verification recovery note
+
+If the browser shows `failed to verify the token` after a successful CH06.2 rollout, clear cookies/session storage for both `argocd.<domain>` and `auth.<domain>` before retesting. The workflow creates and attaches a dedicated Authentik `groups` scope mapping for Argo CD, but stale callback/session state from previous failed OIDC attempts can keep the browser on an old invalid token flow.
+

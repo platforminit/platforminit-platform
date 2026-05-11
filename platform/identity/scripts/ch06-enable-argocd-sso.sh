@@ -182,34 +182,56 @@ def flow_pk(slug):
 
 
 def default_scope_pks():
-    wanted = {
-        "authentik default OAuth Mapping: OpenID 'openid'",
-        "authentik default OAuth Mapping: OpenID 'email'",
-        "authentik default OAuth Mapping: OpenID 'profile'",
-        "authentik default OAuth Mapping: OpenID 'groups'",
-        "authentik default OAuth Mapping: OpenID 'entitlements'",
-    }
+    wanted_scopes = {"openid", "email", "profile"}
     results = paginated_results("/api/v3/propertymappings/provider/scope/?page_size=200")
     found = []
     seen = set()
     for item in results:
         name = item.get("name", "")
-        # Authentik versions differ slightly in the display name of default
-        # scope mappings. Keep exact matches, and also accept any default
-        # OpenID mapping whose name clearly references the requested scope.
+        scope_name = item.get("scope_name", "")
         normalized = name.lower()
-        is_expected = name in wanted or any(f"'{scope}'" in normalized for scope in ("openid", "email", "profile", "groups"))
-        if is_expected and item.get("pk") not in seen:
+        scope_matches = scope_name in wanted_scopes
+        name_matches = any(f"'{scope}'" in normalized for scope in wanted_scopes)
+        if (scope_matches or name_matches) and item.get("pk") not in seen:
             found.append(item["pk"])
             seen.add(item["pk"])
-    if len(found) < 4:
-        print("WARN: fewer default OIDC scope mappings found than expected; continuing with available mappings", file=sys.stderr)
+    if len(found) < 3:
+        print("WARN: fewer default openid/email/profile scope mappings found than expected; continuing with available mappings", file=sys.stderr)
     return found
+
+
+def ensure_argocd_groups_scope_mapping():
+    mapping_name = "PlatformInit Argo CD Groups"
+    expression = '''
+# Emit Authentik group names into the OIDC ID token for Argo CD RBAC.
+# Argo CD maps these values through argocd-rbac-cm policy.csv.
+return {
+    "groups": [group.name for group in request.user.ak_groups.all()],
+}
+'''.strip()
+    payload = {
+        "name": mapping_name,
+        "scope_name": "groups",
+        "description": "PlatformInit Argo CD RBAC groups claim",
+        "expression": expression,
+    }
+    existing = first_by_field("/api/v3/propertymappings/provider/scope/", "name", mapping_name)
+    if existing:
+        request("PATCH", f"/api/v3/propertymappings/provider/scope/{existing['pk']}/", payload)
+        print(f"Updated Authentik scope mapping {mapping_name} pk={existing['pk']}")
+        return existing["pk"]
+
+    created = request("POST", "/api/v3/propertymappings/provider/scope/", payload)
+    print(f"Created Authentik scope mapping {mapping_name} pk={created['pk']}")
+    return created["pk"]
 
 request("GET", "/api/v3/core/users/me/")
 authorization_flow = flow_pk("default-provider-authorization-implicit-consent")
 invalidation_flow = flow_pk("default-provider-invalidation-flow")
 property_mappings = default_scope_pks()
+argocd_groups_mapping_pk = ensure_argocd_groups_scope_mapping()
+if argocd_groups_mapping_pk not in property_mappings:
+    property_mappings.append(argocd_groups_mapping_pk)
 
 provider_payload = {
     "name": "Argo CD",
