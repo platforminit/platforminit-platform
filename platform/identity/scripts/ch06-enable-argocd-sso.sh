@@ -295,6 +295,27 @@ PY
     || die "argocd-secret is missing oidc.authentik.clientSecret after secret reconciliation"
 }
 
+
+validate_authentik_oidc_discovery_from_cluster() {
+  local discovery_url="${AUTHENTIK_OIDC_ISSUER%/}/.well-known/openid-configuration"
+  local probe_name="argocd-oidc-discovery-probe-$(date +%s)"
+  local probe_output=""
+
+  log "Validating Authentik OIDC discovery endpoint from inside the cluster"
+  if ! probe_output="$(kubectl -n "${ARGOCD_NAMESPACE}" run "${probe_name}" \
+      --image=curlimages/curl:8.10.1 \
+      --restart=Never \
+      --rm \
+      --attach \
+      --quiet \
+      --pod-running-timeout=90s \
+      --command -- sh -c "curl -fsSL --connect-timeout 10 --max-time 30 '${discovery_url}' | grep -q '\"issuer\"'" 2>&1)"; then
+    echo "${probe_output}" >&2
+    remove_argocd_oidc_config_for_recovery || true
+    die "OIDC discovery is reachable from the host workflow but not from inside the cluster: ${discovery_url}"
+  fi
+}
+
 render_and_apply_argocd_config() {
   local tmp_dir=""
   tmp_dir="$(mktemp -d)"
@@ -497,15 +518,24 @@ collect_argocd_server_crash_logs() {
   log "Collecting Argo CD server crash diagnostics"
   print_argocd_oidc_config_summary || true
 
-  local pods=""
-  pods="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
-  while IFS= read -r pod_name; do
-    [[ -n "${pod_name}" ]] || continue
-    log "Current logs for ${pod_name}"
-    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --tail=200 || true
-    log "Previous logs for ${pod_name}"
-    kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --previous --tail=200 || true
-  done <<< "${pods}"
+  local pod_rows=""
+  pod_rows="$(kubectl -n "${ARGOCD_NAMESPACE}" get pods -l app.kubernetes.io/name=argocd-server \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\t"}{.status.containerStatuses[0].state.waiting.reason}{"\n"}{end}' 2>/dev/null \
+    | awk '$2 != "true" {print "0\t" $0} $2 == "true" {print "1\t" $0}' \
+    | sort || true)"
+
+  while IFS=$'\t' read -r _order pod_name ready_state wait_reason; do
+    [[ -n "${pod_name:-}" ]] || continue
+    if [[ "${ready_state}" != "true" ]]; then
+      log "Previous logs for unhealthy ${pod_name} reason=${wait_reason:-unknown}"
+      kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --previous --tail=240 || true
+      log "Current logs for unhealthy ${pod_name} reason=${wait_reason:-unknown}"
+      kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --tail=240 || true
+    else
+      log "Current logs for ready ${pod_name} (tail only, to avoid hiding crash logs)"
+      kubectl -n "${ARGOCD_NAMESPACE}" logs "${pod_name}" --since=10m --tail=60 || true
+    fi
+  done <<< "${pod_rows}"
 
   log "Compact rollout diagnostics"
   kubectl -n "${ARGOCD_NAMESPACE}" get deploy argocd-server -o wide || true
@@ -584,6 +614,7 @@ main() {
   resolve_authentik_api_token
   configure_authentik_argocd_provider
   validate_authentik_oidc_discovery
+  validate_authentik_oidc_discovery_from_cluster
   render_and_apply_argocd_config
   restart_argocd_server
   log "Argo CD SSO enabled via Authentik provider slug=${ARGOCD_OIDC_PROVIDER_SLUG} url=https://argocd.${BASE_DOMAIN}"
