@@ -10,7 +10,11 @@ data:
     issuer: __AUTHENTIK_OIDC_ISSUER__
     clientID: __ARGOCD_OIDC_CLIENT_ID__
     clientSecret: $oidc.authentik.clientSecret
-    requestedScopes: ["openid", "profile", "email"]
+    requestedScopes:
+      - openid
+      - profile
+      - email
+      - groups
     requestedIDTokenClaims:
       groups:
-        essential: false
+        essential: true
