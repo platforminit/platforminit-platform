@@ -71,9 +71,9 @@ After the identity stack is healthy:
 5. Decide whether Traefik ForwardAuth should protect any future non-OIDC services.
 
 
-## CH06.1 Grafana SSO
+## CH05.1 Grafana SSO
 
-After Authentik is reachable and the `akadmin` account works, use `06.1 - Enable Grafana SSO` to configure Grafana Generic OAuth from code. This keeps local Grafana login enabled as a break-glass path and applies SSO via Helm values rather than manual Grafana UI changes.
+After Authentik is reachable and the `akadmin` account works, use `05.1 - Enable Grafana SSO` to configure Grafana Generic OAuth from code. This keeps local Grafana login enabled as a break-glass path and applies SSO via Helm values rather than manual Grafana UI changes.
 
 Credential ownership model:
 
@@ -83,9 +83,9 @@ Credential ownership model:
 
 Default Authentik provider/application slug: `grafana`.
 
-## CH06.2 Argo CD SSO
+## CH04.6 Argo CD SSO
 
-After Authentik is reachable and Grafana SSO has been validated, use `06.2 - Enable Argo CD SSO` to configure Argo CD OIDC from code. This keeps the local Argo CD `admin` account available as a break-glass path and stores the OIDC client secret in Kubernetes, not in GitHub secrets.
+After Authentik is reachable and Grafana SSO has been validated, use `04.6 - Enable Argo CD SSO` to configure Argo CD OIDC from code. This keeps the local Argo CD `admin` account available as a break-glass path and stores the OIDC client secret in Kubernetes, not in GitHub secrets.
 
 Credential ownership model:
 

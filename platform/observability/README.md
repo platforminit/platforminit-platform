@@ -43,7 +43,7 @@ Use:
 05 - Deploy Observability Stack
 ```
 
-For normal updates after CH06.1 Grafana SSO has been enabled, prefer:
+For normal updates after CH05.1 Grafana SSO has been enabled, prefer:
 
 ```text
 deploy_mode: reconcile
@@ -52,7 +52,7 @@ deploy_mode: reconcile
 If CH05 is run in `baseline` mode after SSO was enabled, rerun:
 
 ```text
-06.1 - Enable Grafana SSO
+05.1 - Enable Grafana SSO
 ```
 
 ## Validation contract
@@ -71,7 +71,7 @@ The validation also checks that the PlatformInit beginner dashboards are present
 
 - `docs/ch05-beginner-dashboard-guide.md`
 - `docs/ch05-k3s-monitoring-runbook.md`
-- `docs/ch05-ch06-sso-interaction.md`
+- `docs/ch05-ch05-1-sso-interaction.md`
 
 ## Grafana datasource policy
 

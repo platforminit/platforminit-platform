@@ -101,7 +101,7 @@ else
   fail "GRAFANA_TLS" "grafana certificate missing"
 fi
 
-# CH06.1 may enable Grafana SSO after the CH05 baseline deploy. CH05 itself does
+# CH05.1 may enable Grafana SSO after the CH05 baseline deploy. CH05 itself does
 # not require SSO, but it should make auth overlay drift visible when the OAuth
 # credential secret exists and Grafana no longer renders the Generic OAuth block.
 if kubectl -n "$ns" get secret grafana-authentik-oauth >/dev/null 2>&1; then
@@ -109,7 +109,7 @@ if kubectl -n "$ns" get secret grafana-authentik-oauth >/dev/null 2>&1; then
   if echo "$grafana_ini" | grep -q '\[auth.generic_oauth\]' && echo "$grafana_ini" | grep -q '^enabled = true'; then
     pass "GRAFANA_SSO_OVERLAY" "Grafana SSO overlay is present"
   else
-    warn "GRAFANA_SSO_OVERLAY" "grafana-authentik-oauth secret exists, but Grafana Generic OAuth is not enabled; run 06.1 after CH05 baseline"
+    warn "GRAFANA_SSO_OVERLAY" "grafana-authentik-oauth secret exists, but Grafana Generic OAuth is not enabled; run 05.1 after CH05 baseline"
   fi
 fi
 

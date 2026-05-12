@@ -12,10 +12,22 @@ USERS_FILE="${IDENTITY_DIR}/users/bootstrap-technical-users.yaml"
 
 BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
 IDENTITY_NAMESPACE="${IDENTITY_NAMESPACE:-identity}"
-AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-https://auth.${BASE_DOMAIN}}"
+AUTHENTIK_PUBLIC_BASE_URL="${AUTHENTIK_PUBLIC_BASE_URL:-https://auth.${BASE_DOMAIN}}"
+AUTHENTIK_LOCAL_PORT="${AUTHENTIK_LOCAL_PORT:-18080}"
+AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-http://127.0.0.1:${AUTHENTIK_LOCAL_PORT}}"
+AUTHENTIK_USE_PORT_FORWARD="${AUTHENTIK_USE_PORT_FORWARD:-true}"
 AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME="${AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME:-akadmin}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-export BASE_DOMAIN IDENTITY_NAMESPACE AUTHENTIK_BASE_URL AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME KUBECONFIG GROUPS_FILE USERS_FILE
+PORT_FORWARD_PID=""
+export BASE_DOMAIN IDENTITY_NAMESPACE AUTHENTIK_PUBLIC_BASE_URL AUTHENTIK_LOCAL_PORT AUTHENTIK_BASE_URL AUTHENTIK_USE_PORT_FORWARD AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME KUBECONFIG GROUPS_FILE USERS_FILE
+
+cleanup() {
+  if [[ -n "${PORT_FORWARD_PID:-}" ]] && kill -0 "${PORT_FORWARD_PID}" >/dev/null 2>&1; then
+    kill "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
+    wait "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 read_secret_key() {
   local namespace="$1"
@@ -42,6 +54,46 @@ validate_prerequisites() {
   [[ -f "${KUBECONFIG}" ]] || die "Missing kubeconfig: ${KUBECONFIG}"
   kubectl --kubeconfig "${KUBECONFIG}" get ns "${IDENTITY_NAMESPACE}" >/dev/null 2>&1 || die "Missing namespace: ${IDENTITY_NAMESPACE}"
   kubectl --kubeconfig "${KUBECONFIG}" -n "${IDENTITY_NAMESPACE}" rollout status deploy/authentik-server --timeout=90s >/dev/null || die "Authentik server is not healthy"
+}
+
+start_authentik_api_port_forward() {
+  [[ "${AUTHENTIK_USE_PORT_FORWARD}" == "true" ]] || return 0
+
+  case "${AUTHENTIK_BASE_URL}" in
+    http://127.0.0.1:*|http://localhost:*) ;;
+    *)
+      log "Using external Authentik API endpoint: ${AUTHENTIK_BASE_URL}"
+      return 0
+      ;;
+  esac
+
+  log "Starting local Authentik API port-forward on 127.0.0.1:${AUTHENTIK_LOCAL_PORT}"
+  kubectl --kubeconfig "${KUBECONFIG}" -n "${IDENTITY_NAMESPACE}" \
+    port-forward --address 127.0.0.1 svc/authentik-server "${AUTHENTIK_LOCAL_PORT}:80" \
+    >/tmp/ch04-5-authentik-port-forward.log 2>&1 &
+  PORT_FORWARD_PID="$!"
+
+  for _ in $(seq 1 60); do
+    if ! kill -0 "${PORT_FORWARD_PID}" >/dev/null 2>&1; then
+      cat /tmp/ch04-5-authentik-port-forward.log >&2 || true
+      die "Authentik API port-forward exited before becoming ready"
+    fi
+
+    if python3 - <<PY >/dev/null 2>&1
+import socket
+s = socket.create_connection(("127.0.0.1", int("${AUTHENTIK_LOCAL_PORT}")), timeout=1)
+s.close()
+PY
+    then
+      log "Local Authentik API endpoint is ready: ${AUTHENTIK_BASE_URL}"
+      return 0
+    fi
+
+    sleep 2
+  done
+
+  cat /tmp/ch04-5-authentik-port-forward.log >&2 || true
+  die "Timed out waiting for local Authentik API port-forward"
 }
 
 bootstrap_identity_model() {
@@ -82,6 +134,8 @@ def request(method, path, payload=None):
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"{method} {path} failed with HTTP {exc.code}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{method} {path} failed against {base_url}: {exc}") from exc
 
 
 def paginated_results(path):
@@ -195,6 +249,7 @@ PY
 
 main() {
   validate_prerequisites
+  start_authentik_api_port_forward
   resolve_authentik_api_token
   bootstrap_identity_model
   log "CH04.5 identity foundation bootstrap completed"

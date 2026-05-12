@@ -444,7 +444,8 @@ jobs:
         shell: bash
         run: |
           {
-            echo "CH04.5 identity foundation run completed"
+            echo "CH04.5 identity foundation run finished"
+            echo "Check job status and validation artifact for PASS/FAIL verdict."
             echo "artifact_run_id=${{ inputs.artifact_run_id }}"
             echo "artifact_id=${{ inputs.artifact_id }}"
             echo "short_sha=${{ steps.artifact.outputs.short_sha }}"

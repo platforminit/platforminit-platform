@@ -19,8 +19,8 @@ Application-specific SSO bindings remain separate follow-up workflows because th
 applications must already exist before they can be integrated:
 
 ```text
-06.1 - Enable Grafana SSO
-06.2 - Enable Argo CD SSO
+05.1 - Enable Grafana SSO
+04.6 - Enable Argo CD SSO
 ```
 
 ## Rationale
@@ -47,8 +47,8 @@ For a clean rebuild use:
 04   - Enable Platform (Ingress, TLS, ArgoCD)
 04.5 - Deploy Identity Foundation
 05   - Deploy Observability Stack
-06.1 - Enable Grafana SSO
-06.2 - Enable Argo CD SSO
+05.1 - Enable Grafana SSO
+04.6 - Enable Argo CD SSO
 ```
 
 ## Compatibility

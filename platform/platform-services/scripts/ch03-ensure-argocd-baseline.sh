@@ -65,7 +65,7 @@ patch_argocd_baseline_fields() {
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=merge \
     -p "{\"data\":{\"url\":\"${ARGOCD_URL}\"}}" >/dev/null
 
-  # CH06.2 owns SSO. CH04 must guarantee that the baseline UI/login can recover
+  # CH04.6 owns SSO. CH04 must guarantee that the baseline UI/login can recover
   # even after a failed SSO attempt, therefore stale OIDC config is removed here.
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
     -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true

@@ -55,7 +55,7 @@ ready_server_revision() {
 }
 
 remove_managed_sso_config() {
-  log "Removing CH06.2-managed Argo CD OIDC config from argocd-cm"
+  log "Removing CH04.6-managed Argo CD OIDC config from argocd-cm"
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
     -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
 }
