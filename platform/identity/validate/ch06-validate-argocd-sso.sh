@@ -70,6 +70,29 @@ echo "${rbac_text}" | grep -q "g, ${EXPECTED_ADMIN_GROUP}, role:admin" && \
 echo "${scopes_text}" | grep -q 'groups' && \
   pass "ARGOCD_RBAC_SCOPES" "RBAC scopes include groups" || warn "ARGOCD_RBAC_SCOPES" "RBAC scopes do not include groups"
 
+if command -v curl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  discovery_url="https://auth.${BASE_DOMAIN}/application/o/${EXPECTED_PROVIDER_SLUG}/.well-known/openid-configuration"
+  discovery_json="$(curl -fsSL --retry 3 --retry-delay 2 "${discovery_url}" 2>/dev/null || true)"
+  if [[ -n "${discovery_json}" ]]; then
+    DISCOVERY_JSON="${discovery_json}" python3 - <<'PYALGS' && \
+      pass "AUTHENTIK_OIDC_SIGNING_ALG" "OIDC discovery does not advertise symmetric-only HS* signing" || \
+      fail "AUTHENTIK_OIDC_SIGNING_ALG" "OIDC discovery appears to advertise symmetric-only HS* signing"
+import json
+import os
+import sys
+
+doc = json.loads(os.environ["DISCOVERY_JSON"])
+algs = doc.get("id_token_signing_alg_values_supported", []) or []
+if algs and all(str(alg).upper().startswith("HS") for alg in algs):
+    print("symmetric-only algorithms:", ",".join(map(str, algs)), file=sys.stderr)
+    sys.exit(1)
+print("algorithms:", ",".join(map(str, algs)) or "not-advertised")
+PYALGS
+  else
+    warn "AUTHENTIK_OIDC_SIGNING_ALG" "skipped signing algorithm validation; discovery endpoint could not be fetched"
+  fi
+fi
+
 
 # Validate Authentik-side group bootstrap when the bootstrap API token is available.
 # This catches the exact post-login failure mode where SSO succeeds but Argo CD
