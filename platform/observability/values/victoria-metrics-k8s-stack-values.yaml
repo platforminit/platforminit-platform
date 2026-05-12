@@ -1,0 +1,126 @@
+nameOverride: observability-vmstack
+
+# PlatformInit ships its own beginner-friendly dashboards. The upstream
+# VictoriaMetrics Kubernetes dashboards remain useful for deep troubleshooting,
+# but are intentionally disabled by default to avoid k3s-specific noise.
+defaultDashboardsEnabled: false
+experimentalDashboardsEnabled: false
+
+grafana:
+  enabled: true
+  adminPassword: changeme
+  defaultDashboardsTimezone: utc
+
+  # Grafana default datasource policy:
+  # keep the chart-managed VictoriaMetrics datasource as the only default datasource.
+  # Additional datasources such as Loki are provisioned separately without isDefault=true.
+  sidecar:
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      searchNamespace: observability
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: observability
+      folder: /tmp/dashboards
+      provider:
+        allowUiUpdates: true
+        foldersFromFilesStructure: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+alertmanager:
+  enabled: true
+  config:
+    global: {}
+    route:
+      receiver: default
+      group_by: ['alertname', 'namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      - name: default
+  spec:
+    externalURL: http://alertmanager.observability.svc.cluster.local:9093
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
+
+vmsingle:
+  enabled: true
+  spec:
+    retentionPeriod: "14d"
+    storage:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 30Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 2Gi
+
+vmagent:
+  enabled: true
+  spec:
+    selectAllByDefault: true
+    externalLabels:
+      cluster: platforminit-homelab
+    extraArgs:
+      promscrape.maxScrapeSize: "33554432"
+    additionalScrapeConfigs:
+      name: vmagent-additional-scrape
+      key: additional-scrape.yaml
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+vmalert:
+  enabled: true
+  spec:
+    evaluationInterval: 30s
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
+
+kube-state-metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+prometheus-node-exporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

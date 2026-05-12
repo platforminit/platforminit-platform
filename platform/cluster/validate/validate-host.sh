@@ -201,9 +201,7 @@ else
   res WARN "k3s data-dir not found: $dd"
 fi
 
-[[ -d /srv/k3s ]] \
-  && res PASS "/srv/k3s exists" \
-  || res WARN "/srv/k3s missing"
+# legacy /srv/k3s check removed; k3s_data_dir() already validates the configured layout-aware data-dir.
 
 # ----------------------------
 # kubectl

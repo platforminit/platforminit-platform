@@ -1,132 +1,145 @@
-# feat/platform
-
-## Overview
-Platform enablement with ArgoCD, ingress and TLS automation
-
----
-
-## Feature Documentation
-
 # PlatformInit Platform
 
-Monorepo for PlatformInit's step-by-step VPS to platform automation.
+Turn a fresh VPS into a production-ready single-node platform with deterministic automation.
+
+This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformInit roadmap. It provisions a Hetzner Cloud host, bootstraps a hardened Ubuntu baseline, installs k3s, enables ingress/TLS/GitOps services, and deploys observability and identity layers.
+
+## Current platform model
+
+| Layer | Purpose |
+|---|---|
+| CH01 / 01.x | host lifecycle, bootstrap and host access tooling |
+| CH02 / 02.x | host baseline, drift checks, OS security and file integrity |
+| CH03 | single-node k3s cluster installation |
+| CH04 | platform services: ingress, TLS and Argo CD |
+| CH05 | observability: Grafana, VictoriaMetrics, Loki and Alloy |
+| CH06 | identity: Authentik SSO foundation |
+| CH06.1 | Grafana SSO integration with Authentik |
 
 ## User-facing workflow order
 
-1. **01 - Create or Rebuild Host**
-2. **02 - Configure Host Baseline**
-3. **03 - Install Kubernetes Cluster**
-4. **04 - Enable Platform (Ingress, TLS, ArgoCD)**
-5. **05 - Deploy Observability Stack**
+| Order | Workflow | Artifact required |
+|---:|---|---|
+| 0 | `00 - Build Platform Artifacts` | none |
+| 1 | `01 - Create or Rebuild Host` | none |
+| 2 | `01.1 - Host Bootstrap` | none |
+| 3 | `01.2 - Sync Host Access Tooling` | none |
+| 4 | `02 - Apply Host Baseline` | `host-baseline-release-*` |
+| 5 | `02.1 - Drift Check` | host-baseline artifact where requested |
+| 6 | `02.3 - OS Security Check` | host-baseline artifact where requested |
+| 7 | `02.4 - OS Security Apply` | host-baseline artifact where requested |
+| 8 | `02.5 - File Integrity Check` | host-baseline artifact where requested |
+| 9 | `02.5.1 - Initialize AIDE Database` | host-baseline artifact where requested |
+| 10 | `02.5.2 - Run AIDE Check` | host-baseline artifact where requested |
+| 11 | `03 - Install Kubernetes Cluster` | `cluster-release-*` |
+| 12 | `04 - Enable Platform (Ingress, TLS, ArgoCD)` | `platform-services-release-*` |
+| 13 | `05 - Deploy Observability Stack` | `observability-release-*` |
+| 14 | `06 - Deploy Identity Stack` | `identity-release-*` |
+| 15 | `06.1 - Enable Grafana SSO` | `identity-release-*` |
 
-## Current implementation scope
+Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
-- Provider implementation: **Hetzner Cloud**
-- Active development domain: **sysadminhomelab.hu**
-- Product brand: **PlatformInit**
+## Active environment contract
 
-## Secret contract
+| Item | Current value |
+|---|---|
+| Provider | Hetzner Cloud |
+| Active project | `development` |
+| Development host | `platforminit-dev-01` |
+| Base domain | `sysadminhomelab.hu` |
+| Kubernetes | single-node k3s |
+| Public operational UI | Grafana |
+| Public identity UI | Authentik |
 
-See `docs/secrets-reference.md`.
+Deprecated development host aliases must not be used; the only valid development host contract is `platforminit-dev-01`.
 
+## CH05 observability UX
 
-## Policy-driven v2 additions
+CH05 is intentionally beginner-friendly by default.
 
-This version keeps the existing 00/01/02/03/04 workflow UX and adds 02.1–02.5 security workflows.
-Legacy CH01 capture/restore content is preserved under `platform/host-baseline/archive/legacy-v1/`.
+Public WebUI:
 
+```text
+https://grafana.<PLATFORM_BASE_DOMAIN>
+```
+
+Internal backends:
+
+| Component | Public WebUI? | Usage |
+|---|---:|---|
+| Grafana | yes | dashboards, logs and alerts |
+| VictoriaMetrics | no | metrics backend / internal debug API |
+| Loki | no | log backend queried from Grafana |
+| Alloy | no | collector / internal debug endpoint |
+| Alertmanager | no by default | internal alert routing |
+
+Default dashboard entrypoint:
+
+```text
+Dashboards → PlatformInit → 00 - Start Here
+```
+
+PlatformInit provisions a focused dashboard set and prunes noisy upstream dashboard ConfigMaps during CH05 deploy:
+
+| Dashboard | Purpose |
+|---|---|
+| `PlatformInit / 00 - Start Here` | first green/red operational view |
+| `PlatformInit / Cluster Overview` | pods, namespaces, nodes and restarts |
+| `PlatformInit / Node Overview` | host CPU, memory, disk, filesystem and network |
+| `PlatformInit / Logs Overview` | Loki logs through Grafana |
+
+Generic upstream dashboards for etcd, scheduler and controller-manager can show expected `No data` on single-node k3s and are not part of the default beginner UX.
+
+See `platform/observability/docs/ch05-beginner-dashboard-guide.md`.
+
+## CH06 identity and SSO
+
+CH06 deploys Authentik:
+
+```text
+https://auth.<PLATFORM_BASE_DOMAIN>
+```
+
+CH06.1 enables Grafana Generic OAuth against Authentik while keeping local Grafana admin login as the break-glass path.
+
+After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun. After CH05 `baseline` mode, rerun `06.1 - Enable Grafana SSO` if the Grafana SSO button disappears.
 
 ## Privilege model
 
 - `01 - Create or Rebuild Host` provisions the machine and injects the automation key for initial root access.
-- `01.1 - Host Bootstrap` creates `devops` and `itadmin`, installs the shared SSH public key for both users, disables root login and password auth, and installs the scoped privilege helper.
-- `A1 - Access Elevation` is the only supported elevation path. It is approval-gated through the `privileged-ops` environment and grants a 15-minute time-bound sudo window scoped to the target workflow path.
-- `HOST_LOGIN_USER` should be switched to `devops` after `01.1` completes successfully.
+- `01.1 - Host Bootstrap` creates `devops` and `itadmin`, disables root login and password auth, and installs the scoped privilege helper.
+- `01.2 - Sync Host Access Tooling` updates the host-side grant tooling without rebuilding the host.
+- `A1 - Access Elevation` is the approval-gated elevation path for time-bound workflow sudo.
+- `devops` should not have standing sudo.
 
-
-## Current operating model
-
-- `01 - Create or Rebuild Host`
-- `01.1 - Host Bootstrap`
-- `A1 - Access Elevation`
-- `A2 - Security Patching`
-- `02 - Apply Host Baseline`
-- `03 - Install Kubernetes Cluster`
-- `04 - Enable Platform`
-
-Security model:
-- shared automation key pair for this iteration
-- `root` bootstrap only
-- `devops` runtime user without standing sudo
-- `itadmin` scoped privilege broker
-- deterministic dependency layer with pinned `yq` install
-- policy-driven FIM (no AIDE baseline database)
-
-
-## Host access tooling lifecycle
-
-- `01.1 - Host Bootstrap` installs the initial broker tooling.
-- `01.2 - Sync Host Access Tooling` updates `platforminit-grant-sudo`, `platforminit-sync-host-access`, and `lib-policy.sh` in place without rebuilding the host.
-- Destructive infrastructure actions remain the customer's backup/snapshot responsibility.
-
-## Artifact contract
-
-- `02 - Apply Host Baseline` requires the **host-baseline** build artifact.
-- `03 - Install Kubernetes Cluster` requires the **cluster** build artifact.
-- `04 - Enable Platform` requires the **platform-services** build artifact.
-- Each deploy workflow now accepts both the producing **workflow run ID** and the specific **artifact ID**.
-
-
-## Day-2 operations
-
-See `docs/day2-ops.md`.
-
----
-
-## Platform Context
-
-# platforminit-platform
-
-Turn any VPS into a production-ready platform in minutes.
-
-## Scope
-
-This repository defines:
-
-- Host provisioning and bootstrap
-- Secure SSH access and tooling sync
-- Host baseline enforcement and drift detection
-- File integrity monitoring and AIDE-based validation
-- Kubernetes bootstrap with k3s
-- Platform enablement with ArgoCD, ingress and TLS
-- GitOps-aligned lifecycle management
-
-## Branch Model
+## Branch model
 
 | Branch | Purpose |
 |---|---|
 | `main` | release-ready baseline |
 | `staging` | pre-release validation |
 | `dev` | active integration branch |
-| `feat/*` | isolated feature delivery |
+| `feat/*` / `fix/*` | isolated delivery branches |
+
+## Documentation index
+
+| Area | Document |
+|---|---|
+| Secrets | `docs/secrets-reference.md` |
+| Multi-project routing | `docs/multi-project-routing.md` |
+| Host discovery and volume layout | `docs/multi-project-host-discovery-and-volume-layout.md` |
+| Day-2 operations | `docs/day2-ops.md` |
+| Release model | `docs/release-model.md` |
+| CH05 dashboard guide | `platform/observability/docs/ch05-beginner-dashboard-guide.md` |
+| CH05 k3s monitoring runbook | `platform/observability/docs/ch05-k3s-monitoring-runbook.md` |
+| CH05/CH06 SSO interaction | `platform/observability/docs/ch05-ch06-sso-interaction.md` |
 
 ## Principles
 
 - deterministic infrastructure
-- GitOps-first workflows
-- security baseline enforcement
-- non-interactive automation
-- production-grade auditability
-
-## Roadmap
-
-- CH05 – Observability
-- CH06 – Security & Compliance
-- CH07 – Platform Services
-- CH08 – Multi-Environment & Promotion
-- CH09 – Reliability & Operations
-- CH10 – Platform Productization
-- CH11 – FinOps & Governance
-- CH12 – Identity & Access Platform
-- CH13 – Data / AI Ops
-- CH14 – Internal Developer Platform
+- immutable rebuild preference
+- GitOps-first platform ownership
+- no hardcoded secrets
+- no standing sudo for runtime automation users
+- public UIs only where they provide operator value
+- beginner-friendly defaults with deeper debug paths available when needed

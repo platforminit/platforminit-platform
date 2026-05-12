@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+if [[ -f /etc/platforminit/host-context.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/platforminit/host-context.env
+fi
+PLATFORMINIT_VOLUME_LAYOUT="${PLATFORMINIT_VOLUME_LAYOUT:-single}"
+if [[ "$PLATFORMINIT_VOLUME_LAYOUT" == "split" ]]; then
+  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
+else
+  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv}"
+fi
+K3S_DATA_DIR="${K3S_DATA_DIR:-${PLATFORMINIT_DATA_PATH}/k3s}"
 log(){ echo "[CH02-RESET][$(date -u +%FT%TZ)] $*"; }
 [[ $EUID -eq 0 ]] || { echo 'Run as root (sudo).' >&2; exit 1; }
 log "Stopping and uninstalling existing k3s state if present..."
@@ -14,8 +26,8 @@ rm -rf /etc/rancher/k3s \
        /var/lib/cni \
        /etc/cni/net.d \
        /run/k3s \
-       /srv/k3s \
+       "${K3S_DATA_DIR}" \
        /srv/ch02
-log "Recreating clean /srv/k3s ..."
-install -d -m 0755 /srv/k3s
+log "Recreating clean ${K3S_DATA_DIR} ..."
+install -d -m 0755 "${K3S_DATA_DIR}"
 log "Clean-slate reset complete."

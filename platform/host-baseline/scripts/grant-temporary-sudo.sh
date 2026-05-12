@@ -14,6 +14,10 @@ scope_sudoers_content() {
     baseline)
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch02-remote.sh *
 ' "$USER_NAME"
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/apply-baseline-remote.sh *
+' "$USER_NAME"
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/collect-baseline-artifacts.sh *
+' "$USER_NAME"
       ;;
     drift)
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/drift-check.sh
@@ -51,6 +55,10 @@ scope_sudoers_content() {
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch05-remote.sh *
 ' "$USER_NAME"
       ;;
+    identity)
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch06-remote.sh *
+' "$USER_NAME"
+      ;;
     interactive-elevation)
       printf '%s ALL=(ALL) NOPASSWD:ALL
 ' "$USER_NAME"
@@ -69,6 +77,21 @@ scope_sudoers_content() {
 scope_sudoers_content "$SCOPE" > "$SUDO_FILE"
 chmod 440 "$SUDO_FILE"
 visudo -cf "$SUDO_FILE" >/dev/null
+
+if [[ "$SCOPE" == "interactive-elevation" ]]; then
+  if ! command -v runuser >/dev/null 2>&1; then
+    echo "FATAL: runuser is required to verify interactive elevation" >&2
+    rm -f "$SUDO_FILE"
+    exit 1
+  fi
+  if ! runuser -u "$USER_NAME" -- sudo -n true; then
+    echo "FATAL: interactive sudo verification failed for ${USER_NAME}; refusing false-positive A1 success" >&2
+    rm -f "$SUDO_FILE"
+    exit 1
+  fi
+fi
+
+printf 'temporary sudo granted: user=%s scope=%s duration=%sm sudoers=%s\n' "$USER_NAME" "$SCOPE" "$WINDOW_MINUTES" "$SUDO_FILE"
 
 audit_event "temporary_sudo_granted" "ok" "user=${USER_NAME} scope=${SCOPE} duration=${WINDOW_MINUTES}m run_id=${RUN_ID}"
 

@@ -3,7 +3,4 @@
 artifacts/
 dist/
 __pycache__/
-.local_cache/
 .local_secrets/
-*.log
-*.tmp
