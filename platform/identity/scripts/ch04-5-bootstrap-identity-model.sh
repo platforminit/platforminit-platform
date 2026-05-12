@@ -69,7 +69,7 @@ start_authentik_api_port_forward() {
 
   log "Starting local Authentik API port-forward on 127.0.0.1:${AUTHENTIK_LOCAL_PORT}"
   kubectl --kubeconfig "${KUBECONFIG}" -n "${IDENTITY_NAMESPACE}" \
-    port-forward svc/authentik-server "127.0.0.1:${AUTHENTIK_LOCAL_PORT}:80" \
+    port-forward --address 127.0.0.1 svc/authentik-server "${AUTHENTIK_LOCAL_PORT}:80" \
     >/tmp/ch04-5-authentik-port-forward.log 2>&1 &
   PORT_FORWARD_PID="$!"
 
