@@ -1,4 +1,4 @@
-name: 04.5 - Bootstrap Identity Foundation
+name: 04.5 - Deploy Identity Foundation
 
 on:
   workflow_dispatch:
@@ -31,9 +31,30 @@ on:
         description: Optional explicit IPv4 override for break-glass/debug
         required: false
         default: ''
-      authentik_bootstrap_admin_username:
-        description: Existing Authentik bootstrap admin username to place into foundation groups
+      deploy_mode:
+        description: baseline or reconcile deployment mode
         required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - reconcile
+      issuer_mode:
+        description: staging or prod issuer selection
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - prod
+      authentik_chart_version:
+        description: Authentik Helm chart version pin
+        required: true
+        default: '2026.2.2'
+        type: string
+      authentik_bootstrap_admin_username:
+        description: Authentik bootstrap/admin username to attach to PlatformInit admin groups
+        required: false
         default: akadmin
         type: string
 
@@ -56,7 +77,7 @@ jobs:
       role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
-      duration_minutes: '15'
+      duration_minutes: '30'
       mode: identity-foundation
 
   deploy:
@@ -117,7 +138,7 @@ jobs:
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Render remote identity foundation script
+      - name: Render remote identity script
         shell: bash
         run: |
           set -euo pipefail
@@ -126,61 +147,96 @@ jobs:
           set -euo pipefail
 
           usage() {
-            echo "Usage: $0 run SHORT_SHA PLATFORM_BASE_DOMAIN AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME OWNER_USER" >&2
+            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE ISSUER_MODE PLATFORM_BASE_DOMAIN AUTHENTIK_CHART_VERSION OWNER_USER AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME" >&2
             exit 2
           }
 
-          [[ $# -ge 5 ]] || usage
+          [[ $# -ge 8 ]] || usage
 
           ACTION="$1"
           SHORT_SHA="$2"
-          PLATFORM_BASE_DOMAIN="$3"
-          AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME="$4"
-          OWNER_USER="$5"
+          DEPLOY_MODE="$3"
+          ISSUER_MODE="$4"
+          PLATFORM_BASE_DOMAIN="$5"
+          AUTHENTIK_CHART_VERSION="$6"
+          OWNER_USER="$7"
+          AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME="$8"
 
-          [[ "$ACTION" == "run" ]] || usage
           [[ "${EUID}" -eq 0 ]] || { echo "ch04-5-remote.sh must run as root" >&2; exit 1; }
 
           if [[ -f /etc/platforminit/host-context.env ]]; then
             # shellcheck disable=SC1091
             source /etc/platforminit/host-context.env
           fi
-
           PLATFORMINIT_IDENTITY_PATH="${PLATFORMINIT_IDENTITY_PATH:-/srv/identity}"
+
           release_root="${PLATFORMINIT_IDENTITY_PATH}/platforminit"
           release_dir="${release_root}/${SHORT_SHA}"
-          tmp_root="/tmp/platforminit-identity-foundation"
+          tmp_root="/tmp/platforminit-identity"
           tmp_dir="${tmp_root}/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
           report_dir="${release_root}/reports"
-          bootstrap_log="${tmp_dir}/ch04-5-bootstrap-${SHORT_SHA}.log"
+          run_log="${tmp_dir}/ch04-5-run-${SHORT_SHA}.log"
+          run_pid="${tmp_dir}/ch04-5-run-${SHORT_SHA}.pid"
+          run_status="${tmp_dir}/ch04-5-run-${SHORT_SHA}.status"
+          run_done="${tmp_dir}/ch04-5-run-${SHORT_SHA}.done"
           validate_log="${tmp_dir}/ch04-5-validate-${SHORT_SHA}.log"
-          report_bootstrap="${report_dir}/ch04-5-bootstrap-${SHORT_SHA}.log"
-          report_validate="${report_dir}/ch04-5-validate-${SHORT_SHA}.log"
+          report_file="${report_dir}/ch04-5-validate-${SHORT_SHA}.log"
+
+          cleanup_old_ch06_logs() {
+            find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+            find "$release_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -mtime +14 -exec rm -rf {} + 2>/dev/null || true
+          }
 
           ensure_owner_access() {
-            mkdir -p "$tmp_dir" "$report_dir"
+            mkdir -p "$tmp_dir"
             chown "${OWNER_USER}:${OWNER_USER}" "$tmp_dir" 2>/dev/null || true
             chmod 755 "$tmp_dir" 2>/dev/null || true
-            for f in "$bootstrap_log" "$validate_log"; do
-              if [[ -e "$f" ]]; then
+            for f in "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"; do
+              if [ -e "$f" ]; then
                 chown "${OWNER_USER}:${OWNER_USER}" "$f" 2>/dev/null || true
                 chmod 644 "$f" 2>/dev/null || true
               fi
             done
           }
 
-          cleanup_old_logs() {
-            find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+          load_secrets_file() {
+            local secrets_file="${tmp_dir}/ch04-5-secrets.env"
+            if [[ -f "$secrets_file" ]]; then
+              set -a
+              # shellcheck disable=SC1090
+              source "$secrets_file"
+              set +a
+              chmod 600 "$secrets_file" 2>/dev/null || true
+            fi
           }
 
-          main() {
-            mkdir -p "$release_dir" "$unpack_dir" "$report_dir" "$tmp_dir"
-            cleanup_old_logs
-            rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
-            rm -f "$bootstrap_log" "$validate_log"
+          launch() {
+            mkdir -p "$tmp_dir" "$release_root"
+            cleanup_old_ch06_logs
+            rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
+            : > "$run_log"
+            load_secrets_file
+            ensure_owner_access
+            nohup env \
+              AUTHENTIK_SECRET_KEY="${AUTHENTIK_SECRET_KEY:-}" \
+              AUTHENTIK_POSTGRESQL_PASSWORD="${AUTHENTIK_POSTGRESQL_PASSWORD:-}" \
+              AUTHENTIK_BOOTSTRAP_PASSWORD="${AUTHENTIK_BOOTSTRAP_PASSWORD:-}" \
+              AUTHENTIK_BOOTSTRAP_EMAIL="${AUTHENTIK_BOOTSTRAP_EMAIL:-}" \
+              AUTHENTIK_BOOTSTRAP_TOKEN="${AUTHENTIK_BOOTSTRAP_TOKEN:-}" \
+              "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$ISSUER_MODE" "$PLATFORM_BASE_DOMAIN" "$AUTHENTIK_CHART_VERSION" "$OWNER_USER" "$AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME" >>"$run_log" 2>&1 < /dev/null &
+            echo $! > "$run_pid"
+            ensure_owner_access
+            echo "launched pid=$(cat "$run_pid")"
+          }
 
+          run_main() {
+            trap 'rc=$?; printf "%s\n" "$rc" > "${run_status}.tmp"; mv "${run_status}.tmp" "$run_status"; touch "$run_done"; ensure_owner_access; exit "$rc"' EXIT
+
+            mkdir -p "$release_dir" "$unpack_dir" "$report_dir" "$tmp_dir"
+            rm -rf "${release_dir:?}/"* "${unpack_dir:?}/"*
             tar -xzf "${tmp_dir}/identity-release.tar.gz" -C "$unpack_dir"
+
             test -d "$unpack_dir/platform/identity" || {
               echo "Missing platform/identity in artifact" >&2
               find "$unpack_dir" -maxdepth 4 -print >&2
@@ -191,48 +247,166 @@ jobs:
             find "$release_dir" -type f -name "*.sh" -exec chmod +x {} \;
 
             export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
-            export BASE_DOMAIN="$PLATFORM_BASE_DOMAIN"
-            export AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME
+            test -f "$KUBECONFIG" || {
+              echo "Missing kubeconfig at $KUBECONFIG" >&2
+              exit 1
+            }
 
-            test -f "$KUBECONFIG" || { echo "Missing kubeconfig at $KUBECONFIG" >&2; exit 1; }
-            test -x "$release_dir/scripts/ch04-5-bootstrap-identity-model.sh" || { echo "Missing CH04.5 bootstrap script" >&2; exit 1; }
-            test -x "$release_dir/validate/ch04-5-validate-identity-model.sh" || { echo "Missing CH04.5 validation script" >&2; exit 1; }
+            env \
+              KUBECONFIG="$KUBECONFIG" \
+              DEPLOY_MODE="$DEPLOY_MODE" \
+              ISSUER_MODE="$ISSUER_MODE" \
+              BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
+              AUTHENTIK_CHART_VERSION="$AUTHENTIK_CHART_VERSION" \
+              AUTHENTIK_SECRET_KEY="${AUTHENTIK_SECRET_KEY:-}" \
+              AUTHENTIK_POSTGRESQL_PASSWORD="${AUTHENTIK_POSTGRESQL_PASSWORD:-}" \
+              AUTHENTIK_BOOTSTRAP_PASSWORD="${AUTHENTIK_BOOTSTRAP_PASSWORD:-}" \
+              AUTHENTIK_BOOTSTRAP_EMAIL="${AUTHENTIK_BOOTSTRAP_EMAIL:-}" \
+              AUTHENTIK_BOOTSTRAP_TOKEN="${AUTHENTIK_BOOTSTRAP_TOKEN:-}" \
+              "$release_dir/scripts/ch06-orchestrator.sh"
 
-            "$release_dir/scripts/ch04-5-bootstrap-identity-model.sh" | tee "$bootstrap_log"
-            "$release_dir/validate/ch04-5-validate-identity-model.sh" | tee "$validate_log"
+            env \
+              KUBECONFIG="$KUBECONFIG" \
+              BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
+              IDENTITY_NAMESPACE="identity" \
+              AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME="$AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME" \
+              AUTHENTIK_BOOTSTRAP_TOKEN="${AUTHENTIK_BOOTSTRAP_TOKEN:-}" \
+              "$release_dir/scripts/ch04-5-bootstrap-identity-model.sh"
 
-            cp "$bootstrap_log" "$report_bootstrap" || true
-            cp "$validate_log" "$report_validate" || true
+            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" "$release_dir/validate/ch06-validate-identity.sh" | tee "$validate_log"
+            env \
+              KUBECONFIG="$KUBECONFIG" \
+              BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
+              IDENTITY_NAMESPACE="identity" \
+              AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME="$AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME" \
+              AUTHENTIK_BOOTSTRAP_TOKEN="${AUTHENTIK_BOOTSTRAP_TOKEN:-}" \
+              "$release_dir/validate/ch04-5-validate-identity-model.sh" | tee -a "$validate_log"
+            cp "$validate_log" "$report_file" || true
             ensure_owner_access
           }
 
-          trap 'ensure_owner_access' EXIT
-          main "$@"
+          case "$ACTION" in
+            launch) launch ;;
+            run) run_main ;;
+            *) usage ;;
+          esac
           EOS
           chmod +x /tmp/ch04-5-remote.sh
 
-      - name: Upload and run identity foundation bootstrap
+      - name: Upload and launch identity foundation deploy
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
+          DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          ISSUER_MODE: ${{ inputs.issuer_mode }}
           PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
+          AUTHENTIK_CHART_VERSION: ${{ inputs.authentik_chart_version }}
+          AUTHENTIK_SECRET_KEY: ${{ secrets.AUTHENTIK_SECRET_KEY }}
+          AUTHENTIK_POSTGRESQL_PASSWORD: ${{ secrets.AUTHENTIK_POSTGRESQL_PASSWORD }}
+          AUTHENTIK_BOOTSTRAP_PASSWORD: ${{ secrets.AUTHENTIK_BOOTSTRAP_PASSWORD }}
+          AUTHENTIK_BOOTSTRAP_EMAIL: ${{ secrets.AUTHENTIK_BOOTSTRAP_EMAIL }}
+          AUTHENTIK_BOOTSTRAP_TOKEN: ${{ secrets.AUTHENTIK_BOOTSTRAP_TOKEN }}
           AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME: ${{ inputs.authentik_bootstrap_admin_username }}
         shell: bash
         run: |
           set -euo pipefail
-          : "${PLATFORM_BASE_DOMAIN:?Missing PLATFORM_BASE_DOMAIN secret}"
 
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-identity-foundation/${SHORTSHA} /tmp/platforminit-run"
-          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-identity-foundation/${SHORTSHA}/identity-release.tar.gz"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-identity/${SHORTSHA} /tmp/platforminit-run"
+          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-identity/${SHORTSHA}/identity-release.tar.gz"
           scp -i ~/.ssh/id_ed25519 /tmp/ch04-5-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch04-5-remote.sh"
+
+          python3 - <<'PYENV' > /tmp/ch04-5-secrets.env
+          import os, shlex
+          for name in [
+              "AUTHENTIK_SECRET_KEY",
+              "AUTHENTIK_POSTGRESQL_PASSWORD",
+              "AUTHENTIK_BOOTSTRAP_PASSWORD",
+              "AUTHENTIK_BOOTSTRAP_EMAIL",
+              "AUTHENTIK_BOOTSTRAP_TOKEN",
+          ]:
+              print(f"export {name}={shlex.quote(os.environ.get(name, ''))}")
+          PYENV
+          chmod 600 /tmp/ch04-5-secrets.env
+          scp -i ~/.ssh/id_ed25519 /tmp/ch04-5-secrets.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-identity/${SHORTSHA}/ch04-5-secrets.env"
 
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
+            chmod 600 /tmp/platforminit-identity/${SHORTSHA}/ch04-5-secrets.env
             chmod +x /tmp/platforminit-run/ch04-5-remote.sh
-            sudo -n /tmp/platforminit-run/ch04-5-remote.sh run '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME}' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch04-5-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${ISSUER_MODE}' '${PLATFORM_BASE_DOMAIN}' '${AUTHENTIK_CHART_VERSION}' '${HOST_LOGIN_USER}' '${AUTHENTIK_BOOTSTRAP_ADMIN_USERNAME}'
           "
+          echo "Remote identity foundation deploy launched."
+
+      - name: Poll identity foundation deploy
+        env:
+          HOST: ${{ steps.server.outputs.public_ip }}
+          HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
+          SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_tmp_dir="/tmp/platforminit-identity/${SHORTSHA}"
+          remote_run_log="${remote_tmp_dir}/ch04-5-run-${SHORTSHA}.log"
+          remote_run_status="${remote_tmp_dir}/ch04-5-run-${SHORTSHA}.status"
+          remote_run_done="${remote_tmp_dir}/ch04-5-run-${SHORTSHA}.done"
+
+          max_attempts=100
+          sleep_seconds=15
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
+              break
+            fi
+
+            echo "[poll] CH04.5 still running (attempt ${attempt}/${max_attempts})"
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 20 '${remote_run_log}' 2>/dev/null || true"
+            sleep "${sleep_seconds}"
+          done
+
+          if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
+            echo "Timed out waiting for CH04.5 deploy to finish." >&2
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+            exit 1
+          fi
+
+          status=""
+          for retry in $(seq 1 10); do
+            status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" \
+              "if [ -s '${remote_run_status}' ]; then cat '${remote_run_status}'; elif [ -f '${remote_run_status}' ]; then echo '__EMPTY_STATUS__'; else echo '__NO_STATUS__'; fi" \
+              | tr -d '\r[:space:]')"
+
+            case "${status}" in
+              __NO_STATUS__|__EMPTY_STATUS__|"")
+                echo "[poll] Remote CH04.5 status not ready yet (retry ${retry}/10)"
+                sleep 2
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done
+
+          echo "Remote CH04.5 exit status: ${status}"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
+
+          if [[ "${status}" == "__NO_STATUS__" ]]; then
+            echo "Remote CH04.5 status file does not exist." >&2
+            exit 1
+          fi
+
+          if [[ "${status}" == "__EMPTY_STATUS__" || -z "${status}" ]]; then
+            echo "Remote CH04.5 status file is empty." >&2
+            exit 1
+          fi
+
+          if [[ ! "${status}" =~ ^[0-9]+$ ]]; then
+            echo "Remote CH04.5 status is not numeric: ${status}" >&2
+            exit 1
+          fi
+
+          [ "${status}" = "0" ] || exit "${status}"
 
       - name: Fetch validation report
         if: always()
@@ -243,23 +417,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ./identity-foundation-reports
-          remote_tmp_dir="/tmp/platforminit-identity-foundation/${SHORTSHA}"
+          mkdir -p ./identity-reports
+          remote_tmp_dir="/tmp/platforminit-identity/${SHORTSHA}"
 
-          for file in "ch04-5-bootstrap-${SHORTSHA}.log" "ch04-5-validate-${SHORTSHA}.log"; do
-            if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/${file}'"; then
-              scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/${file}" "./identity-foundation-reports/${file}"
-            else
-              echo "No report found: ${file}"
-            fi
-          done
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch04-5-validate-${SHORTSHA}.log'"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch04-5-validate-${SHORTSHA}.log" "./identity-reports/ch04-5-validate-${SHORTSHA}.log"
+          else
+            echo "No validation report found; deploy failed before validation step"
+          fi
+
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch04-5-run-${SHORTSHA}.log'"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch04-5-run-${SHORTSHA}.log" "./identity-reports/ch04-5-run-${SHORTSHA}.log"
+          fi
 
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ch04-5-identity-foundation-validate-${{ steps.artifact.outputs.short_sha }}
-          path: ./identity-foundation-reports/
+          name: ch04-5-identity-validate-${{ steps.artifact.outputs.short_sha }}
+          path: ./identity-reports/
           if-no-files-found: warn
           retention-days: 14
 
