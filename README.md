@@ -12,6 +12,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH02 / 02.x | host baseline, drift checks, OS security and file integrity |
 | CH03 | single-node k3s cluster installation |
 | CH04 | platform services: ingress, TLS and Argo CD |
+| CH04.5 | identity foundation: scoped Authentik groups and bootstrap memberships |
 | CH05 | observability: Grafana, VictoriaMetrics, Loki and Alloy |
 | CH06 | identity: Authentik SSO foundation |
 | CH06.1 | Grafana SSO integration with Authentik |
@@ -33,9 +34,11 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 10 | `02.5.2 - Run AIDE Check` | host-baseline artifact where requested |
 | 11 | `03 - Install Kubernetes Cluster` | `cluster-release-*` |
 | 12 | `04 - Enable Platform (Ingress, TLS, ArgoCD)` | `platform-services-release-*` |
-| 13 | `05 - Deploy Observability Stack` | `observability-release-*` |
-| 14 | `06 - Deploy Identity Stack` | `identity-release-*` |
-| 15 | `06.1 - Enable Grafana SSO` | `identity-release-*` |
+| 13 | `06 - Deploy Identity Stack` | `identity-release-*` |
+| 14 | `04.5 - Bootstrap Identity Foundation` | `identity-release-*` |
+| 15 | `05 - Deploy Observability Stack` | `observability-release-*` |
+| 16 | `06.1 - Enable Grafana SSO` | `identity-release-*` |
+| 17 | `06.2 - Enable Argo CD SSO` | `identity-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -100,7 +103,9 @@ CH06 deploys Authentik:
 https://auth.<PLATFORM_BASE_DOMAIN>
 ```
 
-CH06.1 enables Grafana Generic OAuth against Authentik while keeping local Grafana admin login as the break-glass path.
+Run `04.5 - Bootstrap Identity Foundation` after Authentik is deployed. It reconciles the scoped Authentik groups and puts the bootstrap admin into `PlatformInit Admins`, `ArgoCD Admins`, `Grafana Admins` and `Authentik Admins`.
+
+CH06.1 enables Grafana Generic OAuth against Authentik while keeping local Grafana admin login as the break-glass path. CH06.2 enables Argo CD Dex/OIDC against Authentik after the group model exists.
 
 After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun. After CH05 `baseline` mode, rerun `06.1 - Enable Grafana SSO` if the Grafana SSO button disappears.
 
@@ -132,6 +137,7 @@ After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun
 | Release model | `docs/release-model.md` |
 | CH05 dashboard guide | `platform/observability/docs/ch05-beginner-dashboard-guide.md` |
 | CH05 k3s monitoring runbook | `platform/observability/docs/ch05-k3s-monitoring-runbook.md` |
+| CH04.5 identity foundation | `platform/identity/docs/ch04-5-identity-foundation.md` |
 | CH05/CH06 SSO interaction | `platform/observability/docs/ch05-ch06-sso-interaction.md` |
 
 ## Principles
