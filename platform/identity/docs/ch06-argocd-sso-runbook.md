@@ -69,6 +69,15 @@ g, PlatformInit Admins, role:admin
 
 The workflow input `argocd_admin_group` controls the group name. Keep this group small and use local `admin` only for break-glass recovery.
 
+CH06.2 also reconciles the matching Authentik group as an application-scoped group:
+
+- group name: `PlatformInit Admins` by default
+- `is_superuser`: `false`
+- parent group: empty
+- default direct member: `akadmin`
+
+The default direct member can be overridden with `AUTHENTIK_ARGOCD_ADMIN_USERNAME` if the bootstrap administrator username differs. This avoids the post-login state where Authentik SSO succeeds but Argo CD sync is denied because the user only receives `role:readonly`.
+
 ## Workflow
 
 Run:
@@ -87,6 +96,7 @@ Recommended inputs:
 | `host_name` | `platforminit-dev-01` |
 | `argocd_provider_slug` | `argocd` |
 | `argocd_admin_group` | `PlatformInit Admins` |
+| `authentik_argocd_admin_username` | `akadmin` |
 
 ## Validation
 

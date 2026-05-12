@@ -15,6 +15,7 @@ ARGOCD_OIDC_PROVIDER_SLUG="${ARGOCD_OIDC_PROVIDER_SLUG:-argocd}"
 ARGOCD_OIDC_CLIENT_ID="${ARGOCD_OIDC_CLIENT_ID:-}"
 ARGOCD_OIDC_CLIENT_SECRET="${ARGOCD_OIDC_CLIENT_SECRET:-}"
 ARGOCD_ADMIN_GROUP="${ARGOCD_ADMIN_GROUP:-PlatformInit Admins}"
+AUTHENTIK_ARGOCD_ADMIN_USERNAME="${AUTHENTIK_ARGOCD_ADMIN_USERNAME:-akadmin}"
 AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-https://auth.${BASE_DOMAIN}}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
@@ -141,7 +142,7 @@ resolve_authentik_api_token() {
 
 configure_authentik_argocd_provider() {
   log "Reconciling Authentik Argo CD provider/application via Authentik API"
-  export BASE_DOMAIN AUTHENTIK_BASE_URL ARGOCD_OIDC_PROVIDER_SLUG ARGOCD_OIDC_CLIENT_ID ARGOCD_OIDC_CLIENT_SECRET
+  export BASE_DOMAIN AUTHENTIK_BASE_URL ARGOCD_OIDC_PROVIDER_SLUG ARGOCD_OIDC_CLIENT_ID ARGOCD_OIDC_CLIENT_SECRET ARGOCD_ADMIN_GROUP AUTHENTIK_ARGOCD_ADMIN_USERNAME
 
   python3 - <<'PY'
 import json
@@ -157,6 +158,8 @@ token = os.environ["AUTHENTIK_BOOTSTRAP_TOKEN"]
 provider_slug = os.environ.get("ARGOCD_OIDC_PROVIDER_SLUG", "argocd")
 client_id = os.environ["ARGOCD_OIDC_CLIENT_ID"]
 client_secret = os.environ["ARGOCD_OIDC_CLIENT_SECRET"]
+admin_group_name = os.environ.get("ARGOCD_ADMIN_GROUP", "PlatformInit Admins")
+admin_username = os.environ.get("AUTHENTIK_ARGOCD_ADMIN_USERNAME", "akadmin")
 
 argocd_url = f"https://argocd.{base_domain}"
 redirect_uri = f"{argocd_url}/api/dex/callback"
@@ -250,6 +253,82 @@ return {
     print(f"Created Authentik scope mapping {mapping_name} pk={created['pk']}")
     return created["pk"]
 
+def ensure_authentik_group(name):
+    existing = first_by_field("/api/v3/core/groups/", "name", name)
+    desired_payload = {
+        "name": name,
+        "is_superuser": False,
+        "parent": None,
+        "attributes": {},
+    }
+
+    if existing:
+        # Keep the Argo CD RBAC group application-scoped. It must not inherit
+        # broad Authentik administrator privileges and must not become an
+        # Authentik superuser group. Argo CD only needs the group claim name.
+        request("PATCH", f"/api/v3/core/groups/{existing['pk']}/", desired_payload)
+        print(f"Reconciled Authentik group {name} pk={existing['pk']} as non-superuser application group")
+        return existing["pk"]
+
+    created = request("POST", "/api/v3/core/groups/", desired_payload)
+    print(f"Created Authentik group {name} pk={created['pk']}")
+    return created["pk"]
+
+
+def group_pk_list(raw_groups):
+    values = []
+    for item in raw_groups or []:
+        if isinstance(item, str):
+            values.append(item)
+        elif isinstance(item, dict):
+            value = item.get("pk") or item.get("id") or item.get("uuid")
+            if value:
+                values.append(value)
+    return values
+
+
+def find_user_by_username(username):
+    # Prefer an exact username lookup and fall back to Authentik's search
+    # endpoint because different Authentik versions expose slightly different
+    # filter behaviour for core users.
+    encoded = urllib.parse.quote(username)
+    for path in (
+        f"/api/v3/core/users/?username={encoded}",
+        f"/api/v3/core/users/?search={encoded}",
+    ):
+        for item in paginated_results(path):
+            if item.get("username") == username:
+                return item
+    return None
+
+
+def ensure_user_in_group(user, group_pk, group_name):
+    user_pk = user.get("pk")
+    username = user.get("username") or user.get("name") or user_pk
+    if not user_pk:
+        raise RuntimeError(f"Could not resolve Authentik user pk for {username}")
+
+    editable_user = request("GET", f"/api/v3/core/users/{user_pk}/")
+    groups = group_pk_list(editable_user.get("groups", []))
+    if group_pk in groups:
+        print(f"Authentik user {username} is already a member of {group_name}")
+        return
+
+    groups.append(group_pk)
+    request("PATCH", f"/api/v3/core/users/{user_pk}/", {"groups": groups})
+    print(f"Added Authentik user {username} to {group_name} for Argo CD RBAC")
+
+
+def ensure_argocd_admin_membership(group_pk, group_name, username):
+    user = find_user_by_username(username)
+    if not user:
+        raise RuntimeError(
+            f"Required Authentik Argo CD admin user not found: {username}. "
+            "Set AUTHENTIK_ARGOCD_ADMIN_USERNAME if the bootstrap admin username differs."
+        )
+
+    ensure_user_in_group(user, group_pk, group_name)
+
 request("GET", "/api/v3/core/users/me/")
 authorization_flow = flow_pk("default-provider-authorization-implicit-consent")
 invalidation_flow = flow_pk("default-provider-invalidation-flow")
@@ -257,6 +336,9 @@ property_mappings = default_scope_pks()
 argocd_groups_mapping_pk = ensure_argocd_groups_scope_mapping()
 if argocd_groups_mapping_pk not in property_mappings:
     property_mappings.append(argocd_groups_mapping_pk)
+
+argocd_admin_group_pk = ensure_authentik_group(admin_group_name)
+ensure_argocd_admin_membership(argocd_admin_group_pk, admin_group_name, admin_username)
 
 provider_payload = {
     "name": "Argo CD",
