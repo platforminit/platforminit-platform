@@ -403,24 +403,33 @@ render_and_apply_argocd_config() {
   previous_oidc="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.dex\.config}' 2>/dev/null || true)"
   previous_url="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.url}' 2>/dev/null || true)"
   previous_dex="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null || true)"
-  next_oidc="$(python3 - "${tmp_dir}/argocd-authentik-oidc-cm.yaml" <<'PYCODE'
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-text = path.read_text()
-marker = "  dex.config: |\n"
-if marker not in text:
-    raise SystemExit("template did not render dex.config")
-body = text.split(marker, 1)[1]
-lines = []
-for line in body.splitlines():
-    if line.startswith("    "):
-        lines.append(line[4:])
-    elif line.strip() == "":
-        lines.append("")
-    else:
-        break
-print("\n".join(lines).rstrip() + "\n")
+  # Render the Dex connector body directly from resolved runtime values.
+  # Do not parse the ConfigMap template back into a shell variable: artifact
+  # packaging or line-ending differences can make exact text-marker parsing
+  # brittle and previously caused false failures such as:
+  #   template did not render dex.config
+  next_oidc="$(AUTHENTIK_OIDC_ISSUER="${AUTHENTIK_OIDC_ISSUER}" ARGOCD_OIDC_CLIENT_ID="${ARGOCD_OIDC_CLIENT_ID}" python3 - <<'PYCODE'
+import os
+
+issuer = os.environ["AUTHENTIK_OIDC_ISSUER"]
+client_id = os.environ["ARGOCD_OIDC_CLIENT_ID"]
+
+print(f"""connectors:
+  - type: oidc
+    id: authentik
+    name: Authentik
+    config:
+      issuer: {issuer}
+      clientID: {client_id}
+      clientSecret: $dex.authentik.clientSecret
+      insecureEnableGroups: true
+      getUserInfo: true
+      scopes:
+        - openid
+        - profile
+        - email
+        - groups
+""".rstrip() + "\n")
 PYCODE
 )"
 
@@ -480,8 +489,8 @@ print_argocd_oidc_config_summary() {
   else
     echo "argocd-secret key server.secretkey: MISSING"
   fi
-  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
-    echo "argocd-secret key oidc.authentik.clientSecret: present"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.dex\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
+    echo "argocd-secret key dex.authentik.clientSecret: present"
   else
     echo "argocd-secret key dex.authentik.clientSecret: MISSING"
   fi

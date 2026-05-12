@@ -126,31 +126,4 @@ kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.dex\.config}'
 kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.oidc\.config}'
 ```
 
-CH06.2 validates the Authentik OIDC discovery document before writing `oidc.config` into `argocd-cm`. The rendered Argo CD issuer is taken from the discovery document instead of being guessed from the provider slug. This prevents repeated `argocd-server` CrashLoopBackOff rollouts caused by malformed or incompatible OIDC startup configuration.
-
-## Group scope requirement
-
-CH06.2 requests the `groups` OIDC scope explicitly and requires the Authentik groups scope mapping to be attached to the Argo CD OAuth provider. This is required for the `PlatformInit Admins -> role:admin` RBAC mapping to work reliably.
-
-After changing OIDC config, clear stale browser cookies for `argocd.<domain>` and retry the login flow if the browser shows `failed to verify the token`.
-
-## Token verification recovery note
-
-If the browser shows `failed to verify the token` after a successful CH06.2 rollout, clear cookies/session storage for both `argocd.<domain>` and `auth.<domain>` before retesting. The workflow creates and attaches a dedicated Authentik `groups` scope mapping for Argo CD, but stale callback/session state from previous failed OIDC attempts can keep the browser on an old invalid token flow.
-
-
-### Token verification failures
-
-If the browser shows `failed to verify the token` after the Authentik login callback, verify that `argocd/argocd-secret` contains a stable `server.secretkey`. Argo CD uses this key for callback state/session token verification. CH04 and CH06.2 now create it when missing before SSO is enabled.
-
-Manual check:
-
-```bash
-kubectl -n argocd get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' | wc -c
-```
-
-A zero-length result means the Argo CD session signing key is missing and OIDC callback verification can fail even when the OAuth provider and rollout are otherwise healthy.
-
-### Token verification hardening
-
-CH06.2 renders explicit `allowedAudiences` with the Argo CD OIDC client ID and enables `skipAudienceCheckWhenTokenHasNoAudience` for Authentik compatibility. This keeps Argo CD token verification deterministic even when the provider emits non-standard or temporarily audience-less ID tokens during rebuild/testing scenarios.
+`dex.config` should exist and direct `oidc.config` should be empty.
