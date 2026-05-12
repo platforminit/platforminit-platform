@@ -1,4 +1,4 @@
-name: 06 - Deploy Identity Stack
+name: 06 - Deploy Identity Stack (deprecated; use 04.5)
 
 on:
   workflow_dispatch:

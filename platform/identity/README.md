@@ -71,30 +71,6 @@ After the identity stack is healthy:
 5. Decide whether Traefik ForwardAuth should protect any future non-OIDC services.
 
 
-
-## CH04.5 Identity Foundation
-
-After `06 - Deploy Identity Stack` is healthy and before application-specific SSO bindings, run:
-
-```text
-04.5 - Bootstrap Identity Foundation
-```
-
-This workflow uses the `identity-release-*` artifact to reconcile the machine-readable group model in `groups/platforminit-groups.yaml` and bootstrap memberships in `users/bootstrap-technical-users.yaml`.
-
-The current foundation creates/scopes these groups:
-
-- `PlatformInit Admins`
-- `PlatformInit Operators`
-- `ArgoCD Admins`
-- `ArgoCD Viewers`
-- `Grafana Admins`
-- `Grafana Editors`
-- `Grafana Viewers`
-- `Authentik Admins`
-
-Technical users are documented in the model but are not created automatically yet.
-
 ## CH06.1 Grafana SSO
 
 After Authentik is reachable and the `akadmin` account works, use `06.1 - Enable Grafana SSO` to configure Grafana Generic OAuth from code. This keeps local Grafana login enabled as a break-glass path and applies SSO via Helm values rather than manual Grafana UI changes.
