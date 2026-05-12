@@ -19,26 +19,45 @@ kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc >/dev/null 2>&
 
 client_id_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc -o jsonpath='{.data.ARGOCD_OIDC_CLIENT_ID}' 2>/dev/null || true)"
 client_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc -o jsonpath='{.data.ARGOCD_OIDC_CLIENT_SECRET}' 2>/dev/null || true)"
-argocd_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null || true)"
+client_id_value="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-authentik-oidc -o jsonpath='{.data.ARGOCD_OIDC_CLIENT_ID}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+dex_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.dex\.authentik\.clientSecret}' 2>/dev/null || true)"
+server_secret_present="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null || true)"
 [[ -n "${client_id_present}" ]] && pass "ARGOCD_CLIENT_ID" "client ID is stored in Kubernetes secret" || fail "ARGOCD_CLIENT_ID" "missing client ID"
 [[ -n "${client_secret_present}" ]] && pass "ARGOCD_CLIENT_SECRET" "client secret is stored in Kubernetes secret" || fail "ARGOCD_CLIENT_SECRET" "missing client secret"
-[[ -n "${argocd_secret_present}" ]] && pass "ARGOCD_SECRET_REFERENCE" "argocd-secret contains oidc.authentik.clientSecret" || fail "ARGOCD_SECRET_REFERENCE" "missing argocd-secret OIDC clientSecret key"
+[[ -n "${dex_secret_present}" ]] && pass "ARGOCD_DEX_SECRET_REFERENCE" "argocd-secret contains dex.authentik.clientSecret" || fail "ARGOCD_DEX_SECRET_REFERENCE" "missing argocd-secret Dex clientSecret key"
+[[ -n "${server_secret_present}" ]] && pass "ARGOCD_SERVER_SECRETKEY" "argocd-secret contains stable server.secretkey" || fail "ARGOCD_SERVER_SECRETKEY" "missing argocd-secret server.secretkey"
+
+kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-dex-server --timeout=10s >/dev/null 2>&1 && \
+  pass "ARGOCD_DEX_ROLLOUT" "Argo CD Dex server rollout is healthy" || fail "ARGOCD_DEX_ROLLOUT" "Argo CD Dex server rollout is not healthy"
 
 kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=10s >/dev/null 2>&1 && \
   pass "ARGOCD_ROLLOUT" "Argo CD server rollout is healthy" || fail "ARGOCD_ROLLOUT" "Argo CD server rollout is not healthy"
 
-config_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null || true)"
+config_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.dex\.config}' 2>/dev/null || true)"
+direct_oidc_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null || true)"
 rbac_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm -o jsonpath='{.data.policy\.csv}' 2>/dev/null || true)"
 scopes_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm -o jsonpath='{.data.scopes}' 2>/dev/null || true)"
 
+[[ -z "${direct_oidc_text}" ]] && \
+  pass "ARGOCD_DIRECT_OIDC_DISABLED" "direct oidc.config is absent because CH06.2 uses Dex-backed SSO" || fail "ARGOCD_DIRECT_OIDC_DISABLED" "direct oidc.config is still present"
+
 echo "${config_text}" | grep -q 'name: Authentik' && \
-  pass "ARGOCD_OIDC_NAME" "Argo CD OIDC config is named Authentik" || fail "ARGOCD_OIDC_NAME" "Argo CD OIDC config missing Authentik name"
+  pass "ARGOCD_DEX_CONNECTOR_NAME" "Argo CD Dex connector is named Authentik" || fail "ARGOCD_DEX_CONNECTOR_NAME" "Dex connector missing Authentik name"
+
+echo "${config_text}" | grep -q 'type: oidc' && \
+  pass "ARGOCD_DEX_CONNECTOR_TYPE" "Argo CD Dex connector type is oidc" || fail "ARGOCD_DEX_CONNECTOR_TYPE" "Dex connector type is not oidc"
 
 echo "${config_text}" | grep -q "issuer: https://auth.${BASE_DOMAIN}/application/o/${EXPECTED_PROVIDER_SLUG}/" && \
-  pass "ARGOCD_ISSUER" "issuer points to Authentik provider" || fail "ARGOCD_ISSUER" "issuer mismatch"
+  pass "ARGOCD_ISSUER" "Dex connector issuer points to Authentik provider" || fail "ARGOCD_ISSUER" "Dex connector issuer mismatch"
 
-echo "${config_text}" | grep -q 'clientSecret: \$oidc.authentik.clientSecret' && \
-  pass "ARGOCD_CLIENT_SECRET_REF" "clientSecret uses argocd-secret reference" || fail "ARGOCD_CLIENT_SECRET_REF" "clientSecret reference mismatch"
+echo "${config_text}" | grep -q "clientID: ${client_id_value}" && \
+  pass "ARGOCD_CLIENT_ID_MATCH" "Dex connector clientID matches stored client ID" || fail "ARGOCD_CLIENT_ID_MATCH" "Dex connector clientID mismatch"
+
+echo "${config_text}" | grep -q 'clientSecret: \$dex.authentik.clientSecret' && \
+  pass "ARGOCD_CLIENT_SECRET_REF" "Dex connector clientSecret uses argocd-secret reference" || fail "ARGOCD_CLIENT_SECRET_REF" "Dex connector clientSecret reference mismatch"
+
+echo "${config_text}" | grep -q 'insecureEnableGroups: true' && \
+  pass "ARGOCD_DEX_GROUPS_ENABLED" "Dex connector enables groups claim handling" || fail "ARGOCD_DEX_GROUPS_ENABLED" "Dex connector missing insecureEnableGroups"
 
 echo "${config_text}" | grep -q -- '- groups' && \
   pass "ARGOCD_GROUP_SCOPE" "groups scope is requested" || fail "ARGOCD_GROUP_SCOPE" "groups scope missing"

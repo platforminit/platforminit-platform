@@ -5,12 +5,19 @@ metadata:
   namespace: argocd
 data:
   url: https://argocd.__BASE_DOMAIN__
-  oidc.config: |
-    name: Authentik
-    issuer: __AUTHENTIK_OIDC_ISSUER__
-    clientID: __ARGOCD_OIDC_CLIENT_ID__
-    clientSecret: $oidc.authentik.clientSecret
-    requestedScopes: ["openid", "profile", "email"]
-    requestedIDTokenClaims:
-      groups:
-        essential: false
+  dex.config: |
+    connectors:
+      - type: oidc
+        id: authentik
+        name: Authentik
+        config:
+          issuer: __AUTHENTIK_OIDC_ISSUER__
+          clientID: __ARGOCD_OIDC_CLIENT_ID__
+          clientSecret: $dex.authentik.clientSecret
+          insecureEnableGroups: true
+          getUserInfo: true
+          scopes:
+            - openid
+            - profile
+            - email
+            - groups

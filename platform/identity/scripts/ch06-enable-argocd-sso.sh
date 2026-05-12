@@ -58,6 +58,27 @@ validate_prerequisites() {
   fi
 }
 
+ensure_argocd_server_secretkey() {
+  log "Ensuring argocd-secret contains stable server.secretkey before SSO login"
+
+  local existing_key=""
+  existing_key="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null || true)"
+  if [[ -n "${existing_key}" ]]; then
+    log "argocd-secret server.secretkey already present"
+    return 0
+  fi
+
+  local raw_key=""
+  local encoded_key=""
+  raw_key="$(openssl rand -base64 32)"
+  encoded_key="$(printf '%s' "${raw_key}" | base64 -w0)"
+
+  kubectl -n "${ARGOCD_NAMESPACE}" patch secret argocd-secret --type=merge \
+    -p "{\"data\":{\"server.secretkey\":\"${encoded_key}\"}}" >/dev/null
+
+  log "Created stable argocd-secret server.secretkey for OIDC state/session token verification"
+}
+
 resolve_or_create_argocd_oidc_secret() {
   local existing_id=""
   local existing_secret=""
@@ -98,7 +119,11 @@ if not secret:
     print("ARGOCD_OIDC_CLIENT_SECRET is empty; refusing to render argocd-secret patch", file=sys.stderr)
     sys.exit(1)
 
-print(json.dumps({"data": {"oidc.authentik.clientSecret": base64.b64encode(secret.encode()).decode()}}))
+encoded = base64.b64encode(secret.encode()).decode()
+print(json.dumps({"data": {
+    "dex.authentik.clientSecret": encoded,
+    "oidc.authentik.clientSecret": encoded,
+}}))
 PY
 )"
 
@@ -134,7 +159,7 @@ client_id = os.environ["ARGOCD_OIDC_CLIENT_ID"]
 client_secret = os.environ["ARGOCD_OIDC_CLIENT_SECRET"]
 
 argocd_url = f"https://argocd.{base_domain}"
-redirect_uri = f"{argocd_url}/auth/callback"
+redirect_uri = f"{argocd_url}/api/dex/callback"
 logout_uri = f"{argocd_url}/logout"
 headers = {
     "Authorization": f"Bearer {token}",
@@ -182,22 +207,56 @@ def flow_pk(slug):
 
 
 def default_scope_pks():
-    wanted = {
-        "authentik default OAuth Mapping: OpenID 'openid'",
-        "authentik default OAuth Mapping: OpenID 'email'",
-        "authentik default OAuth Mapping: OpenID 'profile'",
-        "authentik default OAuth Mapping: OpenID 'entitlements'",
-    }
+    wanted_scopes = {"openid", "email", "profile"}
     results = paginated_results("/api/v3/propertymappings/provider/scope/?page_size=200")
-    found = [item["pk"] for item in results if item.get("name") in wanted]
+    found = []
+    seen = set()
+    for item in results:
+        name = item.get("name", "")
+        scope_name = item.get("scope_name", "")
+        normalized = name.lower()
+        scope_matches = scope_name in wanted_scopes
+        name_matches = any(f"'{scope}'" in normalized for scope in wanted_scopes)
+        if (scope_matches or name_matches) and item.get("pk") not in seen:
+            found.append(item["pk"])
+            seen.add(item["pk"])
     if len(found) < 3:
-        print("WARN: fewer default scope mappings found than expected; continuing with available mappings", file=sys.stderr)
+        print("WARN: fewer default openid/email/profile scope mappings found than expected; continuing with available mappings", file=sys.stderr)
     return found
+
+
+def ensure_argocd_groups_scope_mapping():
+    mapping_name = "PlatformInit Argo CD Groups"
+    expression = '''
+# Emit Authentik group names into the OIDC ID token for Argo CD RBAC.
+# Argo CD maps these values through argocd-rbac-cm policy.csv.
+return {
+    "groups": [group.name for group in request.user.ak_groups.all()],
+}
+'''.strip()
+    payload = {
+        "name": mapping_name,
+        "scope_name": "groups",
+        "description": "PlatformInit Argo CD RBAC groups claim",
+        "expression": expression,
+    }
+    existing = first_by_field("/api/v3/propertymappings/provider/scope/", "name", mapping_name)
+    if existing:
+        request("PATCH", f"/api/v3/propertymappings/provider/scope/{existing['pk']}/", payload)
+        print(f"Updated Authentik scope mapping {mapping_name} pk={existing['pk']}")
+        return existing["pk"]
+
+    created = request("POST", "/api/v3/propertymappings/provider/scope/", payload)
+    print(f"Created Authentik scope mapping {mapping_name} pk={created['pk']}")
+    return created["pk"]
 
 request("GET", "/api/v3/core/users/me/")
 authorization_flow = flow_pk("default-provider-authorization-implicit-consent")
 invalidation_flow = flow_pk("default-provider-invalidation-flow")
 property_mappings = default_scope_pks()
+argocd_groups_mapping_pk = ensure_argocd_groups_scope_mapping()
+if argocd_groups_mapping_pk not in property_mappings:
+    property_mappings.append(argocd_groups_mapping_pk)
 
 provider_payload = {
     "name": "Argo CD",
@@ -209,6 +268,7 @@ provider_payload = {
     "client_secret": client_secret,
     "redirect_uris": [
         {"matching_mode": "strict", "url": redirect_uri, "redirect_uri_type": "authorization"},
+        {"matching_mode": "strict", "url": "https://localhost:8085/auth/callback", "redirect_uri_type": "authorization"},
         {"matching_mode": "strict", "url": logout_uri, "redirect_uri_type": "logout"},
     ],
     "logout_uri": logout_uri,
@@ -291,8 +351,8 @@ PY
   export AUTHENTIK_OIDC_ISSUER
   log "Using discovered Authentik OIDC issuer: ${AUTHENTIK_OIDC_ISSUER}"
 
-  kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' | grep -q . \
-    || die "argocd-secret is missing oidc.authentik.clientSecret after secret reconciliation"
+  kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.dex\.authentik\.clientSecret}' | grep -q . \
+    || die "argocd-secret is missing dex.authentik.clientSecret after secret reconciliation"
 }
 
 
@@ -340,17 +400,17 @@ render_and_apply_argocd_config() {
   local next_oidc=""
   local argocd_url="https://argocd.${BASE_DOMAIN}"
 
-  previous_oidc="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null || true)"
+  previous_oidc="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.dex\.config}' 2>/dev/null || true)"
   previous_url="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.url}' 2>/dev/null || true)"
-  previous_dex="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.dex\.config}' 2>/dev/null || true)"
+  previous_dex="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null || true)"
   next_oidc="$(python3 - "${tmp_dir}/argocd-authentik-oidc-cm.yaml" <<'PYCODE'
 import sys
 from pathlib import Path
 path = Path(sys.argv[1])
 text = path.read_text()
-marker = "  oidc.config: |\n"
+marker = "  dex.config: |\n"
 if marker not in text:
-    raise SystemExit("template did not render oidc.config")
+    raise SystemExit("template did not render dex.config")
 body = text.split(marker, 1)[1]
 lines = []
 for line in body.splitlines():
@@ -364,25 +424,25 @@ print("\n".join(lines).rstrip() + "\n")
 PYCODE
 )"
 
-  [[ -n "${next_oidc}" ]] || die "Rendered Argo CD OIDC config is empty"
+  [[ -n "${next_oidc}" ]] || die "Rendered Argo CD Dex Authentik config is empty"
 
   log "Applying Argo CD OIDC config with field-scoped merge patch"
   local cm_patch_payload=""
   cm_patch_payload="$(ARGOCD_URL="${argocd_url}" OIDC_CONFIG="${next_oidc}" python3 - <<'PYCODE'
 import json
 import os
-print(json.dumps({"data": {"url": os.environ["ARGOCD_URL"], "oidc.config": os.environ["OIDC_CONFIG"]}}))
+print(json.dumps({"data": {"url": os.environ["ARGOCD_URL"], "dex.config": os.environ["OIDC_CONFIG"]}}))
 PYCODE
 )"
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=merge -p "${cm_patch_payload}" >/dev/null
 
-  # Argo CD direct OIDC mode must not compete with a Dex connector config in
-  # the same argocd-cm. The stock install runs the Dex deployment, but direct
-  # Authentik SSO uses oidc.config and should not leave dex.config active.
+  # CH06.2 uses Argo CD's bundled Dex as the broker for Authentik. Ensure
+  # any previous direct oidc.config is removed so the two SSO modes do not
+  # compete in the same argocd-cm.
   if [[ -n "${previous_dex}" ]]; then
-    log "Removing existing dex.config because CH06.2 uses direct Argo CD OIDC"
+    log "Removing existing oidc.config because CH06.2 uses Dex-backed Authentik SSO"
     kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
-      -p='[{"op":"remove","path":"/data/dex.config"}]' >/dev/null 2>&1 || true
+      -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
   fi
 
   local rbac_apply_output=""
@@ -405,15 +465,25 @@ print_argocd_oidc_config_summary() {
   log "Current Argo CD OIDC runtime config summary"
   echo "--- argocd-cm data keys ---"
   kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{range $k,$v := .data}{"- "}{$k}{"\n"}{end}' 2>/dev/null || true
-  echo "--- oidc.config redacted ---"
-  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null \
+  echo "--- dex.config redacted ---"
+  kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.dex\.config}' 2>/dev/null \
     | sed -E 's/(clientSecret:[[:space:]]*).*/\1<redacted>/' || true
-  echo
-  echo "--- argocd-secret OIDC secret key presence ---"
-  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
-    echo "argocd-secret key oidc.authentik.clientSecret: present"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-cm -o jsonpath='{.data.oidc\.config}' 2>/dev/null | grep -q .; then
+    echo "WARN: direct oidc.config is still present"
   else
-    echo "argocd-secret key oidc.authentik.clientSecret: MISSING"
+    echo "direct oidc.config: absent"
+  fi
+  echo
+  echo "--- argocd-secret key presence ---"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' 2>/dev/null | grep -q .; then
+    echo "argocd-secret key server.secretkey: present"
+  else
+    echo "argocd-secret key server.secretkey: MISSING"
+  fi
+  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.dex\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
+    echo "argocd-secret key dex.authentik.clientSecret: present"
+  else
+    echo "argocd-secret key dex.authentik.clientSecret: MISSING"
   fi
 }
 
@@ -422,9 +492,12 @@ restore_previous_argocd_config() {
   # backups contain resourceVersion/uid/last-applied metadata and can conflict
   # with a ConfigMap modified by a later reconciliation attempt. Recovery must
   # be conflict-free and field-scoped. The only argocd-cm field introduced by
-  # CH06.2 that can crash argocd-server startup is oidc.config, so remove that
-  # key explicitly instead of trying to replace the full ConfigMap object.
+  # CH06.2-managed SSO fields that can affect argocd-server startup are dex.config
+  # and leftover direct oidc.config, so remove those keys explicitly instead
+  # of trying to replace the full ConfigMap object.
   log "Restoring Argo CD config with conflict-free field cleanup"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
+    -p='[{"op":"remove","path":"/data/dex.config"}]' >/dev/null 2>&1 || true
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
     -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
 
@@ -434,7 +507,8 @@ restore_previous_argocd_config() {
 }
 
 remove_argocd_oidc_config_for_recovery() {
-  log "Removing Argo CD OIDC config for emergency control-plane recovery"
+  log "Removing Argo CD SSO config for emergency control-plane recovery"
+  kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json -p='[{"op":"remove","path":"/data/dex.config"}]' >/dev/null 2>&1 || true
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
 }
 
@@ -575,7 +649,7 @@ repair_argocd_server_rollout() {
 
 restart_argocd_server() {
   if [[ "${ARGOCD_CONFIG_CHANGED}" != "1" ]]; then
-    log "Argo CD OIDC/RBAC config unchanged; skipping unnecessary rollout restart"
+    log "Argo CD Dex/RBAC config unchanged; skipping unnecessary rollout restart"
     if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null 2>&1; then
       return 0
     fi
@@ -585,14 +659,18 @@ restart_argocd_server() {
     return 0
   fi
 
-  log "Restarting Argo CD server to load changed OIDC config"
+  log "Restarting Argo CD Dex server and API server to load changed Authentik connector config"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get deploy/argocd-dex-server >/dev/null 2>&1; then
+    kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-dex-server >/dev/null
+    kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-dex-server --timeout=180s
+  fi
   kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deploy/argocd-server >/dev/null
 
   if kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=180s; then
     return 0
   fi
 
-  log "Argo CD server rollout failed after changed SSO config; restoring/removing SSO config to protect the control plane"
+  log "Argo CD server rollout failed after changed Dex SSO config; restoring/removing SSO config to protect the control plane"
   collect_argocd_server_crash_logs || true
   restore_previous_argocd_config || true
   remove_argocd_oidc_config_for_recovery || true
@@ -603,13 +681,14 @@ restart_argocd_server() {
   delete_unhealthy_argocd_server_pods || true
   kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=90s || true
   wait_for_existing_stable_argocd_server || true
-  die "Argo CD server failed to start with the reconciled SSO config; SSO config was removed/restored and restart annotation was cleared for recovery"
+  die "Argo CD server failed to start with the reconciled Dex SSO config; SSO config was removed/restored and restart annotation was cleared for recovery"
 }
 
 main() {
   ensure_runtime_deps
   ensure_cluster_ready
   validate_prerequisites
+  ensure_argocd_server_secretkey
   resolve_or_create_argocd_oidc_secret
   resolve_authentik_api_token
   configure_authentik_argocd_provider
@@ -617,7 +696,7 @@ main() {
   validate_authentik_oidc_discovery_from_cluster
   render_and_apply_argocd_config
   restart_argocd_server
-  log "Argo CD SSO enabled via Authentik provider slug=${ARGOCD_OIDC_PROVIDER_SLUG} url=https://argocd.${BASE_DOMAIN}"
+  log "Argo CD Dex-backed SSO enabled via Authentik provider slug=${ARGOCD_OIDC_PROVIDER_SLUG} url=https://argocd.${BASE_DOMAIN}"
 }
 
 main "$@"
