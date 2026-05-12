@@ -16,6 +16,7 @@ ARGOCD_OIDC_CLIENT_ID="${ARGOCD_OIDC_CLIENT_ID:-}"
 ARGOCD_OIDC_CLIENT_SECRET="${ARGOCD_OIDC_CLIENT_SECRET:-}"
 ARGOCD_ADMIN_GROUP="${ARGOCD_ADMIN_GROUP:-PlatformInit Admins}"
 AUTHENTIK_ARGOCD_ADMIN_USERNAME="${AUTHENTIK_ARGOCD_ADMIN_USERNAME:-akadmin}"
+AUTHENTIK_ARGOCD_SIGNING_KEY_NAME="${AUTHENTIK_ARGOCD_SIGNING_KEY_NAME:-}"
 AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-https://auth.${BASE_DOMAIN}}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
@@ -142,7 +143,7 @@ resolve_authentik_api_token() {
 
 configure_authentik_argocd_provider() {
   log "Reconciling Authentik Argo CD provider/application via Authentik API"
-  export BASE_DOMAIN AUTHENTIK_BASE_URL ARGOCD_OIDC_PROVIDER_SLUG ARGOCD_OIDC_CLIENT_ID ARGOCD_OIDC_CLIENT_SECRET ARGOCD_ADMIN_GROUP AUTHENTIK_ARGOCD_ADMIN_USERNAME
+  export BASE_DOMAIN AUTHENTIK_BASE_URL ARGOCD_OIDC_PROVIDER_SLUG ARGOCD_OIDC_CLIENT_ID ARGOCD_OIDC_CLIENT_SECRET ARGOCD_ADMIN_GROUP AUTHENTIK_ARGOCD_ADMIN_USERNAME AUTHENTIK_ARGOCD_SIGNING_KEY_NAME
 
   python3 - <<'PY'
 import json
@@ -160,6 +161,7 @@ client_id = os.environ["ARGOCD_OIDC_CLIENT_ID"]
 client_secret = os.environ["ARGOCD_OIDC_CLIENT_SECRET"]
 admin_group_name = os.environ.get("ARGOCD_ADMIN_GROUP", "PlatformInit Admins")
 admin_username = os.environ.get("AUTHENTIK_ARGOCD_ADMIN_USERNAME", "akadmin")
+preferred_signing_key_name = os.environ.get("AUTHENTIK_ARGOCD_SIGNING_KEY_NAME", "").strip()
 
 argocd_url = f"https://argocd.{base_domain}"
 redirect_uri = f"{argocd_url}/api/dex/callback"
@@ -329,6 +331,63 @@ def ensure_argocd_admin_membership(group_pk, group_name, username):
 
     ensure_user_in_group(user, group_pk, group_name)
 
+
+def resolve_oauth_signing_key():
+    """Resolve an Authentik certificate/key pair for asymmetric OIDC signing.
+
+    Without an explicit signing key, Authentik OAuth2 providers can fall back to
+    symmetric HS* token signing. Argo CD/Dex is more reliable with a normal OIDC
+    JWKS-backed asymmetric provider, so CH06.2 treats signing_key as mandatory.
+    """
+    keys = paginated_results("/api/v3/crypto/certificatekeypairs/?page_size=200")
+    if not keys:
+        raise RuntimeError(
+            "No Authentik certificate/key pairs found. Create or generate one before enabling Argo CD SSO."
+        )
+
+    def key_name(item):
+        return str(item.get("name") or item.get("managed") or item.get("pk") or "")
+
+    def key_type(item):
+        return str(item.get("key_type") or item.get("type") or item.get("algorithm") or "").lower()
+
+    def has_private_key(item):
+        # Different Authentik versions expose this slightly differently. Only
+        # reject explicit false values; otherwise keep the key as a candidate.
+        value = item.get("has_key", item.get("has_private_key", None))
+        return value is not False
+
+    if preferred_signing_key_name:
+        for item in keys:
+            if key_name(item) == preferred_signing_key_name:
+                if not has_private_key(item):
+                    raise RuntimeError(f"Preferred signing key has no private key: {preferred_signing_key_name}")
+                print(f"Using configured Authentik signing key {key_name(item)} pk={item['pk']}")
+                return item["pk"]
+        raise RuntimeError(f"Configured Authentik signing key was not found: {preferred_signing_key_name}")
+
+    # Prefer RSA because this yields the expected RS256-style OIDC/JWKS path for
+    # consumers such as Argo CD/Dex.
+    for item in keys:
+        if has_private_key(item) and key_type(item) == "rsa":
+            print(f"Using Authentik RSA signing key {key_name(item)} pk={item['pk']}")
+            return item["pk"]
+
+    # Common default name in Authentik installs. Keep this fallback even if the
+    # API response does not expose key_type.
+    for item in keys:
+        name = key_name(item).lower()
+        if has_private_key(item) and "authentik" in name and "self" in name and "sign" in name:
+            print(f"Using Authentik self-signed signing key {key_name(item)} pk={item['pk']}")
+            return item["pk"]
+
+    for item in keys:
+        if has_private_key(item):
+            print(f"Using first available Authentik signing key {key_name(item)} pk={item['pk']}")
+            return item["pk"]
+
+    raise RuntimeError("No usable Authentik signing key with a private key was found")
+
 request("GET", "/api/v3/core/users/me/")
 authorization_flow = flow_pk("default-provider-authorization-implicit-consent")
 invalidation_flow = flow_pk("default-provider-invalidation-flow")
@@ -339,6 +398,7 @@ if argocd_groups_mapping_pk not in property_mappings:
 
 argocd_admin_group_pk = ensure_authentik_group(admin_group_name)
 ensure_argocd_admin_membership(argocd_admin_group_pk, admin_group_name, admin_username)
+argocd_signing_key_pk = resolve_oauth_signing_key()
 
 provider_payload = {
     "name": "Argo CD",
@@ -358,6 +418,7 @@ provider_payload = {
     "sub_mode": "hashed_user_id",
     "issuer_mode": "per_provider",
     "include_claims_in_id_token": True,
+    "signing_key": argocd_signing_key_pk,
 }
 if property_mappings:
     provider_payload["property_mappings"] = property_mappings
@@ -414,6 +475,7 @@ issuer = doc.get("issuer", "")
 authorization_endpoint = doc.get("authorization_endpoint", "")
 token_endpoint = doc.get("token_endpoint", "")
 jwks_uri = doc.get("jwks_uri", "")
+algorithms = doc.get("id_token_signing_alg_values_supported", []) or []
 
 missing = [name for name, value in {
     "issuer": issuer,
@@ -424,6 +486,16 @@ missing = [name for name, value in {
 if missing:
     print(f"OIDC discovery document is missing required keys: {', '.join(missing)}", file=sys.stderr)
     sys.exit(1)
+
+if algorithms:
+    symmetric_only = all(str(alg).upper().startswith("HS") for alg in algorithms)
+    if symmetric_only:
+        print(
+            "OIDC discovery advertises only symmetric HS* signing algorithms; "
+            "CH06.2 requires an asymmetric Authentik signing_key for Argo CD/Dex",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 print(issuer)
 PY
