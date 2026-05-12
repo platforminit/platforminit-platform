@@ -1,5 +1,11 @@
 nameOverride: observability-vmstack
 
+# PlatformInit ships its own beginner-friendly dashboards. The upstream
+# VictoriaMetrics Kubernetes dashboards remain useful for deep troubleshooting,
+# but are intentionally disabled by default to avoid k3s-specific noise.
+defaultDashboardsEnabled: false
+experimentalDashboardsEnabled: false
+
 grafana:
   enabled: true
   adminPassword: changeme
@@ -13,6 +19,14 @@ grafana:
       enabled: true
       label: grafana_datasource
       searchNamespace: observability
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: observability
+      folder: /tmp/dashboards
+      provider:
+        allowUiUpdates: true
+        foldersFromFilesStructure: true
   resources:
     requests:
       cpu: 100m

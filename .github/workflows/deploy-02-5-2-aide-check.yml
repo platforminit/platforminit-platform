@@ -3,6 +3,18 @@ name: 02.5.2 - Run AIDE Check
 on:
   workflow_dispatch:
     inputs:
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: development
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-dev-01
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
       server_id_override:
         description: Optional server ID override
         required: false
@@ -16,20 +28,28 @@ permissions:
   contents: read
   actions: read
 
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+
 jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
+    secrets: inherit
     with:
+      project: ${{ inputs.project || 'development' }}
+      host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+      role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
-      target_user: devops
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
       mode: aide-check
-    secrets: inherit
 
   run:
     needs: grant
     runs-on: ubuntu-latest
+    environment: ${{ inputs.project || 'development' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,8 +57,10 @@ jobs:
         id: server
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
+          project: ${{ inputs.project || 'development' }}
+          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
 

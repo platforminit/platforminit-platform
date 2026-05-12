@@ -3,16 +3,24 @@ kind: Application
 metadata:
   name: ch05-observability
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: ch05-observability
+    app.kubernetes.io/part-of: platforminit
+    platforminit.io/chapter: ch05
+    platforminit.io/gitops-mode: inventory
+  annotations:
+    platforminit.io/description: "Registers CH05 observability manifests in Argo CD without taking over Helm-owned releases."
 spec:
   project: default
   source:
-    repoURL: https://github.com/PlatformInit/platforminit-platform.git
-    targetRevision: feat/ch05-observability-foundation
-    path: platform/observability
+    repoURL: https://github.com/platforminit/platforminit-platform.git
+    targetRevision: dev
+    path: platform/observability/manifests
+    directory:
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: observability
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

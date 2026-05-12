@@ -21,7 +21,48 @@ audit(){ printf '{"ts":"%s","event":"%s","status":"%s","detail":"%s"}
 create_user(){ local u="$1"; id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash "$u"; }
 install_key(){ local u="$1"; local h; h="$(getent passwd "$u" | cut -d: -f6)"; install -d -m 700 -o "$u" -g "$u" "$h/.ssh"; printf '%s
 ' "$AUTOMATION_SSH_PUBLIC_KEY" > "$h/.ssh/authorized_keys"; chmod 600 "$h/.ssh/authorized_keys"; chown -R "$u:$u" "$h/.ssh"; }
+load_host_context(){
+  if [[ -f /etc/platforminit/host-context.env ]]; then
+    # shellcheck disable=SC1091
+    source /etc/platforminit/host-context.env
+  fi
+  PLATFORMINIT_VOLUME_LAYOUT="${PLATFORMINIT_VOLUME_LAYOUT:-single}"
+  PLATFORMINIT_SRV_PATH="${PLATFORMINIT_SRV_PATH:-/srv}"
+  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
+  PLATFORMINIT_DB_PATH="${PLATFORMINIT_DB_PATH:-/srv/db}"
+  PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+}
+resolve_audit_dir_from_context(){
+  case "${PLATFORMINIT_VOLUME_LAYOUT:-single}" in
+    none) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/var/lib/platforminit/audit}" ;;
+    single) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/srv/platforminit/audit}" ;;
+    split) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-${PLATFORMINIT_DATA_PATH:-/srv/data}/platforminit/audit}" ;;
+    *) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/var/lib/platforminit/audit}" ;;
+  esac
+}
+mount_volume_by_id(){
+  local role="$1" volume_id="$2" mount_path="$3" device="/dev/disk/by-id/scsi-0HC_Volume_${volume_id}" uuid
+  if mountpoint -q "$mount_path"; then log "${mount_path} already mounted"; return 0; fi
+  if [[ ! -e "$device" ]]; then log "Volume device missing for ${role}: ${device}"; audit "volume_mount_probe" "warn" "role=${role} device_missing=${device}"; return 0; fi
+  if ! blkid "$device" >/dev/null 2>&1; then mkfs.ext4 -F "$device"; fi
+  uuid="$(blkid -s UUID -o value "$device")"
+  mkdir -p "$mount_path"
+  grep -qE "^[^#].+[[:space:]]+${mount_path//\//\/}[[:space:]]+" /etc/fstab || echo "UUID=${uuid} ${mount_path} ext4 defaults,nofail 0 2" >> /etc/fstab
+  mount "$mount_path"
+  audit "volume_mount_ready" "ok" "role=${role} device=${device} mount=${mount_path}"
+}
 ensure_srv_mount(){
+  load_host_context
+  resolve_audit_dir_from_context
+  if [[ -s /etc/platforminit/volume-layout.tsv ]]; then
+    while IFS=$'\t' read -r role volume_id _name mount_path; do
+      [[ -n "${role:-}" && -n "${volume_id:-}" && -n "${mount_path:-}" ]] || continue
+      mount_volume_by_id "$role" "$volume_id" "$mount_path"
+    done < /etc/platforminit/volume-layout.tsv
+    init_audit_dirs
+    return 0
+  fi
+
   if mountpoint -q /srv; then log "/srv already mounted"; return 0; fi
   local root_source root_parent candidate uuid
   root_source="$(findmnt -n -o SOURCE / || true)"
@@ -60,5 +101,5 @@ write_audit_marker(){ cat > "$BOOTSTRAP_AUDIT_DIR/bootstrap-host-access.json" <<
 }
 EOFJSON
 audit "host_bootstrap_completed" "ok" "users=devops,itadmin"; }
-main(){ init_audit_dirs; ensure_srv_mount; init_audit_dirs; create_user devops; create_user itadmin; install_key devops; install_key itadmin; usermod -aG sudo devops; usermod -aG sudo itadmin; install_helpers; install_broker_policy; remove_standing_sudo; harden_ssh; write_audit_marker; }
+main(){ load_host_context; resolve_audit_dir_from_context; init_audit_dirs; ensure_srv_mount; init_audit_dirs; create_user devops; create_user itadmin; install_key devops; install_key itadmin; usermod -aG sudo devops; usermod -aG sudo itadmin; install_helpers; install_broker_policy; remove_standing_sudo; harden_ssh; write_audit_marker; }
 main "$@"

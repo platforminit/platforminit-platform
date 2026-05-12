@@ -3,6 +3,18 @@ name: A1 - Access Elevation
 on:
   workflow_dispatch:
     inputs:
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: development
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-dev-01
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
       server_id_override:
         description: Optional Hetzner server ID override
         required: false
@@ -13,7 +25,7 @@ on:
         default: ''
       target_user:
         description: User to elevate temporarily
-        required: true
+        required: false
         default: devops
       duration_minutes:
         description: Time-bound elevation window in minutes
@@ -35,10 +47,23 @@ on:
           - cluster
           - platform
           - observability
+          - identity
           - interactive-elevation
           - automation-admin-shell
   workflow_call:
     inputs:
+      project:
+        required: false
+        type: string
+        default: development
+      host_name:
+        required: false
+        type: string
+        default: platforminit-dev-01
+      role:
+        required: false
+        type: string
+        default: primary
       server_id_override:
         required: false
         type: string
@@ -63,10 +88,15 @@ permissions:
   contents: read
   actions: read
 
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+
 jobs:
   grant:
     runs-on: ubuntu-latest
-    environment: privileged-ops
+    environment: ${{ inputs.project || 'development' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -74,8 +104,10 @@ jobs:
         id: target
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
+          project: ${{ inputs.project || 'development' }}
+          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
 
@@ -102,11 +134,22 @@ jobs:
         env:
           HOST: ${{ steps.target.outputs.public_ip }}
           BROKER_USER: itadmin
-          TARGET_USER: ${{ inputs.target_user }}
+          INPUT_TARGET_USER: ${{ inputs.target_user }}
           DURATION_MINUTES: ${{ inputs.duration_minutes }}
           SCOPE: ${{ inputs.mode }}
           RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$BROKER_USER@$HOST"             "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"
+          TARGET_USER="${INPUT_TARGET_USER:-devops}"
+          [ -n "$TARGET_USER" ] || { echo "Missing target user" >&2; exit 1; }
+
+          echo "Granting temporary sudo: user=${TARGET_USER} scope=${SCOPE} duration=${DURATION_MINUTES}m host=${HOST}"
+          ssh -i ~/.ssh/id_ed25519 "$BROKER_USER@$HOST" \
+            "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"
+
+          if [[ "$SCOPE" == "interactive-elevation" ]]; then
+            echo "Validating interactive sudo as ${TARGET_USER}"
+            ssh -i ~/.ssh/id_ed25519 "$TARGET_USER@$HOST" \
+              "sudo -n true && sudo -n -l | sed -n '1,20p'"
+          fi

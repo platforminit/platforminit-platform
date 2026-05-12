@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,10 +35,19 @@ jobs:
           - component_name: observability
             source_dir: platform/observability
             artifact_prefix: platforminit-observability
+          - component_name: identity
+            source_dir: platform/identity
+            artifact_prefix: platforminit-identity
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate host naming contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/platforminit_ops/check_host_name_contract.py .
 
       - name: Package ${{ matrix.component_name }}
         id: pkg

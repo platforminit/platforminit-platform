@@ -11,6 +11,18 @@ on:
         description: Observability artifact ID
         required: true
         type: string
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: development
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-dev-01
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
       server_id_override:
         description: Optional server ID override
         required: false
@@ -20,32 +32,48 @@ on:
         required: false
         default: ''
       deploy_mode:
-        description: Baseline or reconcile mode
+        description: baseline or reconcile deployment mode
         required: true
         default: baseline
         type: choice
         options:
           - baseline
           - reconcile
+      issuer_mode:
+        description: staging or prod issuer selection
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - prod
 
 permissions:
   contents: read
   actions: read
 
+env:
+  HCLOUD_TOKEN_DEVELOPMENT: ${{ secrets.HCLOUD_TOKEN_DEVELOPMENT }}
+  HCLOUD_TOKEN_N8N: ${{ secrets.HCLOUD_TOKEN_N8N }}
+  HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
+
 jobs:
   grant:
     uses: ./.github/workflows/a1-access-elevation.yml
+    secrets: inherit
     with:
+      project: ${{ inputs.project || 'development' }}
+      host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+      role: ${{ inputs.role || 'primary' }}
       server_id_override: ${{ inputs.server_id_override }}
-      target_user: devops
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '15'
       mode: observability
-    secrets: inherit
 
   deploy:
     needs: grant
     runs-on: ubuntu-latest
+    environment: ${{ inputs.project || 'development' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,8 +81,10 @@ jobs:
         id: server
         uses: ./.github/actions/resolve-target-host
         with:
-          infra_api_token: ${{ secrets.INFRA_API_TOKEN }}
           infra_server_id: ${{ secrets.INFRA_SERVER_ID }}
+          project: ${{ inputs.project || 'development' }}
+          host_name: ${{ inputs.host_name || 'platforminit-dev-01' }}
+          role: ${{ inputs.role || 'primary' }}
           server_id_override: ${{ inputs.server_id_override }}
           host_ipv4_override: ${{ inputs.host_ipv4_override }}
 
@@ -107,31 +137,45 @@ jobs:
           set -euo pipefail
 
           usage() {
-            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE PLATFORM_BASE_DOMAIN GRAFANA_ADMIN_PASSWORD OWNER_USER" >&2
+            echo "Usage: $0 <launch|run> SHORT_SHA DEPLOY_MODE ISSUER_MODE PLATFORM_BASE_DOMAIN GRAFANA_ADMIN_PASSWORD OWNER_USER" >&2
             exit 2
           }
 
-          [[ $# -ge 6 ]] || usage
+          [[ $# -ge 7 ]] || usage
 
           ACTION="$1"
           SHORT_SHA="$2"
           DEPLOY_MODE="$3"
-          PLATFORM_BASE_DOMAIN="$4"
-          GRAFANA_ADMIN_PASSWORD="$5"
-          OWNER_USER="$6"
+          ISSUER_MODE="$4"
+          PLATFORM_BASE_DOMAIN="$5"
+          GRAFANA_ADMIN_PASSWORD="$6"
+          OWNER_USER="$7"
 
           [[ "${EUID}" -eq 0 ]] || { echo "ch05-remote.sh must run as root" >&2; exit 1; }
 
-          release_dir="/srv/platforminit/observability/${SHORT_SHA}"
-          tmp_dir="/tmp/platforminit-observability/${SHORT_SHA}"
+          if [[ -f /etc/platforminit/host-context.env ]]; then
+            # shellcheck disable=SC1091
+            source /etc/platforminit/host-context.env
+          fi
+          PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+
+          release_root="${PLATFORMINIT_OBSERVABILITY_PATH}/platforminit"
+          release_dir="${release_root}/${SHORT_SHA}"
+          tmp_root="/tmp/platforminit-observability"
+          tmp_dir="${tmp_root}/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
-          report_dir="/srv/platforminit/observability/reports"
+          report_dir="${release_root}/reports"
           run_log="${tmp_dir}/ch05-run-${SHORT_SHA}.log"
           run_pid="${tmp_dir}/ch05-run-${SHORT_SHA}.pid"
           run_status="${tmp_dir}/ch05-run-${SHORT_SHA}.status"
           run_done="${tmp_dir}/ch05-run-${SHORT_SHA}.done"
           validate_log="${tmp_dir}/ch05-validate-${SHORT_SHA}.log"
           report_file="${report_dir}/ch05-validate-${SHORT_SHA}.log"
+
+          cleanup_old_ch05_logs() {
+            find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+            find "$release_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -mtime +14 -exec rm -rf {} + 2>/dev/null || true
+          }
 
           ensure_owner_access() {
             mkdir -p "$tmp_dir"
@@ -146,11 +190,12 @@ jobs:
           }
 
           launch() {
-            mkdir -p "$tmp_dir"
+            mkdir -p "$tmp_dir" "$release_root"
+            cleanup_old_ch05_logs
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             ensure_owner_access
-            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
+            nohup "$0" run "$SHORT_SHA" "$DEPLOY_MODE" "$ISSUER_MODE" "$PLATFORM_BASE_DOMAIN" "$GRAFANA_ADMIN_PASSWORD" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
             echo $! > "$run_pid"
             ensure_owner_access
             echo "launched pid=$(cat "$run_pid")"
@@ -181,6 +226,7 @@ jobs:
             env \
               KUBECONFIG="$KUBECONFIG" \
               DEPLOY_MODE="$DEPLOY_MODE" \
+              ISSUER_MODE="$ISSUER_MODE" \
               BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \
               GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
               "$release_dir/scripts/ch05-orchestrator.sh"
@@ -205,6 +251,7 @@ jobs:
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
           DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          ISSUER_MODE: ${{ inputs.issuer_mode }}
           PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         shell: bash
@@ -218,7 +265,7 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh
-            sudo -n /tmp/platforminit-run/ch05-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_ADMIN_PASSWORD}' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch05-remote.sh launch '${SHORTSHA}' '${DEPLOY_MODE}' '${ISSUER_MODE}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_ADMIN_PASSWORD}' '${HOST_LOGIN_USER}'
           "
           echo "Remote observability deploy launched."
 

@@ -53,8 +53,48 @@ done < <(yq -r '.packages.common[] , .packages.security[]' "$POLICY")
 actual_root="$(sshd -T | awk '/^permitrootlogin /{print $2}')"
 [[ "$actual_root" == "no" ]] || { echo "DRIFT | SSH_ROOT_LOGIN | $actual_root"; drift=1; }
 
-# Validate that /srv is mounted. This ensures audit logs and state persist.
-mountpoint -q /srv || { echo "DRIFT | SRV_MOUNT | missing"; drift=1; }
+
+# Validate PlatformInit volume layout and required mount points.
+if [[ -f /etc/platforminit/host-context.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/platforminit/host-context.env
+fi
+PLATFORMINIT_VOLUME_LAYOUT="${PLATFORMINIT_VOLUME_LAYOUT:-single}"
+PLATFORMINIT_SRV_PATH="${PLATFORMINIT_SRV_PATH:-/srv}"
+PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
+PLATFORMINIT_DB_PATH="${PLATFORMINIT_DB_PATH:-/srv/db}"
+PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+
+check_mount_rw() {
+  local label="$1" path="$2"
+  if ! mountpoint -q "$path"; then
+    echo "DRIFT | ${label}_MOUNT | missing:${path}"
+    drift=1
+    return
+  fi
+  if ! test -w "$path"; then
+    echo "DRIFT | ${label}_WRITE | not-writable:${path}"
+    drift=1
+  fi
+}
+
+case "$PLATFORMINIT_VOLUME_LAYOUT" in
+  none)
+    test -d "$PLATFORMINIT_SRV_PATH" || { echo "DRIFT | SRV_PATH | missing:${PLATFORMINIT_SRV_PATH}"; drift=1; }
+    ;;
+  single)
+    check_mount_rw SRV "$PLATFORMINIT_SRV_PATH"
+    ;;
+  split)
+    check_mount_rw DATA "$PLATFORMINIT_DATA_PATH"
+    check_mount_rw DB "$PLATFORMINIT_DB_PATH"
+    check_mount_rw OBSERVABILITY "$PLATFORMINIT_OBSERVABILITY_PATH"
+    ;;
+  *)
+    echo "DRIFT | VOLUME_LAYOUT | unsupported:${PLATFORMINIT_VOLUME_LAYOUT}"
+    drift=1
+    ;;
+esac
 
 # Emit a PASS or DRIFT event and return an appropriate exit code for pipeline consumption.
 if (( drift == 0 )); then
