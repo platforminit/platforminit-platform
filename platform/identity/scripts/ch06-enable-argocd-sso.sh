@@ -480,8 +480,8 @@ print_argocd_oidc_config_summary() {
   else
     echo "argocd-secret key server.secretkey: MISSING"
   fi
-  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.dex\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
-    echo "argocd-secret key dex.authentik.clientSecret: present"
+  if kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-secret -o jsonpath='{.data.oidc\.authentik\.clientSecret}' 2>/dev/null | grep -q .; then
+    echo "argocd-secret key oidc.authentik.clientSecret: present"
   else
     echo "argocd-secret key dex.authentik.clientSecret: MISSING"
   fi
