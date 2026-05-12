@@ -12,9 +12,12 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH02 / 02.x | host baseline, drift checks, OS security and file integrity |
 | CH03 | single-node k3s cluster installation |
 | CH04 | platform services: ingress, TLS and Argo CD |
+| CH04.5 | proposed identity foundation: Authentik base runtime, groups and technical users |
 | CH05 | observability: Grafana, VictoriaMetrics, Loki and Alloy |
-| CH06 | identity: Authentik SSO foundation |
+| CH05.1 | proposed observability UX: operator health, alerts and log taxonomy |
+| CH06 | access integrations: application-specific SSO bindings |
 | CH06.1 | Grafana SSO integration with Authentik |
+| CH06.2 | Argo CD SSO integration with Authentik through Dex |
 
 ## User-facing workflow order
 
@@ -36,6 +39,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 13 | `05 - Deploy Observability Stack` | `observability-release-*` |
 | 14 | `06 - Deploy Identity Stack` | `identity-release-*` |
 | 15 | `06.1 - Enable Grafana SSO` | `identity-release-*` |
+| 16 | `06.2 - Enable Argo CD SSO` | `identity-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -130,6 +134,10 @@ After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun
 | Host discovery and volume layout | `docs/multi-project-host-discovery-and-volume-layout.md` |
 | Day-2 operations | `docs/day2-ops.md` |
 | Release model | `docs/release-model.md` |
+| Runtime roadmap | `docs/architecture/runtime-roadmap.md` |
+| Known-good CH04-CH06 runtime state | `docs/platform-state/ch04-ch06-known-good-runtime.md` |
+| CH04.5 identity foundation design | `platform/identity/docs/ch04-5-identity-foundation.md` |
+| CH05.1 observability UX redesign | `platform/observability/docs/ch05-1-observability-ux-redesign.md` |
 | CH05 dashboard guide | `platform/observability/docs/ch05-beginner-dashboard-guide.md` |
 | CH05 k3s monitoring runbook | `platform/observability/docs/ch05-k3s-monitoring-runbook.md` |
 | CH05/CH06 SSO interaction | `platform/observability/docs/ch05-ch06-sso-interaction.md` |

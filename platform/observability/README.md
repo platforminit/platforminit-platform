@@ -89,3 +89,15 @@ The registered Application tracks only the Kubernetes manifests under
 `observability-vmstack`, `loki`, and `alloy` remain workflow-owned until a
 separate GitOps migration intentionally moves those releases under Argo CD
 ownership.
+
+## Planned CH05.1 Observability UX redesign
+
+The runtime stack is healthy, but the next improvement is to make the dashboards operator-facing instead of raw telemetry-first.
+
+See `docs/ch05-1-observability-ux-redesign.md` for the proposed model:
+
+- Nagios-style OK/WARNING/CRITICAL/UNKNOWN views in Grafana.
+- CH01-CH06 platform health matrix.
+- Pod readiness, restart and failure reason panels.
+- CH/component/severity based Loki search UX.
+- External blackbox/status monitoring deferred until this UX is improved.

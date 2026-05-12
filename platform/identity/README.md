@@ -97,3 +97,14 @@ Credential ownership model:
 Default Authentik provider/application slug: `argocd`.
 Default admin group mapping: `PlatformInit Admins` → `role:admin`.
 
+
+## Planned CH04.5 Identity Foundation refactor
+
+The current CH06 identity deployment works as the runtime identity layer, but the next architecture step is to split base identity from target-specific SSO bindings.
+
+See `docs/ch04-5-identity-foundation.md` for the proposed model:
+
+- Authentik base runtime earlier as CH04.5.
+- Differentiated platform and application groups.
+- Bootstrap and technical users suitable for validation.
+- Argo CD and Grafana SSO kept as later CH06.x bindings.
