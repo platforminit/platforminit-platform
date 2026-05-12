@@ -239,6 +239,23 @@ wait_for_metric_pipeline() {
   sleep 30
 }
 
+register_argocd_apps() {
+  if [[ "${REGISTER_ARGOCD_APPS:-true}" != "true" ]]; then
+    log "Skipping Argo CD Application registration because REGISTER_ARGOCD_APPS=${REGISTER_ARGOCD_APPS:-}"
+    return 0
+  fi
+
+  if [[ -x "${REPO_ROOT}/scripts/ch05-register-argocd-apps.sh" ]]; then
+    env \
+      KUBECONFIG="${KUBECONFIG}" \
+      GITOPS_REPO_URL="${GITOPS_REPO_URL:-https://github.com/platforminit/platforminit-platform.git}" \
+      GITOPS_TARGET_REVISION="${GITOPS_TARGET_REVISION:-dev}" \
+      bash "${REPO_ROOT}/scripts/ch05-register-argocd-apps.sh"
+  else
+    log "No Argo CD Application registration script found; skipping"
+  fi
+}
+
 restart_if_needed() {
   kubectl -n "${NAMESPACE}" rollout restart deploy/observability-vmstack-grafana || true
   kubectl -n "${NAMESPACE}" rollout status deploy/observability-vmstack-grafana --timeout=300s || true
@@ -260,6 +277,7 @@ main() {
   deploy_alloy
   restart_if_needed
   apply_grafana_ingress
+  register_argocd_apps
   log "CH05 observability deploy completed with deploy_mode=${DEPLOY_MODE} issuer=${CLUSTER_ISSUER}"
 }
 

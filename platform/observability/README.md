@@ -76,3 +76,16 @@ The validation also checks that the PlatformInit beginner dashboards are present
 ## Grafana datasource policy
 
 VictoriaMetrics remains the single default Grafana datasource. Loki is provisioned as a non-default datasource to avoid Grafana startup failures caused by multiple defaults in the same organization.
+
+## Argo CD inventory registration
+
+CH05 deploys the observability stack with Helm from the GitHub Actions workflow.
+After deployment, `scripts/ch05-register-argocd-apps.sh` registers a
+non-destructive Argo CD `Application` named `ch05-observability` so the layer is
+visible in the Argo CD UI.
+
+The registered Application tracks only the Kubernetes manifests under
+`platform/observability/manifests`. Helm-owned releases such as
+`observability-vmstack`, `loki`, and `alloy` remain workflow-owned until a
+separate GitOps migration intentionally moves those releases under Argo CD
+ownership.

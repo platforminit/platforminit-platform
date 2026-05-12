@@ -13,8 +13,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/platforminit/platforminit-platform.git
-    targetRevision: dev
+    repoURL: __REPO_URL__
+    targetRevision: __TARGET_REVISION__
     path: platform/observability/manifests
     directory:
       recurse: true
