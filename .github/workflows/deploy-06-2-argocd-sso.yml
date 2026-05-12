@@ -41,6 +41,11 @@ on:
         required: true
         default: PlatformInit Admins
         type: string
+      authentik_argocd_admin_username:
+        description: Authentik username to add to the Argo CD admin group
+        required: true
+        default: akadmin
+        type: string
 
 permissions:
   contents: read
@@ -131,18 +136,19 @@ jobs:
           set -euo pipefail
 
           usage() {
-            echo "Usage: $0 <launch|run> SHORT_SHA BASE_DOMAIN ARGOCD_PROVIDER_SLUG ARGOCD_ADMIN_GROUP OWNER_USER" >&2
+            echo "Usage: $0 <launch|run> SHORT_SHA BASE_DOMAIN ARGOCD_PROVIDER_SLUG ARGOCD_ADMIN_GROUP AUTHENTIK_ARGOCD_ADMIN_USERNAME OWNER_USER" >&2
             exit 2
           }
 
-          [[ $# -ge 6 ]] || usage
+          [[ $# -ge 7 ]] || usage
 
           ACTION="$1"
           SHORT_SHA="$2"
           BASE_DOMAIN="$3"
           ARGOCD_PROVIDER_SLUG="$4"
           ARGOCD_ADMIN_GROUP="$5"
-          OWNER_USER="$6"
+          AUTHENTIK_ARGOCD_ADMIN_USERNAME="$6"
+          OWNER_USER="$7"
 
           [[ "${EUID}" -eq 0 ]] || { echo "ch06-remote.sh must run as root" >&2; exit 1; }
 
@@ -182,7 +188,7 @@ jobs:
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             ensure_owner_access
-            nohup "$0" run "$SHORT_SHA" "$BASE_DOMAIN" "$ARGOCD_PROVIDER_SLUG" "$ARGOCD_ADMIN_GROUP" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
+            nohup "$0" run "$SHORT_SHA" "$BASE_DOMAIN" "$ARGOCD_PROVIDER_SLUG" "$ARGOCD_ADMIN_GROUP" "$AUTHENTIK_ARGOCD_ADMIN_USERNAME" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
             echo $! > "$run_pid"
             ensure_owner_access
             echo "launched pid=$(cat "$run_pid")"
@@ -215,9 +221,10 @@ jobs:
               BASE_DOMAIN="$BASE_DOMAIN" \
               ARGOCD_OIDC_PROVIDER_SLUG="$ARGOCD_PROVIDER_SLUG" \
               ARGOCD_ADMIN_GROUP="$ARGOCD_ADMIN_GROUP" \
+              AUTHENTIK_ARGOCD_ADMIN_USERNAME="$AUTHENTIK_ARGOCD_ADMIN_USERNAME" \
               "$release_dir/scripts/ch06-enable-argocd-sso.sh"
 
-            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$BASE_DOMAIN" ARGOCD_OIDC_PROVIDER_SLUG="$ARGOCD_PROVIDER_SLUG" ARGOCD_ADMIN_GROUP="$ARGOCD_ADMIN_GROUP" \
+            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$BASE_DOMAIN" ARGOCD_OIDC_PROVIDER_SLUG="$ARGOCD_PROVIDER_SLUG" ARGOCD_ADMIN_GROUP="$ARGOCD_ADMIN_GROUP" AUTHENTIK_ARGOCD_ADMIN_USERNAME="$AUTHENTIK_ARGOCD_ADMIN_USERNAME" \
               "$release_dir/validate/ch06-validate-argocd-sso.sh" | tee "$validate_log"
             cp "$validate_log" "$report_file" || true
             ensure_owner_access
@@ -240,6 +247,7 @@ jobs:
           PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
           ARGOCD_OIDC_PROVIDER_SLUG: ${{ inputs.argocd_provider_slug }}
           ARGOCD_ADMIN_GROUP: ${{ inputs.argocd_admin_group }}
+          AUTHENTIK_ARGOCD_ADMIN_USERNAME: ${{ inputs.authentik_argocd_admin_username }}
         shell: bash
         run: |
           set -euo pipefail
@@ -250,7 +258,7 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch06-remote.sh
-            sudo -n /tmp/platforminit-run/ch06-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${ARGOCD_OIDC_PROVIDER_SLUG}' '${ARGOCD_ADMIN_GROUP}' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch06-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${ARGOCD_OIDC_PROVIDER_SLUG}' '${ARGOCD_ADMIN_GROUP}' '${AUTHENTIK_ARGOCD_ADMIN_USERNAME}' '${HOST_LOGIN_USER}'
           "
           echo "Remote Argo CD SSO enablement launched."
 
