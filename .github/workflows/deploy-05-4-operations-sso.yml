@@ -38,7 +38,7 @@ on:
       issuer_mode:
         description: staging or prod issuer selection
         required: true
-        default: staging
+        default: prod
         type: choice
         options:
           - staging
@@ -172,9 +172,9 @@ jobs:
           export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
           test -f "$KUBECONFIG" || { echo "Missing kubeconfig at $KUBECONFIG" >&2; exit 1; }
 
-          env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-staging}"             OPENOBSERVE_ROOT_USER_EMAIL="${OPENOBSERVE_ROOT_USER_EMAIL:-}"             OPENOBSERVE_ROOT_USER_PASSWORD="${OPENOBSERVE_ROOT_USER_PASSWORD:-}"             "$release_dir/scripts/$SCRIPT"
+          env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-prod}"             OPENOBSERVE_ROOT_USER_EMAIL="${OPENOBSERVE_ROOT_USER_EMAIL:-}"             OPENOBSERVE_ROOT_USER_PASSWORD="${OPENOBSERVE_ROOT_USER_PASSWORD:-}"             "$release_dir/scripts/$SCRIPT"
 
-          env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-staging}"             "$release_dir/validate/$VALIDATE" | tee "$validate_log"
+          env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-prod}"             "$release_dir/validate/$VALIDATE" | tee "$validate_log"
 
           cp "$validate_log" "$report_dir/${VALIDATE%.sh}-${SHORT_SHA}.log" || true
           chown -R "${OWNER_USER}:${OWNER_USER}" "$tmp_dir" 2>/dev/null || true
@@ -189,7 +189,7 @@ jobs:
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
           BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
-          ISSUER_MODE: ${{ inputs.issuer_mode || 'staging' }}
+          ISSUER_MODE: ${{ inputs.issuer_mode || 'prod' }}
           OPENOBSERVE_ROOT_USER_EMAIL: ${{ secrets.OPENOBSERVE_ROOT_USER_EMAIL }}
           OPENOBSERVE_ROOT_USER_PASSWORD: ${{ secrets.OPENOBSERVE_ROOT_USER_PASSWORD }}
 

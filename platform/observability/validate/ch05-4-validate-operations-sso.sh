@@ -19,6 +19,13 @@ case "$address" in
   *) die "Unexpected forwardAuth address: ${address}" ;;
 esac
 kubectl -n "$NAMESPACE" get ingress zabbix openobserve >/dev/null
+expected_issuer="letsencrypt-${ISSUER_MODE:-prod}"
+for cert in zabbix-tls openobserve-tls; do
+  if kubectl -n "$NAMESPACE" get certificate "$cert" >/dev/null 2>&1; then
+    issuer="$(kubectl -n "$NAMESPACE" get certificate "$cert" -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
+    [[ "$issuer" == "$expected_issuer" ]] || die "Unexpected issuer for $cert: $issuer expected $expected_issuer"
+  fi
+done
 zabbix_host="$(kubectl -n "$NAMESPACE" get ingress zabbix -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
 logs_host="$(kubectl -n "$NAMESPACE" get ingress openobserve -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
 [[ "$zabbix_host" == "zabbix.${BASE_DOMAIN}" ]] || die "Unexpected Zabbix host: ${zabbix_host}"
