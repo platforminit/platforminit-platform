@@ -14,8 +14,8 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04 | platform services: ingress, TLS and Argo CD |
 | CH04.5 | identity foundation: Authentik, identity namespace, groups, technical users and validation |
 | CH04.6 | Argo CD SSO integration with Authentik |
-| CH05 | operational observability: Grafana, VictoriaMetrics, Loki, Alloy, Alertmanager and Argo CD inventory |
-| CH05.x | planned observability split: dashboards, alerting, security/audit, external host onboarding and Grafana SSO |
+| CH05 | operations monitoring: Zabbix, Vector, OpenObserve and external host onboarding |
+| CH05.x | operations split: monitoring, logging, RCA search, external host onboarding and SSO |
 | CH06 | deprecated identity compatibility workflow; do not use for normal lifecycle execution |
 
 ## User-facing workflow order
@@ -40,7 +40,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 15 | `05 - Deploy Observability Stack` | `observability-release-*` |
 | 16 | `05.1 - Provision Dashboards` | `observability-release-*` |
 | 17 | `05.2 - Provision Alerting` | `observability-release-*` |
-| 18 | `05.5 - Enable Grafana SSO` | `identity-release-*` |
+| 18 | `05.4 - Enable Operations SSO` | `identity-release-*` |
 
 Target CH05 redesign order:
 
@@ -51,7 +51,7 @@ Target CH05 redesign order:
 | 17 | `05.2 - Provision Alerting` | OK/WARNING/CRITICAL/UNKNOWN alert model |
 | 18 | `05.3 - Provision Security & Audit Monitoring` | access elevation, sudo, SSH, UFW and AIDE/FIM visibility |
 | 19 | `05.4 - Onboard External Host` | n8n and future host telemetry onboarding |
-| 20 | `05.5 - Enable Grafana SSO` | Authentik Grafana SSO integration |
+| 20 | `05.4 - Enable Operations SSO` | Authentik Grafana SSO integration |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -64,7 +64,7 @@ Each deploy workflow accepts the producing build workflow run ID and the specifi
 | Development host | `platforminit-dev-01` |
 | Base domain | `sysadminhomelab.hu` |
 | Kubernetes | single-node k3s |
-| Public operational UI | Grafana |
+| Public operational UI | Zabbix + OpenObserve |
 | Public identity UI | Authentik |
 
 Deprecated development host aliases must not be used; the only valid development host contract is `platforminit-dev-01`.
@@ -136,9 +136,9 @@ Current SSO bindings:
 | Workflow | Binding | Notes |
 |---|---|---|
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | browser login validated during identity refactor |
-| `05.5 - Enable Grafana SSO` | Grafana → Authentik | run after CH05, CH05.1 and CH05.2 are healthy |
+| `05.4 - Enable Operations SSO` | Grafana → Authentik | run after CH05, CH05.1 and CH05.2 are healthy |
 
-After running CH05 in `baseline` mode, rerun `05.5 - Enable Grafana SSO` if the Grafana SSO button disappears.
+After running CH05 in `baseline` mode, rerun `05.4 - Enable Operations SSO` if the Grafana SSO button disappears.
 
 ## Privilege model
 
@@ -191,9 +191,34 @@ After running CH05 in `baseline` mode, rerun `05.5 - Enable Grafana SSO` if the 
 
 Identity has been promoted into the early platform lifecycle. Use `04.5 - Deploy Identity Foundation` for Authentik core deployment plus PlatformInit scoped identity group bootstrap. The old `06 - Deploy Identity Stack` workflow is deprecated and retained only for compatibility. Application SSO bindings remain separate as `04.6 - Enable Argo CD SSO` and the transitional `05.1 - Enable Grafana SSO`.
 
-CH05 is now being redesigned as an operational observability layer with dashboard, alerting, logging, security/audit and external-host onboarding contracts. The target CH05 split moves Grafana SSO to `05.5 - Enable Grafana SSO`.
+CH05 is now being redesigned as an operational observability layer with dashboard, alerting, logging, security/audit and external-host onboarding contracts. The target CH05 split moves Grafana SSO to `05.4 - Enable Operations SSO`.
 
 See:
 
 - `docs/identity-layer-refactor.md`
 - `docs/ch05-operational-observability-design.md`
+
+
+## CH05 redesign (current direction)
+
+PlatformInit is moving away from the previous Grafana/VictoriaMetrics/Loki/Alloy stack due to operator UX complexity, storage growth and poor root-cause clarity.
+
+New target architecture:
+
+```
+Zabbix -> what is broken
+Vector -> collect logs
+OpenObserve -> why it broke
+Authentik -> SSO for all operational UIs
+```
+
+Removed as default components:
+- Grafana
+- VictoriaMetrics
+- vmagent
+- vmalert
+- Alertmanager
+- Loki
+- Alloy
+
+These may return later as optional advanced modules, but they are no longer PlatformInit defaults.
