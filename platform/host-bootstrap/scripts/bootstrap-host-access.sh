@@ -16,8 +16,16 @@ init_audit_dirs(){
   fi
 }
 log(){ echo "[BOOTSTRAP][$(date -u +%FT%TZ)] $*"; }
-audit(){ printf '{"ts":"%s","event":"%s","status":"%s","detail":"%s"}
-' "$(date -u +%FT%TZ)" "$1" "${2:-ok}" "${3:-}" >> "$BOOTSTRAP_AUDIT_DIR/security.log"; }
+audit(){
+  local audit_file audit_parent
+  audit_file="$BOOTSTRAP_AUDIT_DIR/security.log"
+  audit_parent="$(dirname "$audit_file")"
+  mkdir -p "$audit_parent" 2>/dev/null || true
+  if ! printf '{"ts":"%s","event":"%s","status":"%s","detail":"%s"}
+' "$(date -u +%FT%TZ)" "$1" "${2:-ok}" "${3:-}" >> "$audit_file" 2>/dev/null; then
+    echo "[BOOTSTRAP][$(date -u +%FT%TZ)] WARN audit_write_failed file=${audit_file} event=$1 status=${2:-ok} detail=${3:-}" >&2
+  fi
+}
 create_user(){ local u="$1"; id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash "$u"; }
 install_key(){ local u="$1"; local h; h="$(getent passwd "$u" | cut -d: -f6)"; install -d -m 700 -o "$u" -g "$u" "$h/.ssh"; printf '%s
 ' "$AUTOMATION_SSH_PUBLIC_KEY" > "$h/.ssh/authorized_keys"; chmod 600 "$h/.ssh/authorized_keys"; chown -R "$u:$u" "$h/.ssh"; }
