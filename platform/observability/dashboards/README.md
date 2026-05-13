@@ -44,8 +44,3 @@ An operator can determine within 30 seconds:
 - which layer is degraded;
 - whether the degradation is warning, critical or unknown;
 - which dashboard/log view should be opened next.
-
-
-## Noise policy
-
-CH05.1 intentionally prunes raw upstream / community Grafana dashboards from the main dashboard list. They are useful for deep troubleshooting, but they must not be the operator landing experience. The active operator set is the numbered `PlatformInit / NN - ...` dashboard family.

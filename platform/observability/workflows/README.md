@@ -15,7 +15,7 @@ The current CH05 deploy is technically functional, but the operational observabi
 
 ## Transitional state
 
-The active lifecycle now uses `05.1 - Provision Dashboards` and `05.5 - Enable Grafana SSO`. The `05.2`, `05.3` and `05.4` workflows remain planned implementation steps.
+The repository may still contain a `05.1 - Enable Grafana SSO` workflow during the transition. The target lifecycle moves Grafana SSO to `05.5` because dashboards, alerting and security/audit visibility should exist before SSO polish.
 
 ## Validation philosophy
 
