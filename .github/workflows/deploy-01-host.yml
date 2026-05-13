@@ -431,6 +431,31 @@ jobs:
             code="$(curl -sS -o "${body}" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/servers/${sid}")"
             [[ "${code}" == "200" ]] || { cat "${body}" >&2; exit 1; }
             server_name="$(jq -r '.server.name // empty' "${body}")"
+            effective_region="$(jq -r '.server.datacenter.location.name // .server.location.name // empty' "${body}")"
+            [[ -n "${effective_region}" && "${effective_region}" != "null" ]] || { echo "Failed to resolve server location for rebuild target ${sid}" >&2; cat "${body}" >&2; exit 1; }
+
+            # Rebuild keeps existing volume attachments, but the workflow still must resolve
+            # the requested volume layout and emit volume_summary for the host-context step.
+            # Without this, /etc/platforminit/volume-layout.tsv is empty after rebuild and
+            # 01.1 Host Bootstrap can fall back to the legacy single /srv mount path.
+            case "$VOLUME_LAYOUT" in
+              none)
+                volume_ids_json="[]"
+                ;;
+              single)
+                ensure_volume "srv" "platforminit-${PROJECT}-${HOST_NAME}-srv" "$VOLUME_SIZE_GB" "/srv"
+                ;;
+              split)
+                ensure_volume "data" "platforminit-${PROJECT}-${HOST_NAME}-data" "$DATA_VOLUME_SIZE_GB" "/srv/data"
+                ensure_volume "db" "platforminit-${PROJECT}-${HOST_NAME}-db" "$DB_VOLUME_SIZE_GB" "/srv/db"
+                ensure_volume "observability" "platforminit-${PROJECT}-${HOST_NAME}-observability" "$OBS_VOLUME_SIZE_GB" "/srv/observability"
+                ;;
+              *) echo "Unsupported volume_layout=${VOLUME_LAYOUT}" >&2; exit 1 ;;
+            esac
+
+            if [[ "$(jq 'length' <<< "$volume_ids_json")" != "0" ]]; then
+              attach_volumes_to_server
+            fi
 
             payload="$(jq -n --arg image "${IMAGE}" --rawfile user_data .tmp/user-data.yaml --argjson ssh_key_id "${SSH_KEY_ID}" '{image:$image,user_data:$user_data,ssh_keys:[$ssh_key_id]}')"
             rebuild_body="$(mktemp)"
