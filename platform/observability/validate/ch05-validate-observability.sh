@@ -174,6 +174,12 @@ validate_metric_data() {
     fail "VM_QUERY_NODE" "node-exporter/system metrics are missing"
   fi
 
+  if vm_query_nonempty 'up{job=~".*node-exporter.*|platform-node-exporter"} == 1'; then
+    pass "NODE_EXPORTER_SCRAPE" "node-exporter scrape target is up"
+  else
+    fail "NODE_EXPORTER_SCRAPE" "node-exporter scrape target is not up; host dashboards and host alerts are not trustworthy"
+  fi
+
   if vm_query_nonempty 'kube_node_info or kube_pod_info'; then
     pass "VM_QUERY_KSM" "kube-state-metrics Kubernetes object metrics are present"
   else

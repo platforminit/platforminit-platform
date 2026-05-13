@@ -28,6 +28,22 @@ The current stack remains correct for the PlatformInit roadmap.
 
 The problem is not the component choice. The problem is the current UX: dashboards are too close to raw engineering dashboards and do not provide Nagios-style operational clarity.
 
+
+## Host telemetry decision
+
+Node Exporter remains a core CH05 component. The redesign removes raw/noisy upstream dashboards from the default operator experience, but it must not remove Node Exporter itself.
+
+The curated PlatformInit host dashboard and host alerts should be based on Node Exporter metrics. CH05.3 should later add Node Exporter textfile collector metrics for PlatformInit-specific state such as split storage layout, reboot-required status, failed systemd units, access elevation state and audit log presence.
+
+Decision:
+
+```text
+Keep Node Exporter.
+Hide raw upstream Node Exporter dashboards from the default operator folder.
+Build PlatformInit host dashboards and alerts on top of Node Exporter metrics.
+Extend host compliance via textfile collector in CH05.3.
+```
+
 ## Operational state model
 
 All high-level dashboards and alerts must use a common state language.
