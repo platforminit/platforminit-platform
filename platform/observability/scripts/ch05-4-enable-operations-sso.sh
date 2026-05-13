@@ -183,13 +183,14 @@ def ensure_user_in_group(username, group_pk, group_name):
         print(f"Added Authentik user {username} to {group_name}")
 
 
-def make_proxy_payload(name, external_host, authorization_flow):
+def make_proxy_payload(name, external_host, authorization_flow, invalidation_flow):
     # Keep this payload intentionally minimal. Authentik versions expose additional
     # proxy-provider knobs differently, but these fields are stable for a forward
     # auth single-application provider.
     return {
         "name": name,
         "authorization_flow": authorization_flow,
+        "invalidation_flow": invalidation_flow,
         "mode": "forward_single",
         "external_host": external_host,
         "internal_host": "",
@@ -200,8 +201,8 @@ def make_proxy_payload(name, external_host, authorization_flow):
     }
 
 
-def ensure_proxy_provider(app, authorization_flow):
-    payload = make_proxy_payload(app["name"], app["external_host"], authorization_flow)
+def ensure_proxy_provider(app, authorization_flow, invalidation_flow):
+    payload = make_proxy_payload(app["name"], app["external_host"], authorization_flow, invalidation_flow)
     existing = first_by_field("/api/v3/providers/proxy/", "name", app["name"])
     if existing:
         provider_pk = existing["pk"]
@@ -291,11 +292,12 @@ def ensure_embedded_outpost_provider_assignment(provider_pks):
 
 request("GET", "/api/v3/core/users/me/")
 authorization_flow = flow_pk("default-provider-authorization-implicit-consent")
+invalidation_flow = flow_pk("default-provider-invalidation-flow")
 ops_group_pk = ensure_group("PlatformInit Operations")
 ensure_user_in_group(admin_username, ops_group_pk, "PlatformInit Operations")
 provider_pks = []
 for app in apps:
-    provider_pk = ensure_proxy_provider(app, authorization_flow)
+    provider_pk = ensure_proxy_provider(app, authorization_flow, invalidation_flow)
     ensure_application(app, provider_pk)
     provider_pks.append(provider_pk)
 ensure_embedded_outpost_provider_assignment(provider_pks)

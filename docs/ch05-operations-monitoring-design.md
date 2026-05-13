@@ -51,7 +51,7 @@ The base deploy creates internal services only. `05.4` creates the public ingres
 http://authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
 ```
 
-The default PlatformInit identity deployment does not require a separate `ak-outpost-*` service. `05.4` reconciles Authentik proxy providers/applications for Zabbix and OpenObserve, then creates the Traefik middleware and public ingresses.
+The default PlatformInit identity deployment does not require a separate `ak-outpost-*` service. `05.4` reconciles Authentik proxy providers/applications for Zabbix and OpenObserve, then creates the Traefik middleware and public ingresses. The proxy provider payload must include both `authorization_flow` and `invalidation_flow` because current Authentik provider APIs require both fields for proxy providers.
 
 ## Storage rule
 
