@@ -154,6 +154,13 @@ ensure_srv_mount(){
     return 0
   fi
 
+  if [[ "${PLATFORMINIT_VOLUME_LAYOUT:-single}" == "split" ]]; then
+    echo "FATAL: volume_layout=split but /etc/platforminit/volume-layout.tsv is missing or empty" >&2
+    echo "01 - Create or Rebuild Host must resolve data/db/observability volume IDs and write the split volume layout before 01.1 Host Bootstrap runs." >&2
+    audit "volume_layout_missing" "fail" "layout=split path=/etc/platforminit/volume-layout.tsv"
+    exit 1
+  fi
+
   if mountpoint -q /srv; then log "/srv already mounted"; return 0; fi
   local root_source root_parent candidate uuid
   root_source="$(findmnt -n -o SOURCE / || true)"
