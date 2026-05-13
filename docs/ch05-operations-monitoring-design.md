@@ -42,6 +42,17 @@ Zabbix and OpenObserve must not be exposed publicly without Authentik.
 
 The base deploy creates internal services only. `05.4` creates the public ingresses and attaches the Authentik forward-auth middleware.
 
+
+## Authentik operations SSO contract
+
+`05.4 - Enable Operations SSO` uses the existing `authentik-server` service from CH04.5 as the embedded outpost endpoint:
+
+```text
+http://authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+```
+
+The default PlatformInit identity deployment does not require a separate `ak-outpost-*` service. `05.4` reconciles Authentik proxy providers/applications for Zabbix and OpenObserve, then creates the Traefik middleware and public ingresses.
+
 ## Storage rule
 
 k3s data must be stored under `/srv/data/k3s`. This prevents accidental growth under the wrong partition and makes PVC-backed storage easier to audit.

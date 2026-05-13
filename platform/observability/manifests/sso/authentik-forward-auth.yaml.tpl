@@ -5,7 +5,10 @@ metadata:
   namespace: operations
 spec:
   forwardAuth:
-    address: http://ak-outpost-authentik-embedded-outpost.identity.svc.cluster.local:9000/outpost.goauthentik.io/auth/traefik
+    # The PlatformInit Authentik Helm deployment exposes the embedded proxy outpost
+    # through the authentik-server service. Do not depend on a separate
+    # ak-outpost-* Kubernetes service unless CH04.5 explicitly deploys one later.
+    address: http://authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
     trustForwardHeader: true
     authResponseHeaders:
       - X-authentik-username
