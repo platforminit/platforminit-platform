@@ -170,3 +170,34 @@ none   -> /srv directory exists
 single -> /srv is a writable mountpoint
 split  -> /srv/data, /srv/db and /srv/observability are writable mountpoints
 ```
+
+## 2026-05-13 update: duplicate/orphan volume guard
+
+CH01 now treats the requested volume layout as a strict Hetzner contract before it creates, reuses, attaches, or writes host context for volumes.
+
+For a `split` host, the only valid PlatformInit volumes for the selected `project` + `host_name` are:
+
+```text
+platforminit-<project>-<host_name>-data          -> /srv/data
+platforminit-<project>-<host_name>-db            -> /srv/db
+platforminit-<project>-<host_name>-observability -> /srv/observability
+```
+
+For a `single` host, the only valid volume is:
+
+```text
+platforminit-<project>-<host_name>-srv -> /srv
+```
+
+The lifecycle workflow now fails fast if it detects any of the following conditions:
+
+- duplicate volumes with the same expected name;
+- a stale single-layout `srv` volume while `volume_layout=split` is requested;
+- an unexpected PlatformInit volume attached to the target server;
+- an expected volume attached to another server;
+- an expected volume in a different Hetzner location than the target server;
+- attached volume count different from the requested layout count.
+
+The guard is intentionally non-destructive. It never deletes or reformats stale/orphan volumes automatically. Operators must manually inspect and delete stale Hetzner volumes before rerunning CH01.
+
+This prevents the historical failure mode where stale single-layout volumes and newly created split volumes resulted in six attached volumes and an incorrect runtime mount layout.
