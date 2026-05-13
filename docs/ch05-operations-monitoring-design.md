@@ -79,3 +79,10 @@ This preserves the non-interactive, temporary and audit-friendly A1 model while 
 
 
 Operational note: validation must query Traefik middleware using the fully qualified Kubernetes resource `middleware.traefik.io`. Do not use the ambiguous short resource name `middleware`, because clusters that still expose legacy Traefik CRDs may resolve it to `middlewares.traefik.containo.us` and report false NotFound errors after applying the current `traefik.io/v1alpha1` object.
+
+
+## CH05.4 public redirect and TLS contract
+
+Operations SSO must use `https://auth.<PLATFORM_BASE_DOMAIN>` as the public Authentik/outpost host. Redirects to `0.0.0.0:9000`, `localhost`, or cluster-internal service names are considered failed validation.
+
+The browser-facing operations ingresses should use the production Let's Encrypt issuer for trusted certificates. Staging issuer mode is only for ACME/debug testing and will intentionally produce an untrusted certificate warning in browsers.

@@ -76,7 +76,7 @@ Public operations WebUIs:
 | `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik |
 | `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik |
 
-The base CH05 deploys create internal services first. Public ingresses are created only by `05.4 - Enable Operations SSO`.
+The base CH05 deploys create internal services first. Public ingresses are created only by `05.4 - Enable Operations SSO`. `05.4` must use the public Authentik host `https://auth.<PLATFORM_BASE_DOMAIN>` for redirects and should be run with the production issuer for browser-trusted WebUI certificates.
 
 Removed as default components:
 

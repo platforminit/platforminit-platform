@@ -10,7 +10,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 IDENTITY_NAMESPACE="${IDENTITY_NAMESPACE:-identity}"
 BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
-ISSUER_MODE="${ISSUER_MODE:-staging}"
+ISSUER_MODE="${ISSUER_MODE:-prod}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 AUTHENTIK_LOCAL_PORT="${AUTHENTIK_LOCAL_PORT:-19080}"
 AUTHENTIK_BASE_URL="${AUTHENTIK_BASE_URL:-http://127.0.0.1:${AUTHENTIK_LOCAL_PORT}}"
@@ -61,6 +61,7 @@ import urllib.parse
 import urllib.request
 
 base_domain = os.environ["BASE_DOMAIN"]
+authentik_public_host = f"https://auth.{base_domain}"
 base_url = os.environ["AUTHENTIK_BASE_URL"].rstrip("/")
 token = os.environ["AUTHENTIK_BOOTSTRAP_TOKEN"]
 admin_username = os.environ.get("AUTHENTIK_OPERATIONS_ADMIN_USERNAME", "akadmin")
@@ -283,11 +284,24 @@ def ensure_embedded_outpost_provider_assignment(provider_pks):
     for pk in provider_pks:
         if pk not in desired_refs:
             desired_refs.append(pk)
-    if desired_refs == existing_refs:
-        print(f"Authentik embedded outpost already includes operations proxy providers ({outpost.get('name')})")
+
+    existing_config = outpost.get("config") or {}
+    desired_config = dict(existing_config)
+    desired_config["authentik_host"] = authentik_public_host
+    desired_config["authentik_host_browser"] = authentik_public_host
+
+    patch = {}
+    if desired_refs != existing_refs:
+        patch["providers"] = desired_refs
+    if desired_config != existing_config:
+        patch["config"] = desired_config
+
+    if not patch:
+        print(f"Authentik embedded outpost already includes operations proxy providers and public host ({outpost.get('name')})")
         return
-    request("PATCH", f"/api/v3/outposts/instances/{outpost_pk}/", {"providers": desired_refs})
-    print(f"Updated Authentik embedded outpost provider assignment ({outpost.get('name')})")
+
+    request("PATCH", f"/api/v3/outposts/instances/{outpost_pk}/", patch)
+    print(f"Updated Authentik embedded outpost provider assignment/public host ({outpost.get('name')})")
 
 
 request("GET", "/api/v3/core/users/me/")
@@ -304,6 +318,19 @@ ensure_embedded_outpost_provider_assignment(provider_pks)
 PY
 }
 
+ensure_tls_issuer_state() {
+  local desired="letsencrypt-${ISSUER_MODE}"
+  for cert in zabbix-tls openobserve-tls; do
+    local current=""
+    current="$(kubectl -n "$NAMESPACE" get certificate "$cert" -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
+    if [[ -n "$current" && "$current" != "$desired" ]]; then
+      log "Deleting stale TLS material for $cert: current issuer=$current desired issuer=$desired"
+      kubectl -n "$NAMESPACE" delete certificate "$cert" --ignore-not-found=true >/dev/null 2>&1 || true
+      kubectl -n "$NAMESPACE" delete secret "$cert" --ignore-not-found=true >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 [[ ${EUID} -eq 0 ]] || die "Run as root (sudo)."
 ensure_cluster
 need curl
@@ -317,6 +344,7 @@ kubectl -n "$NAMESPACE" get svc openobserve >/dev/null 2>&1 || die "Missing Open
 resolve_authentik_api_token
 start_authentik_api_port_forward
 configure_authentik_operations_proxy
+ensure_tls_issuer_state
 
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"; [[ -n "${AUTHENTIK_PORT_FORWARD_PID:-}" ]] && kill "${AUTHENTIK_PORT_FORWARD_PID}" >/dev/null 2>&1 || true' EXIT

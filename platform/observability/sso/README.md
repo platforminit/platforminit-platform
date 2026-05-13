@@ -34,6 +34,20 @@ Do not require a separate `ak-outpost-*` Kubernetes service for the default Plat
 - attach the providers to the embedded proxy outpost when the outpost is visible through the API
 - create Traefik forward-auth middleware and public ingresses
 
+
+## Public host and TLS contract
+
+Operations SSO must not redirect users to `0.0.0.0:9000` or an internal Kubernetes URL. The embedded outpost configuration must use the public Authentik URL:
+
+```text
+authentik_host=https://auth.<PLATFORM_BASE_DOMAIN>
+authentik_host_browser=https://auth.<PLATFORM_BASE_DOMAIN>
+```
+
+The `05.4 - Enable Operations SSO` workflow reconciles this on the embedded outpost through the Authentik API. CH04.5 also sets `AUTHENTIK_HOST` and `AUTHENTIK_HOST_BROWSER` on the Authentik server/worker deployments for future rebuilds.
+
+For browser-facing operations WebUIs, run `05.4` with `issuer_mode=prod`. If a staging certificate was previously issued for `zabbix.<domain>` or `logs.<domain>`, `05.4` removes stale certificate material when switching issuer modes so cert-manager can request a trusted certificate.
+
 ## Dependency
 
 `04.5 - Deploy Identity Foundation` must be healthy before `05.4 - Enable Operations SSO` is executed.
