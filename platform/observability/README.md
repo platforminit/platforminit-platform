@@ -180,7 +180,7 @@ If CH05 is run in `baseline` mode after SSO was enabled, rerun the Grafana SSO w
 | `05.4 - Onboard External Host` | n8n and future host telemetry onboarding |
 | `05.5 - Enable Grafana SSO` | Authentik Grafana OAuth integration |
 
-`05.5 - Enable Grafana SSO` is the active Grafana SSO workflow. `05.2`, `05.3` and `05.4` are still planned.
+The current `05.1 - Enable Grafana SSO` workflow is transitional until the CH05 split is implemented.
 
 ## Validation contract
 
@@ -222,4 +222,4 @@ The registered Application tracks only the Kubernetes manifests under `platform/
 - `workflows/README.md`
 - `docs/ch05-beginner-dashboard-guide.md`
 - `docs/ch05-k3s-monitoring-runbook.md`
-- `docs/ch05-ch05-5-sso-interaction.md`
+- `docs/ch05-ch05-1-sso-interaction.md`

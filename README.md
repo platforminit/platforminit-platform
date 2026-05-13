@@ -38,10 +38,9 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 13 | `04.5 - Deploy Identity Foundation` | `identity-release-*` |
 | 14 | `04.6 - Enable Argo CD SSO` | `identity-release-*` |
 | 15 | `05 - Deploy Observability Stack` | `observability-release-*` |
-| 16 | `05.1 - Provision Dashboards` | `observability-release-*` |
-| 17 | `05.5 - Enable Grafana SSO` | `identity-release-*` |
+| 16 | `05.1 - Enable Grafana SSO` | `identity-release-*` |
 
-Current CH05 split:
+Target CH05 redesign order:
 
 | Target order | Workflow | Purpose |
 |---:|---|---|
@@ -122,7 +121,7 @@ See:
 
 ## Identity and SSO
 
-Identity has been promoted into the early platform lifecycle. Authentik is deployed by CH04.5, Argo CD SSO is enabled by CH04.6 and Grafana SSO runs as CH05.5 after CH05 dashboard provisioning.
+Identity has been promoted into the early platform lifecycle. Authentik is deployed by CH04.5, Argo CD SSO is enabled by CH04.6 and Grafana SSO currently remains in CH05.1 during the observability transition.
 
 Public identity UI:
 
@@ -135,9 +134,9 @@ Current SSO bindings:
 | Workflow | Binding | Notes |
 |---|---|---|
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | browser login validated during identity refactor |
-| `05.5 - Enable Grafana SSO` | Grafana → Authentik | runs after CH05.1 dashboard provisioning |
+| `05.1 - Enable Grafana SSO` | Grafana → Authentik | transitional numbering; target is `05.5` after CH05 split |
 
-After running CH05 in `baseline` mode, rerun `05.1 - Provision Dashboards` and `05.5 - Enable Grafana SSO` if Grafana is recreated or its SSO button disappears.
+After running CH05 in `baseline` mode, rerun the Grafana SSO workflow if the Grafana SSO button disappears.
 
 ## Privilege model
 
@@ -174,7 +173,7 @@ After running CH05 in `baseline` mode, rerun `05.1 - Provision Dashboards` and `
 | CH05 workflow restructuring | `platform/observability/workflows/README.md` |
 | CH05 dashboard guide | `platform/observability/docs/ch05-beginner-dashboard-guide.md` |
 | CH05 k3s monitoring runbook | `platform/observability/docs/ch05-k3s-monitoring-runbook.md` |
-| CH05/CH05.5 SSO interaction | `platform/observability/docs/ch05-ch05-5-sso-interaction.md` |
+| CH05/CH05.1 SSO interaction | `platform/observability/docs/ch05-ch05-1-sso-interaction.md` |
 
 ## Principles
 
@@ -188,9 +187,9 @@ After running CH05 in `baseline` mode, rerun `05.1 - Provision Dashboards` and `
 
 ## Current lifecycle note
 
-Identity has been promoted into the early platform lifecycle. Use `04.5 - Deploy Identity Foundation` for Authentik core deployment plus PlatformInit scoped identity group bootstrap. The old `06 - Deploy Identity Stack` workflow is deprecated and retained only for compatibility. Application SSO bindings remain separate as `04.6 - Enable Argo CD SSO` and `05.5 - Enable Grafana SSO`.
+Identity has been promoted into the early platform lifecycle. Use `04.5 - Deploy Identity Foundation` for Authentik core deployment plus PlatformInit scoped identity group bootstrap. The old `06 - Deploy Identity Stack` workflow is deprecated and retained only for compatibility. Application SSO bindings remain separate as `04.6 - Enable Argo CD SSO` and the transitional `05.1 - Enable Grafana SSO`.
 
-CH05 is now being redesigned as an operational observability layer with dashboard, alerting, logging, security/audit and external-host onboarding contracts. The CH05 split now provisions operational dashboards as `05.1` and keeps Grafana SSO as `05.5 - Enable Grafana SSO`.
+CH05 is now being redesigned as an operational observability layer with dashboard, alerting, logging, security/audit and external-host onboarding contracts. The target CH05 split moves Grafana SSO to `05.5 - Enable Grafana SSO`.
 
 See:
 

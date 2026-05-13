@@ -51,6 +51,14 @@ platforminit-<project>-<host_name>-db            -> /srv/db
 platforminit-<project>-<host_name>-observability -> /srv/observability
 ```
 
+Important runtime contract:
+
+- `split` must not leave a direct `/srv` persistent volume mount behind.
+- `/srv/data`, `/srv/db`, and `/srv/observability` must each be separate mounted filesystems.
+- `01 - Create or Rebuild Host` creates and attaches the volumes and writes `/etc/platforminit/volume-layout.tsv`.
+- `01.1 - Host Bootstrap` reconciles `/etc/fstab` and mounts the volumes.
+- CH01 validation fails if the host context says `split` but any split mount is missing, or if a stale direct `/srv` mount exists.
+
 ## Host context
 
 `01 - Create or Rebuild Host` writes:

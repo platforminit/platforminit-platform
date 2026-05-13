@@ -40,25 +40,116 @@ resolve_audit_dir_from_context(){
     *) BOOTSTRAP_AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/var/lib/platforminit/audit}" ;;
   esac
 }
+backup_fstab(){ cp -a /etc/fstab "/etc/fstab.platforminit.$(date -u +%Y%m%dT%H%M%SZ).bak"; }
+remove_fstab_mountpoint(){
+  local mount_path="$1" tmp
+  tmp="$(mktemp)"
+  awk -v mp="$mount_path" 'BEGIN{changed=0} /^[[:space:]]*#/ || NF < 2 {print; next} $2 == mp {changed=1; next} {print} END{exit 0}' /etc/fstab > "$tmp"
+  if ! cmp -s /etc/fstab "$tmp"; then backup_fstab; cat "$tmp" > /etc/fstab; fi
+  rm -f "$tmp"
+}
+remove_fstab_uuid_conflicts(){
+  local uuid="$1" mount_path="$2" tmp
+  tmp="$(mktemp)"
+  awk -v uuid="UUID=${uuid}" -v mp="$mount_path" '
+    /^[[:space:]]*#/ || NF < 2 {print; next}
+    $1 == uuid && $2 != mp {next}
+    $2 == mp && $1 != uuid {next}
+    {print}
+  ' /etc/fstab > "$tmp"
+  if ! cmp -s /etc/fstab "$tmp"; then backup_fstab; cat "$tmp" > /etc/fstab; fi
+  rm -f "$tmp"
+}
+ensure_no_stale_srv_mount_for_split(){
+  [[ "${PLATFORMINIT_VOLUME_LAYOUT:-single}" == "split" ]] || return 0
+  if grep -qE $'^[^\t]+\t[^\t]+\t[^\t]+\t/srv$' /etc/platforminit/volume-layout.tsv 2>/dev/null; then
+    return 0
+  fi
+  if mountpoint -q /srv; then
+    local src
+    src="$(findmnt -n -o SOURCE /srv || true)"
+    log "volume_layout=split detected but stale /srv mount exists from ${src}; unmounting before split mount reconciliation"
+    audit "stale_srv_mount_detected" "warn" "source=${src} action=unmount_for_split_layout"
+    if ! umount /srv; then
+      audit "stale_srv_mount_unmount_failed" "fail" "source=${src}"
+      echo "FATAL: volume_layout=split but stale /srv is mounted and busy: ${src}" >&2
+      echo "Stop workloads using /srv or rebuild from a clean host before applying split volume layout." >&2
+      exit 1
+    fi
+    remove_fstab_mountpoint /srv
+  fi
+}
 mount_volume_by_id(){
-  local role="$1" volume_id="$2" mount_path="$3" device="/dev/disk/by-id/scsi-0HC_Volume_${volume_id}" uuid
-  if mountpoint -q "$mount_path"; then log "${mount_path} already mounted"; return 0; fi
-  if [[ ! -e "$device" ]]; then log "Volume device missing for ${role}: ${device}"; audit "volume_mount_probe" "warn" "role=${role} device_missing=${device}"; return 0; fi
+  local role="$1" volume_id="$2" mount_path="$3" device="/dev/disk/by-id/scsi-0HC_Volume_${volume_id}" uuid current_source current_uuid
+  if [[ ! -e "$device" ]]; then
+    echo "FATAL: Volume device missing for ${role}: ${device}" >&2
+    audit "volume_mount_probe" "fail" "role=${role} device_missing=${device}"
+    exit 1
+  fi
   if ! blkid "$device" >/dev/null 2>&1; then mkfs.ext4 -F "$device"; fi
   uuid="$(blkid -s UUID -o value "$device")"
+  if mountpoint -q "$mount_path"; then
+    current_source="$(findmnt -n -o SOURCE "$mount_path" || true)"
+    current_uuid="$(findmnt -n -o UUID "$mount_path" || true)"
+    if [[ "$current_uuid" == "$uuid" ]]; then
+      log "${mount_path} already mounted with expected volume ${volume_id}"
+      remove_fstab_uuid_conflicts "$uuid" "$mount_path"
+      grep -qE "^UUID=${uuid}[[:space:]]+${mount_path//\//\/}[[:space:]]+" /etc/fstab || echo "UUID=${uuid} ${mount_path} ext4 defaults,nofail 0 2" >> /etc/fstab
+      return 0
+    fi
+    echo "FATAL: ${mount_path} is already mounted from ${current_source:-unknown}, expected HC volume ${volume_id} UUID=${uuid}" >&2
+    audit "volume_mount_conflict" "fail" "role=${role} mount=${mount_path} source=${current_source} expected_uuid=${uuid}"
+    exit 1
+  fi
   mkdir -p "$mount_path"
-  grep -qE "^[^#].+[[:space:]]+${mount_path//\//\/}[[:space:]]+" /etc/fstab || echo "UUID=${uuid} ${mount_path} ext4 defaults,nofail 0 2" >> /etc/fstab
+  remove_fstab_uuid_conflicts "$uuid" "$mount_path"
+  grep -qE "^UUID=${uuid}[[:space:]]+${mount_path//\//\/}[[:space:]]+" /etc/fstab || echo "UUID=${uuid} ${mount_path} ext4 defaults,nofail 0 2" >> /etc/fstab
   mount "$mount_path"
-  audit "volume_mount_ready" "ok" "role=${role} device=${device} mount=${mount_path}"
+  if ! mountpoint -q "$mount_path"; then
+    echo "FATAL: failed to mount ${role} volume ${volume_id} at ${mount_path}" >&2
+    audit "volume_mount_failed" "fail" "role=${role} volume_id=${volume_id} mount=${mount_path}"
+    exit 1
+  fi
+  audit "volume_mount_ready" "ok" "role=${role} device=${device} mount=${mount_path} uuid=${uuid}"
+}
+ensure_layout_mounts_ready(){
+  local expected=0 failures=0 role volume_id _name mount_path
+  ensure_no_stale_srv_mount_for_split
+  while IFS=$'\t' read -r role volume_id _name mount_path; do
+    [[ -n "${role:-}" && -n "${volume_id:-}" && -n "${mount_path:-}" ]] || continue
+    expected=$((expected+1))
+    mount_volume_by_id "$role" "$volume_id" "$mount_path" || failures=$((failures+1))
+  done < /etc/platforminit/volume-layout.tsv
+  if [[ "$expected" == "0" ]]; then
+    echo "FATAL: /etc/platforminit/volume-layout.tsv exists but contains no usable volume rows" >&2
+    audit "volume_layout_empty" "fail" "path=/etc/platforminit/volume-layout.tsv"
+    exit 1
+  fi
+  case "${PLATFORMINIT_VOLUME_LAYOUT:-single}" in
+    split)
+      for required in "${PLATFORMINIT_DATA_PATH}" "${PLATFORMINIT_DB_PATH}" "${PLATFORMINIT_OBSERVABILITY_PATH}"; do
+        if ! mountpoint -q "$required"; then
+          echo "FATAL: split volume layout requires mounted path: ${required}" >&2
+          audit "volume_layout_mount_missing" "fail" "path=${required}"
+          failures=$((failures+1))
+        fi
+      done
+      ;;
+    single)
+      if ! mountpoint -q "${PLATFORMINIT_SRV_PATH}"; then
+        echo "FATAL: single volume layout requires mounted path: ${PLATFORMINIT_SRV_PATH}" >&2
+        audit "volume_layout_mount_missing" "fail" "path=${PLATFORMINIT_SRV_PATH}"
+        failures=$((failures+1))
+      fi
+      ;;
+  esac
+  [[ "$failures" == "0" ]] || exit 1
 }
 ensure_srv_mount(){
   load_host_context
   resolve_audit_dir_from_context
   if [[ -s /etc/platforminit/volume-layout.tsv ]]; then
-    while IFS=$'\t' read -r role volume_id _name mount_path; do
-      [[ -n "${role:-}" && -n "${volume_id:-}" && -n "${mount_path:-}" ]] || continue
-      mount_volume_by_id "$role" "$volume_id" "$mount_path"
-    done < /etc/platforminit/volume-layout.tsv
+    ensure_layout_mounts_ready
     init_audit_dirs
     return 0
   fi

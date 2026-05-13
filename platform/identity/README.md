@@ -66,14 +66,14 @@ After the identity foundation is healthy:
 
 1. Run `04.6 - Enable Argo CD SSO` because Argo CD already exists after CH04.
 2. Run `05 - Deploy Observability Stack`.
-3. Run `05.5 - Enable Grafana SSO` after Grafana exists and `05.1 - Provision Dashboards` has refreshed the operational dashboard set.
+3. Run `05.1 - Enable Grafana SSO` after Grafana exists. This numbering is transitional; the CH05 redesign target is `05.5 - Enable Grafana SSO`.
 4. Keep local Argo CD and Grafana admin accounts as break-glass paths.
 5. Decide later whether Traefik ForwardAuth should protect any future non-OIDC services.
 
 
-## CH05.5 Grafana SSO
+## CH05.1 Grafana SSO
 
-After Authentik is reachable and the `akadmin` account works, use `05.5 - Enable Grafana SSO` to configure Grafana Generic OAuth from code. This keeps local Grafana login enabled as a break-glass path and applies SSO via Helm values rather than manual Grafana UI changes.
+After Authentik is reachable and the `akadmin` account works, use `05.1 - Enable Grafana SSO` to configure Grafana Generic OAuth from code. This keeps local Grafana login enabled as a break-glass path and applies SSO via Helm values rather than manual Grafana UI changes.
 
 Credential ownership model:
 
