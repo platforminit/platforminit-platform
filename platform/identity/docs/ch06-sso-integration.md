@@ -46,18 +46,18 @@ platform/identity/integrations/argocd/argocd-authentik-oidc-cm.yaml.tpl
 2. Enable Argo CD SSO with CH04.6 because Argo CD already exists after CH04.
 3. Confirm local Argo CD admin still works.
 4. Deploy CH05 Observability.
-5. Enable Grafana SSO with the current CH05.1 workflow. Target numbering after the CH05 split is CH05.5.
+5. Enable Grafana SSO with the current CH05.5 workflow. Target numbering after the CH05 split is CH05.5.
 6. Confirm local Grafana admin still works.
 7. Only then consider Traefik ForwardAuth for services without native OIDC.
 
 
-## CH05.1 - Grafana SSO implementation policy
+## CH05.5 - Grafana SSO implementation policy
 
-Grafana SSO is configured by the `05.1 - Enable Grafana SSO` workflow. The workflow does not click through the Grafana UI. It applies a Helm values overlay to the existing `observability-vmstack` release and stores the OAuth client ID/secret in the Kubernetes secret `observability/grafana-authentik-oauth`.
+Grafana SSO is configured by the `05.5 - Enable Grafana SSO` workflow. The workflow does not click through the Grafana UI. It applies a Helm values overlay to the existing `observability-vmstack` release and stores the OAuth client ID/secret in the Kubernetes secret `observability/grafana-authentik-oauth`.
 
 The Authentik provider/application is reconciled through the Authentik API using the bootstrap token stored in `identity/authentik-bootstrap`. `GRAFANA_OIDC_CLIENT_ID` and `GRAFANA_OIDC_CLIENT_SECRET` are intentionally not GitHub secrets in the normal path.
 
-Because Grafana is deployed by CH05, CH05 remains the owner of the base `observability-vmstack` release. CH05.1 owns the SSO overlay. If CH05 is rerun in `baseline` mode after SSO is enabled, rerun CH05.1 afterwards. If CH05 is rerun in `reconcile` mode, the workflow preserves post-CH05 overlays with Helm `--reuse-values`.
+Because Grafana is deployed by CH05, CH05 remains the owner of the base `observability-vmstack` release. CH05.5 owns the SSO overlay. If CH05 is rerun in `baseline` mode after SSO is enabled, rerun CH05.5 afterwards. If CH05 is rerun in `reconcile` mode, the workflow preserves post-CH05 overlays with Helm `--reuse-values`.
 
 ## CH04.6 - Argo CD SSO implementation policy
 
