@@ -1,42 +1,22 @@
-# CH06 Identity Runbook
+# Deprecated CH06 Identity Runbook
 
-## Objective
+CH06 is retained only for compatibility. Normal lifecycle execution uses CH04.5 for Authentik and separate SSO workflows for applications.
 
-Deploy an Authentik-backed identity layer and prepare the platform for SSO-based access to Grafana and Argo CD.
+## Current active identity lifecycle
 
-## Deployment workflow
-
-Use workflow:
-
-```text
-06 - Deploy Identity Stack
-```
-
-Recommended inputs for first test:
-
-| Input | Value |
+| Workflow | Purpose |
 |---|---|
-| `project` | `development` |
-| `host_name` | `platforminit-dev-01` |
-| `deploy_mode` | `baseline` |
-| `issuer_mode` | `staging` |
-| `authentik_chart_version` | `2026.2.2` |
+| `04.5 - Deploy Identity Foundation` | Authentik core and identity model |
+| `04.6 - Enable Argo CD SSO` | Argo CD login through Authentik |
+| `05.4 - Enable Operations SSO` | Zabbix/OpenObserve WebUIs through Authentik forward-auth |
 
-## Required secrets
+## Required secrets for Authentik
 
 ```text
 AUTHENTIK_SECRET_KEY
 AUTHENTIK_POSTGRESQL_PASSWORD
 AUTHENTIK_BOOTSTRAP_PASSWORD
 ```
-
-Generate safe values locally:
-
-```bash
-openssl rand -base64 60 | tr -d '\n'; echo
-```
-
-Use a password manager for `AUTHENTIK_BOOTSTRAP_PASSWORD`.
 
 ## Validation commands
 
@@ -53,18 +33,6 @@ Expected public endpoint:
 https://auth.<PLATFORM_BASE_DOMAIN>/
 ```
 
-Expected admin user:
-
-```text
-akadmin
-```
-
-Expected password source:
-
-```text
-AUTHENTIK_BOOTSTRAP_PASSWORD
-```
-
 ## Break-glass rule
 
-Do not remove local admin login from Grafana or Argo CD during CH06. SSO is introduced as the normal login path, while local admin remains a recovery path.
+Do not remove application-local recovery access until each application-specific SSO path has been validated.

@@ -1,28 +1,47 @@
-# CH05 Operations Monitoring Design (v2)
+# CH05 Operations Monitoring Design
 
-## Goal
-Answer two questions fast:
-1. What is broken?
-2. Why is it broken?
+CH05 is no longer a Grafana-first observability stack. It is an operator-first operations layer for a small, single-node platform.
 
-## Stack
-- Zabbix: alerting + host/service monitoring
-- Vector: log collection
-- OpenObserve: searchable RCA logs
-- Authentik: SSO for Zabbix/OpenObserve
+## Decision
 
-## Why previous stack was removed
-- High storage growth
-- Too many moving parts
-- Poor 2AM operator UX
-- Excessive dashboard fragmentation
+PlatformInit defaults to:
 
-## Workflow order
-- 05 Deploy Zabbix Monitoring
-- 05.1 Deploy Vector Logging
-- 05.2 Deploy OpenObserve
-- 05.3 Onboard External Host
-- 05.4 Enable Operations SSO
+```text
+Zabbix      -> operational state and alerts
+Vector      -> low-footprint log collection
+OpenObserve -> searchable logs and RCA
+Authentik   -> mandatory login for public WebUIs
+```
 
-## Default operator flow
-Zabbix alert -> OpenObserve search -> fix issue
+## Why the previous model was removed
+
+The previous Grafana/VictoriaMetrics/Loki/Alloy model solved telemetry collection but did not solve the operator workflow:
+
+```text
+what failed?
+where did it fail?
+why did it fail?
+what should I inspect next?
+```
+
+It also introduced too many moving parts for the default single-node PlatformInit use case.
+
+## Workflow split
+
+| Workflow | Responsibility |
+|---|---|
+| `05 - Deploy Zabbix Monitoring` | state-first monitoring |
+| `05.1 - Deploy OpenObserve` | searchable RCA logs |
+| `05.2 - Deploy Vector Logging` | log collection |
+| `05.3 - Onboard External Host` | future n8n/customer host agent onboarding |
+| `05.4 - Enable Operations SSO` | Authentik-gated public WebUIs |
+
+## WebUI rule
+
+Zabbix and OpenObserve must not be exposed publicly without Authentik.
+
+The base deploy creates internal services only. `05.4` creates the public ingresses and attaches the Authentik forward-auth middleware.
+
+## Storage rule
+
+k3s data must be stored under `/srv/data/k3s`. This prevents accidental growth under the wrong partition and makes PVC-backed storage easier to audit.

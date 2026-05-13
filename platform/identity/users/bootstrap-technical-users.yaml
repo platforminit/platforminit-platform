@@ -7,8 +7,10 @@
       "groups": [
         "PlatformInit Admins",
         "ArgoCD Admins",
-        "Grafana Admins",
-        "Authentik Admins"
+        "Authentik Admins",
+        "Operations Admins",
+        "Zabbix Admins",
+        "OpenObserve Admins"
       ]
     }
   ],
@@ -18,21 +20,29 @@
       "display_name": "PlatformInit Automation",
       "create_by_default": false,
       "purpose": "Future non-human automation identity for API-based platform operations.",
-      "groups": ["PlatformInit Operators"]
+      "groups": [
+        "PlatformInit Operators"
+      ]
     },
     {
       "username": "argocd-bootstrap-admin",
       "display_name": "Argo CD Bootstrap Admin",
       "create_by_default": false,
       "purpose": "Temporary Argo CD bootstrap identity until real user/group onboarding is complete.",
-      "groups": ["ArgoCD Admins"]
+      "groups": [
+        "ArgoCD Admins"
+      ]
     },
     {
-      "username": "grafana-bootstrap-admin",
-      "display_name": "Grafana Bootstrap Admin",
+      "username": "operations-bootstrap-admin",
+      "display_name": "Operations Bootstrap Admin",
       "create_by_default": false,
-      "purpose": "Temporary Grafana bootstrap identity until real user/group onboarding is complete.",
-      "groups": ["Grafana Admins"]
+      "purpose": "Temporary CH05 operations bootstrap identity until real user/group onboarding is complete.",
+      "groups": [
+        "Operations Admins",
+        "Zabbix Admins",
+        "OpenObserve Admins"
+      ]
     }
   ]
 }

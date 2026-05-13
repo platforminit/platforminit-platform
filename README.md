@@ -2,7 +2,7 @@
 
 Turn a fresh VPS into a production-ready single-node platform with deterministic automation.
 
-This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformInit roadmap. It provisions a Hetzner Cloud host, bootstraps a hardened Ubuntu baseline, installs k3s, enables ingress/TLS/GitOps services, and deploys observability and identity layers.
+This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformInit roadmap. It provisions a Hetzner Cloud host, bootstraps a hardened Ubuntu baseline, installs k3s, enables ingress/TLS/GitOps services, deploys identity, and adds a lightweight operations layer.
 
 ## Current platform model
 
@@ -14,8 +14,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04 | platform services: ingress, TLS and Argo CD |
 | CH04.5 | identity foundation: Authentik, identity namespace, groups, technical users and validation |
 | CH04.6 | Argo CD SSO integration with Authentik |
-| CH05 | operations monitoring: Zabbix, Vector, OpenObserve and external host onboarding |
-| CH05.x | operations split: monitoring, logging, RCA search, external host onboarding and SSO |
+| CH05 | operations monitoring: Zabbix, Vector, OpenObserve and Authentik-gated WebUIs |
 | CH06 | deprecated identity compatibility workflow; do not use for normal lifecycle execution |
 
 ## User-facing workflow order
@@ -37,21 +36,11 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 12 | `04 - Enable Platform (Ingress, TLS, ArgoCD)` | `platform-services-release-*` |
 | 13 | `04.5 - Deploy Identity Foundation` | `identity-release-*` |
 | 14 | `04.6 - Enable Argo CD SSO` | `identity-release-*` |
-| 15 | `05 - Deploy Observability Stack` | `observability-release-*` |
-| 16 | `05.1 - Provision Dashboards` | `observability-release-*` |
-| 17 | `05.2 - Provision Alerting` | `observability-release-*` |
-| 18 | `05.4 - Enable Operations SSO` | `identity-release-*` |
-
-Target CH05 redesign order:
-
-| Target order | Workflow | Purpose |
-|---:|---|---|
-| 15 | `05 - Deploy Observability Stack` | base observability backend and Grafana |
-| 16 | `05.1 - Provision Dashboards` | operational dashboard set and navigation |
-| 17 | `05.2 - Provision Alerting` | OK/WARNING/CRITICAL/UNKNOWN alert model |
-| 18 | `05.3 - Provision Security & Audit Monitoring` | access elevation, sudo, SSH, UFW and AIDE/FIM visibility |
-| 19 | `05.4 - Onboard External Host` | n8n and future host telemetry onboarding |
-| 20 | `05.4 - Enable Operations SSO` | Authentik Grafana SSO integration |
+| 15 | `05 - Deploy Zabbix Monitoring` | `observability-release-*` |
+| 16 | `05.1 - Deploy OpenObserve` | `observability-release-*` |
+| 17 | `05.2 - Deploy Vector Logging` | `observability-release-*` |
+| 18 | `05.3 - Onboard External Host` | `observability-release-*` |
+| 19 | `05.4 - Enable Operations SSO` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -69,76 +58,56 @@ Each deploy workflow accepts the producing build workflow run ID and the specifi
 
 Deprecated development host aliases must not be used; the only valid development host contract is `platforminit-dev-01`.
 
-## CH05 operational observability
+## CH05 operations monitoring
 
-CH05 is being redesigned from a raw metrics dashboard layer into a Platform Operations Console. The deployment stack remains Grafana, VictoriaMetrics, VMAgent, Loki, Alloy and Alertmanager, but the UX goal is Nagios-style operational clarity.
-
-Public WebUI:
+CH05 is an operator-first replacement for the previous Grafana/VictoriaMetrics/Loki/Alloy default stack.
 
 ```text
-https://grafana.<PLATFORM_BASE_DOMAIN>
+Zabbix      -> what is broken?
+Vector      -> collect logs
+OpenObserve -> why did it break?
+Authentik   -> mandatory login gate for public operations WebUIs
 ```
 
-Internal backends:
+Public operations WebUIs:
 
-| Component | Public WebUI? | Usage |
-|---|---:|---|
-| Grafana | yes | dashboards, logs, alerts and operator console |
-| VictoriaMetrics | no | metrics backend / internal debug API |
-| VMAgent | no | scrape and remote-write pipeline |
-| Loki | no | log backend queried from Grafana |
-| Alloy | no | Kubernetes and host log collector |
-| Alertmanager | no by default | internal alert grouping and routing |
+| URL | Purpose | Login |
+|---|---|---|
+| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik |
+| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik |
 
-Target dashboard entrypoint:
+The base CH05 deploys create internal services first. Public ingresses are created only by `05.4 - Enable Operations SSO`.
+
+Removed as default components:
+
+- Grafana
+- VictoriaMetrics
+- VMAgent
+- VMAlert
+- Alertmanager
+- Loki
+- Alloy
+- provisioned Grafana dashboards
+
+## Storage contract
+
+k3s must use:
 
 ```text
-Dashboards → PlatformInit → 00 - Platform Overview
+/srv/data/k3s
 ```
 
-Target dashboard set:
-
-| Dashboard | Purpose |
-|---|---|
-| `00 - Platform Overview` | OK/WARNING/CRITICAL/UNKNOWN landing dashboard |
-| `10 - Host Infrastructure` | CPU, RAM, disk, inode, swap, network, disk IO, uptime and failed services |
-| `20 - Kubernetes / k3s` | node, pod, workload, PVC and cluster resource health |
-| `30 - Argo CD / GitOps` | Argo CD components, sync failures, unhealthy apps and drift |
-| `40 - Identity / SSO` | Authentik, providers, login failures and SSO health |
-| `50 - Observability Self-Monitoring` | Grafana, VictoriaMetrics, Loki, VMAgent, Alloy and Alertmanager health |
-| `60 - Security & Audit` | access elevation, sudo, SSH, UFW, AIDE/FIM and RBAC security visibility |
-| `90 - Application Template` | reusable dashboard for n8n and future workloads |
-
-Security & Audit Monitoring is part of the CH05 redesign. The platform already uses approval-gated temporary access elevation, so CH05 must make elevation grants, sudo activity, SSH anomalies, UFW drift and AIDE/FIM status visible in Grafana.
-
-See:
-
-- `docs/ch05-operational-observability-design.md`
-- `platform/observability/dashboards/README.md`
-- `platform/observability/logging/README.md`
-- `platform/observability/alerts/README.md`
-- `platform/observability/security/README.md`
-- `platform/observability/external-hosts/README.md`
-- `platform/observability/workflows/README.md`
+The old fallback to `/srv/k3s` or `/var/lib/rancher/k3s` is treated as legacy/stale state. Use the CH03 validation output and host storage audit commands when troubleshooting disk growth.
 
 ## Identity and SSO
 
-Identity has been promoted into the early platform lifecycle. Authentik is deployed by CH04.5, Argo CD SSO is enabled by CH04.6 and Grafana SSO has moved to CH05.5 so dashboards and alerting exist before the final operator login polish.
-
-Public identity UI:
-
-```text
-https://auth.<PLATFORM_BASE_DOMAIN>
-```
-
-Current SSO bindings:
+Identity is deployed early in the lifecycle.
 
 | Workflow | Binding | Notes |
 |---|---|---|
-| `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | browser login validated during identity refactor |
-| `05.4 - Enable Operations SSO` | Grafana → Authentik | run after CH05, CH05.1 and CH05.2 are healthy |
-
-After running CH05 in `baseline` mode, rerun `05.4 - Enable Operations SSO` if the Grafana SSO button disappears.
+| `04.5 - Deploy Identity Foundation` | Authentik core | required before app SSO |
+| `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
+| `05.4 - Enable Operations SSO` | Zabbix/OpenObserve → Authentik forward-auth | operations WebUIs |
 
 ## Privilege model
 
@@ -157,6 +126,13 @@ After running CH05 in `baseline` mode, rerun `05.4 - Enable Operations SSO` if t
 | `dev` | active integration branch |
 | `feat/*` / `fix/*` | isolated delivery branches |
 
+Recommended branch for this redesign:
+
+```bash
+git checkout dev
+git checkout -b feat/ch05-operations-stack-redesign
+```
+
 ## Documentation index
 
 | Area | Document |
@@ -166,16 +142,13 @@ After running CH05 in `baseline` mode, rerun `05.4 - Enable Operations SSO` if t
 | Host discovery and volume layout | `docs/multi-project-host-discovery-and-volume-layout.md` |
 | Day-2 operations | `docs/day2-ops.md` |
 | Release model | `docs/release-model.md` |
-| CH05 operational observability design | `docs/ch05-operational-observability-design.md` |
-| CH05 dashboard contract | `platform/observability/dashboards/README.md` |
-| CH05 logging contract | `platform/observability/logging/README.md` |
-| CH05 alerting contract | `platform/observability/alerts/README.md` |
-| CH05 security & audit monitoring | `platform/observability/security/README.md` |
-| CH05 external host onboarding | `platform/observability/external-hosts/README.md` |
-| CH05 workflow restructuring | `platform/observability/workflows/README.md` |
-| CH05 dashboard guide | `platform/observability/docs/ch05-beginner-dashboard-guide.md` |
-| CH05 k3s monitoring runbook | `platform/observability/docs/ch05-k3s-monitoring-runbook.md` |
-| CH05/CH05.1 SSO interaction | `platform/observability/docs/ch05-ch05-1-sso-interaction.md` |
+| CH05 operations monitoring design | `docs/ch05-operations-monitoring-design.md` |
+| CH05 migration from previous stack | `docs/ch05-migration-from-grafana-stack.md` |
+| Zabbix monitoring | `platform/observability/zabbix/README.md` |
+| Vector logging | `platform/observability/vector/README.md` |
+| OpenObserve RCA logs | `platform/observability/openobserve/README.md` |
+| Operations SSO | `platform/observability/sso/README.md` |
+| Operations rule system | `platform/observability/rules/platforminit-operations-rules.md` |
 
 ## Principles
 
@@ -185,40 +158,6 @@ After running CH05 in `baseline` mode, rerun `05.4 - Enable Operations SSO` if t
 - no hardcoded secrets
 - no standing sudo for runtime automation users
 - public UIs only where they provide operator value
-- beginner-friendly defaults with deeper debug paths available when needed
-
-## Current lifecycle note
-
-Identity has been promoted into the early platform lifecycle. Use `04.5 - Deploy Identity Foundation` for Authentik core deployment plus PlatformInit scoped identity group bootstrap. The old `06 - Deploy Identity Stack` workflow is deprecated and retained only for compatibility. Application SSO bindings remain separate as `04.6 - Enable Argo CD SSO` and the transitional `05.1 - Enable Grafana SSO`.
-
-CH05 is now being redesigned as an operational observability layer with dashboard, alerting, logging, security/audit and external-host onboarding contracts. The target CH05 split moves Grafana SSO to `05.4 - Enable Operations SSO`.
-
-See:
-
-- `docs/identity-layer-refactor.md`
-- `docs/ch05-operational-observability-design.md`
-
-
-## CH05 redesign (current direction)
-
-PlatformInit is moving away from the previous Grafana/VictoriaMetrics/Loki/Alloy stack due to operator UX complexity, storage growth and poor root-cause clarity.
-
-New target architecture:
-
-```
-Zabbix -> what is broken
-Vector -> collect logs
-OpenObserve -> why it broke
-Authentik -> SSO for all operational UIs
-```
-
-Removed as default components:
-- Grafana
-- VictoriaMetrics
-- vmagent
-- vmalert
-- Alertmanager
-- Loki
-- Alloy
-
-These may return later as optional advanced modules, but they are no longer PlatformInit defaults.
+- Authentik login required for public WebUIs
+- low-resource single-node defaults
+- clear operator alerts over raw telemetry dashboards

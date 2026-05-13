@@ -148,14 +148,13 @@ PLATFORMINIT_OBSERVABILITY_PATH=/srv/observability
 
 ### CH02 layout awareness
 
-CH02 computes the k3s data directory from host context:
+CH02 uses the PlatformInit k3s storage contract:
 
 ```text
-single/none -> /srv/k3s
-split       -> /srv/data/k3s
+/srv/data/k3s
 ```
 
-Validation now fails when the actual k3s config does not match the expected data-dir.
+This is intentional even when legacy single-layout hosts exist, because the k3s local-path provisioner stores PVC backing data below the k3s data directory. Validation fails when the actual k3s config does not match the expected data-dir.
 
 ### CH05 layout awareness
 

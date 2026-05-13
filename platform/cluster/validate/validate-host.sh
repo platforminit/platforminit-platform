@@ -68,7 +68,7 @@ k3s_data_dir(){
   fi
 
   # 3) default
-  [[ -n "${dd:-}" ]] || dd="/var/lib/rancher/k3s"
+  [[ -n "${dd:-}" ]] || dd="/srv/data/k3s"
 
   printf '%s\n' "$dd"
 }
@@ -201,7 +201,8 @@ else
   res WARN "k3s data-dir not found: $dd"
 fi
 
-# legacy /srv/k3s check removed; k3s_data_dir() already validates the configured layout-aware data-dir.
+# Legacy /srv/k3s and /var/lib/rancher/k3s are not valid target paths for PlatformInit.
+# k3s_data_dir() validates the configured layout-aware data-dir.
 
 # ----------------------------
 # kubectl

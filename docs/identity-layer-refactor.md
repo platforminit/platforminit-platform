@@ -1,59 +1,17 @@
 # Identity Layer Refactor
 
-## Decision
+Identity is an early platform lifecycle layer.
 
-Identity is an early platform foundation layer, not a late CH06-only integration layer.
+## Current model
 
-The deployable identity workflow is now:
+| Workflow | Purpose |
+|---|---|
+| `04.5 - Deploy Identity Foundation` | Deploy Authentik and bootstrap PlatformInit identity groups |
+| `04.6 - Enable Argo CD SSO` | Configure Argo CD OIDC login through Authentik |
+| `05.4 - Enable Operations SSO` | Protect CH05 Zabbix/OpenObserve WebUIs through Authentik forward-auth |
 
-```text
-04.5 - Deploy Identity Foundation
-```
+## Deprecated model
 
-This workflow owns both:
+The old Grafana SSO path was removed from the active lifecycle when CH05 moved to Zabbix + Vector + OpenObserve.
 
-1. Authentik core deployment
-2. PlatformInit scoped identity foundation bootstrap
-
-Application-specific SSO bindings remain separate follow-up workflows because the target
-applications must already exist before they can be integrated:
-
-```text
-04.6 - Enable Argo CD SSO
-05.1 - Enable Grafana SSO
-```
-
-`05.1 - Enable Grafana SSO` is transitional numbering. The CH05 operational observability redesign moves Grafana SSO to `05.5` after dashboard, alerting, security/audit and external-host onboarding workflows are split out.
-
-## Rationale
-
-The previous split caused an invalid lifecycle:
-
-```text
-04.5 Identity Foundation -> failed because identity namespace did not exist
-06 Identity Core -> created the namespace later
-```
-
-That model made CH04.5 dependent on CH06, which contradicted the intent of moving
-identity earlier in the platform lifecycle.
-
-## Correct lifecycle
-
-For a clean rebuild use:
-
-```text
-01.1 - Host Bootstrap
-01.2 - Sync Host Access Tooling
-02   - Apply Host Baseline
-03   - Install Kubernetes Cluster
-04   - Enable Platform (Ingress, TLS, ArgoCD)
-04.5 - Deploy Identity Foundation
-04.6 - Enable Argo CD SSO
-05   - Deploy Observability Stack
-05.1 - Enable Grafana SSO
-```
-
-## Compatibility
-
-The old `06 - Deploy Identity Stack` workflow is kept temporarily for compatibility,
-but it is deprecated. New lifecycle runs should use `04.5 - Deploy Identity Foundation`.
+Do not add new Grafana SSO workflows to the default PlatformInit lifecycle.

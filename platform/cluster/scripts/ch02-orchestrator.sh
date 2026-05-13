@@ -53,6 +53,8 @@ detect_k3s_data_dir() {
 
   if grep -qs '^K3S_DATA_DIR=' /etc/systemd/system/k3s.service.env 2>/dev/null; then
     data_dir="$(grep -s '^K3S_DATA_DIR=' /etc/systemd/system/k3s.service.env | head -n1 | cut -d= -f2- | tr -d '"')"
+  elif [[ -d /srv/data/k3s ]]; then
+    data_dir="/srv/data/k3s"
   elif [[ -d /srv/k3s ]]; then
     data_dir="/srv/k3s"
   else

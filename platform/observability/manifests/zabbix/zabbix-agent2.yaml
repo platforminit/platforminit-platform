@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: zabbix-agent2
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: zabbix-agent2
+    app.kubernetes.io/part-of: platforminit-operations
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zabbix-agent2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zabbix-agent2
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: zabbix-agent2
+          image: zabbix/zabbix-agent2:alpine-7.0-latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZBX_SERVER_HOST
+              value: zabbix-server.operations.svc.cluster.local
+            - name: ZBX_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: zabbix-agent
+              containerPort: 10050
+              hostPort: 10050
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
