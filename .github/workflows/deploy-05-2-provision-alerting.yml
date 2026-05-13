@@ -1,4 +1,4 @@
-name: 05.1 - Provision Dashboards
+name: 05.2 - Provision Alerting
 
 on:
   workflow_dispatch:
@@ -117,7 +117,7 @@ jobs:
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Render remote dashboard provisioner
+      - name: Render remote alerting provisioner
         shell: bash
         run: |
           set -euo pipefail
@@ -149,9 +149,9 @@ jobs:
           tmp_dir="${tmp_root}/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
           report_dir="${release_root}/reports"
-          run_log="${tmp_dir}/ch05-1-dashboards-run-${SHORT_SHA}.log"
-          validate_log="${tmp_dir}/ch05-1-dashboards-validate-${SHORT_SHA}.log"
-          report_file="${report_dir}/ch05-1-dashboards-validate-${SHORT_SHA}.log"
+          run_log="${tmp_dir}/ch05-2-alerting-run-${SHORT_SHA}.log"
+          validate_log="${tmp_dir}/ch05-2-alerting-validate-${SHORT_SHA}.log"
+          report_file="${report_dir}/ch05-2-alerting-validate-${SHORT_SHA}.log"
 
           ensure_owner_access() {
             mkdir -p "$tmp_dir"
@@ -189,8 +189,8 @@ jobs:
               exit 1
             }
 
-            env KUBECONFIG="$KUBECONFIG" "$release_dir/scripts/ch05-1-provision-dashboards.sh"
-            env KUBECONFIG="$KUBECONFIG" "$release_dir/validate/ch05-1-validate-dashboards.sh" | tee "$validate_log"
+            env KUBECONFIG="$KUBECONFIG" "$release_dir/scripts/ch05-2-provision-alerting.sh"
+            env KUBECONFIG="$KUBECONFIG" "$release_dir/validate/ch05-2-validate-alerting.sh" | tee "$validate_log"
             cp "$validate_log" "$report_file" || true
             ensure_owner_access
           }
@@ -199,7 +199,7 @@ jobs:
           EOS
           chmod +x /tmp/ch05-remote.sh
 
-      - name: Upload and run dashboard provisioner
+      - name: Upload and run alerting provisioner
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ inputs.target_user || 'devops' }}
@@ -219,7 +219,7 @@ jobs:
             sudo -n /tmp/platforminit-run/ch05-remote.sh run '${SHORTSHA}' '${HOST_LOGIN_USER}'
           "
 
-      - name: Fetch dashboard validation report
+      - name: Fetch alerting validation report
         if: always()
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
@@ -231,21 +231,21 @@ jobs:
           mkdir -p ./observability-reports
           remote_tmp_dir="/tmp/platforminit-observability/${SHORTSHA}"
 
-          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-1-dashboards-validate-${SHORTSHA}.log'"; then
-            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-1-dashboards-validate-${SHORTSHA}.log" "./observability-reports/ch05-1-dashboards-validate-${SHORTSHA}.log"
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-2-alerting-validate-${SHORTSHA}.log'"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-2-alerting-validate-${SHORTSHA}.log" "./observability-reports/ch05-2-alerting-validate-${SHORTSHA}.log"
           else
-            echo "No dashboard validation report found"
+            echo "No alerting validation report found"
           fi
 
-          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-1-dashboards-run-${SHORTSHA}.log'"; then
-            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-1-dashboards-run-${SHORTSHA}.log" "./observability-reports/ch05-1-dashboards-run-${SHORTSHA}.log"
+          if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/ch05-2-alerting-run-${SHORTSHA}.log'"; then
+            scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/ch05-2-alerting-run-${SHORTSHA}.log" "./observability-reports/ch05-2-alerting-run-${SHORTSHA}.log"
           fi
 
-      - name: Upload dashboard validation report
+      - name: Upload alerting validation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ch05-1-dashboards-validate-${{ steps.artifact.outputs.short_sha }}
+          name: ch05-2-alerting-validate-${{ steps.artifact.outputs.short_sha }}
           path: ./observability-reports/
           if-no-files-found: warn
           retention-days: 14
@@ -255,7 +255,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "CH05.1 dashboard provisioning finished"
+            echo "CH05.2 alerting provisioning finished"
             echo "artifact_run_id=${{ inputs.artifact_run_id }}"
             echo "artifact_id=${{ inputs.artifact_id }}"
             echo "short_sha=${{ steps.artifact.outputs.short_sha }}"
