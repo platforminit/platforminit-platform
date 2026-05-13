@@ -116,4 +116,12 @@ else
   fail "ALERT_OPERATIONS_DASHBOARD" "Alert Operations Center dashboard is missing"
 fi
 
+
+alertops_payload="$(kubectl -n "$ns" get configmap grafana-dashboard-05-alert-operations-center -o jsonpath='{.data.platform-alert-operations-center\.json}' 2>/dev/null || true)"
+if printf '%s' "$alertops_payload" | grep -q 'CRITICAL queue - fix first' &&    printf '%s' "$alertops_payload" | grep -q 'UNKNOWN queue - restore telemetry' &&    printf '%s' "$alertops_payload" | grep -q 'WARNING queue - degraded services' &&    printf '%s' "$alertops_payload" | grep -q 'operator_hint' &&    printf '%s' "$alertops_payload" | grep -q 'runbook'; then
+  pass "ALERT_OPERATIONS_UX" "Alert Operations Center exposes Nagios-style queues and next-action fields"
+else
+  fail "ALERT_OPERATIONS_UX" "Alert Operations Center regressed to a raw counter/label-dump dashboard"
+fi
+
 warn "SECURITY_AUDIT_SOURCE" "host audit ingestion is designed but not yet enforced by CH05.3; implement CH05.3 next"

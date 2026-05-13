@@ -25,7 +25,7 @@ data:
       ],
       "timezone": "utc",
       "schemaVersion": 39,
-      "version": 1,
+      "version": 2,
       "refresh": "30s",
       "time": {
         "from": "now-6h",
@@ -57,13 +57,14 @@ data:
           },
           "options": {
             "mode": "markdown",
-            "content": "### Alert Operations Center\nThis dashboard is the Nagios-style operational alert view for PlatformInit. Start here when the platform is unhealthy: check CRITICAL first, then WARNING, then UNKNOWN. Only actionable alerts should appear here; noisy engineering panels belong in deeper troubleshooting dashboards."
+            "content": "### Alert Operations Center\nNagios-style operating view for PlatformInit. This page must answer: **what is broken, where, how severe, and what should I do next?**\n\nTriage order: **CRITICAL \u2192 UNKNOWN \u2192 WARNING**. If this page only shows numbers, the alert contract is broken; every alert must carry layer, service, target and next-action labels."
           }
         },
         {
           "id": 2,
           "type": "stat",
-          "title": "CRITICAL alerts firing",
+          "title": "CRITICAL - fix now",
+          "description": "Service-impacting or unsafe state. Immediate action.",
           "gridPos": {
             "x": 0,
             "y": 4,
@@ -83,7 +84,6 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -92,12 +92,8 @@ data:
                     "value": null
                   },
                   {
-                    "color": "orange",
-                    "value": 1
-                  },
-                  {
                     "color": "red",
-                    "value": 5
+                    "value": 1
                   }
                 ]
               },
@@ -117,75 +113,16 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
           }
         },
         {
           "id": 3,
           "type": "stat",
-          "title": "WARNING alerts firing",
+          "title": "UNKNOWN - telemetry gap",
+          "description": "Monitoring cannot determine state. Restore visibility.",
           "gridPos": {
             "x": 6,
-            "y": 4,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "count(ALERTS{alertstate=\"firing\",severity=\"warning\"}) or vector(0)",
-              "refId": "A",
-              "instant": true
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "orange",
-                    "value": 1
-                  },
-                  {
-                    "color": "red",
-                    "value": 5
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
-          },
-          "options": {
-            "reduceOptions": {
-              "values": false,
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": ""
-            },
-            "orientation": "auto",
-            "textMode": "auto",
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "auto"
-          }
-        },
-        {
-          "id": 4,
-          "type": "stat",
-          "title": "UNKNOWN alerts firing",
-          "gridPos": {
-            "x": 12,
             "y": 4,
             "w": 6,
             "h": 4
@@ -203,7 +140,6 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -212,12 +148,12 @@ data:
                     "value": null
                   },
                   {
-                    "color": "orange",
+                    "color": "yellow",
                     "value": 1
                   },
                   {
                     "color": "red",
-                    "value": 5
+                    "value": 3
                   }
                 ]
               },
@@ -237,13 +173,74 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "WARNING - degraded",
+          "description": "Degraded but not necessarily down.",
+          "gridPos": {
+            "x": 12,
+            "y": 4,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "expr": "count(ALERTS{alertstate=\"firing\",severity=\"warning\"}) or vector(0)",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "values": false,
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center"
           }
         },
         {
           "id": 5,
           "type": "stat",
-          "title": "Total active alerts",
+          "title": "TOTAL active alerts",
+          "description": "Total active alert load.",
           "gridPos": {
             "x": 18,
             "y": 4,
@@ -263,7 +260,6 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -277,7 +273,7 @@ data:
                   },
                   {
                     "color": "red",
-                    "value": 5
+                    "value": 10
                   }
                 ]
               },
@@ -297,18 +293,19 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
           }
         },
         {
           "id": 6,
           "type": "stat",
-          "title": "Alertmanager up",
+          "title": "Alertmanager telemetry",
+          "description": "UP means Alertmanager telemetry is visible.",
           "gridPos": {
             "x": 0,
             "y": 8,
             "w": 6,
-            "h": 4
+            "h": 3
           },
           "datasource": {
             "type": "prometheus",
@@ -323,21 +320,31 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "DOWN",
+                      "color": "red"
+                    },
+                    "1": {
+                      "text": "UP",
+                      "color": "green"
+                    }
+                  }
+                }
+              ],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
+                    "color": "red",
                     "value": null
                   },
                   {
-                    "color": "orange",
+                    "color": "green",
                     "value": 1
-                  },
-                  {
-                    "color": "red",
-                    "value": 5
                   }
                 ]
               },
@@ -357,18 +364,19 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
           }
         },
         {
           "id": 7,
           "type": "stat",
-          "title": "VMAlert up",
+          "title": "VMAlert telemetry",
+          "description": "UP means rule evaluation telemetry is visible.",
           "gridPos": {
             "x": 6,
             "y": 8,
             "w": 6,
-            "h": 4
+            "h": 3
           },
           "datasource": {
             "type": "prometheus",
@@ -383,21 +391,31 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "DOWN",
+                      "color": "red"
+                    },
+                    "1": {
+                      "text": "UP",
+                      "color": "green"
+                    }
+                  }
+                }
+              ],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
+                    "color": "red",
                     "value": null
                   },
                   {
-                    "color": "orange",
+                    "color": "green",
                     "value": 1
-                  },
-                  {
-                    "color": "red",
-                    "value": 5
                   }
                 ]
               },
@@ -417,18 +435,19 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
           }
         },
         {
           "id": 8,
           "type": "stat",
           "title": "Observability alerts",
+          "description": "",
           "gridPos": {
             "x": 12,
             "y": 8,
             "w": 6,
-            "h": 4
+            "h": 3
           },
           "datasource": {
             "type": "prometheus",
@@ -443,7 +462,6 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -457,7 +475,7 @@ data:
                   },
                   {
                     "color": "red",
-                    "value": 5
+                    "value": 3
                   }
                 ]
               },
@@ -477,18 +495,19 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
           }
         },
         {
           "id": 9,
           "type": "stat",
           "title": "Security alerts",
+          "description": "",
           "gridPos": {
             "x": 18,
             "y": 8,
             "w": 6,
-            "h": 4
+            "h": 3
           },
           "datasource": {
             "type": "prometheus",
@@ -503,7 +522,6 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -517,7 +535,7 @@ data:
                   },
                   {
                     "color": "red",
-                    "value": 5
+                    "value": 3
                   }
                 ]
               },
@@ -537,16 +555,337 @@ data:
             "textMode": "auto",
             "colorMode": "background",
             "graphMode": "none",
-            "justifyMode": "auto"
+            "justifyMode": "center"
           }
         },
         {
           "id": 10,
           "type": "table",
-          "title": "Active alert inventory",
+          "title": "Alert count by layer and severity",
+          "description": "Operational heat map. CRITICAL rows are first triage target; WARNING rows show degradation; UNKNOWN rows mean telemetry gaps.",
           "gridPos": {
             "x": 0,
-            "y": 12,
+            "y": 11,
+            "w": 24,
+            "h": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "expr": "sum by (category,severity) (ALERTS{alertstate=\"firing\"})",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "category": 0,
+                  "severity": 1,
+                  "Value": 2
+                },
+                "renameByName": {
+                  "category": "Layer",
+                  "severity": "Severity",
+                  "Value": "Active alerts"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "CRITICAL queue - fix first",
+          "description": "Immediate action queue. Clear next-action and runbook are mandatory.",
+          "gridPos": {
+            "x": 0,
+            "y": 18,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "expr": "ALERTS{alertstate=\"firing\",severity=\"critical\"}",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "alertstate": true,
+                  "job": true,
+                  "owner": true,
+                  "project": true,
+                  "environment": true,
+                  "prometheus": true,
+                  "replica": true
+                },
+                "indexByName": {
+                  "severity": 0,
+                  "alertname": 1,
+                  "category": 2,
+                  "service": 3,
+                  "namespace": 4,
+                  "pod": 5,
+                  "instance": 6,
+                  "operator_hint": 7,
+                  "runbook": 8,
+                  "lifecycle_ch": 9
+                },
+                "renameByName": {
+                  "severity": "Severity",
+                  "alertname": "Alert",
+                  "category": "Layer",
+                  "service": "Service",
+                  "namespace": "Namespace",
+                  "pod": "Pod",
+                  "instance": "Instance",
+                  "operator_hint": "Next action",
+                  "runbook": "Runbook",
+                  "lifecycle_ch": "CH"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "UNKNOWN queue - restore telemetry",
+          "description": "UNKNOWN means the platform cannot prove state. Restore telemetry before trusting OK.",
+          "gridPos": {
+            "x": 0,
+            "y": 26,
+            "w": 24,
+            "h": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "expr": "ALERTS{alertstate=\"firing\",severity=\"unknown\"}",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "alertstate": true,
+                  "job": true,
+                  "owner": true,
+                  "project": true,
+                  "environment": true,
+                  "prometheus": true,
+                  "replica": true
+                },
+                "indexByName": {
+                  "severity": 0,
+                  "alertname": 1,
+                  "category": 2,
+                  "service": 3,
+                  "namespace": 4,
+                  "pod": 5,
+                  "instance": 6,
+                  "operator_hint": 7,
+                  "runbook": 8,
+                  "lifecycle_ch": 9
+                },
+                "renameByName": {
+                  "severity": "Severity",
+                  "alertname": "Alert",
+                  "category": "Layer",
+                  "service": "Service",
+                  "namespace": "Namespace",
+                  "pod": "Pod",
+                  "instance": "Instance",
+                  "operator_hint": "Next action",
+                  "runbook": "Runbook",
+                  "lifecycle_ch": "CH"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "table",
+          "title": "WARNING queue - degraded services",
+          "description": "Investigate after CRITICAL/UNKNOWN. Repeated warning noise should be fixed in alert rules.",
+          "gridPos": {
+            "x": 0,
+            "y": 33,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "expr": "ALERTS{alertstate=\"firing\",severity=\"warning\"}",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "alertstate": true,
+                  "job": true,
+                  "owner": true,
+                  "project": true,
+                  "environment": true,
+                  "prometheus": true,
+                  "replica": true
+                },
+                "indexByName": {
+                  "severity": 0,
+                  "alertname": 1,
+                  "category": 2,
+                  "service": 3,
+                  "namespace": 4,
+                  "pod": 5,
+                  "instance": 6,
+                  "operator_hint": 7,
+                  "runbook": 8,
+                  "lifecycle_ch": 9
+                },
+                "renameByName": {
+                  "severity": "Severity",
+                  "alertname": "Alert",
+                  "category": "Layer",
+                  "service": "Service",
+                  "namespace": "Namespace",
+                  "pod": "Pod",
+                  "instance": "Instance",
+                  "operator_hint": "Next action",
+                  "runbook": "Runbook",
+                  "lifecycle_ch": "CH"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "type": "table",
+          "title": "All active alerts - operational inventory",
+          "description": "Complete active alert inventory with operational labels.",
+          "gridPos": {
+            "x": 0,
+            "y": 41,
             "w": 24,
             "h": 8
           },
@@ -558,27 +897,86 @@ data:
             {
               "expr": "ALERTS{alertstate=\"firing\"}",
               "refId": "A",
-              "instant": true
+              "instant": true,
+              "format": "table"
             }
           ],
           "options": {
             "showHeader": true,
-            "cellHeight": "sm"
-          }
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              }
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true,
+                  "__name__": true,
+                  "alertstate": true,
+                  "job": true,
+                  "owner": true,
+                  "project": true,
+                  "environment": true,
+                  "prometheus": true,
+                  "replica": true
+                },
+                "indexByName": {
+                  "severity": 0,
+                  "alertname": 1,
+                  "category": 2,
+                  "service": 3,
+                  "namespace": 4,
+                  "pod": 5,
+                  "instance": 6,
+                  "operator_hint": 7,
+                  "runbook": 8,
+                  "lifecycle_ch": 9
+                },
+                "renameByName": {
+                  "severity": "Severity",
+                  "alertname": "Alert",
+                  "category": "Layer",
+                  "service": "Service",
+                  "namespace": "Namespace",
+                  "pod": "Pod",
+                  "instance": "Instance",
+                  "operator_hint": "Next action",
+                  "runbook": "Runbook",
+                  "lifecycle_ch": "CH"
+                }
+              }
+            }
+          ]
         },
         {
-          "id": 11,
+          "id": 15,
           "type": "text",
           "title": "Operator rule",
           "gridPos": {
             "x": 0,
-            "y": 20,
+            "y": 49,
             "w": 24,
             "h": 3
           },
           "options": {
             "mode": "markdown",
-            "content": "**Operator rule:** no alert without action. Each alert should include `summary`, `impact`, `action` and eventually a `runbook_url`. If this dashboard becomes noisy, fix the alert rules instead of ignoring the dashboard."
+            "content": "**Operator rule:** no alert without action. Required alert labels: `severity`, `category`, `service`, `lifecycle_ch`, `operator_hint`, `runbook`. Required annotations remain `summary`, `impact`, `action`, `runbook_url`. If the dashboard becomes noisy, tune rules instead of hiding alerts."
           }
         }
       ]

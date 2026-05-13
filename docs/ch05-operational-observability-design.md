@@ -270,3 +270,15 @@ Rebuild:
 | Alerting | `feat/ch05-alerting-model` | OK/WARNING/CRITICAL/UNKNOWN alert model |
 | Security | `feat/ch05-security-audit-monitoring` | access elevation and baseline security visibility |
 | External hosts | `feat/ch05-external-host-onboarding` | n8n/future host telemetry onboarding |
+
+## Alert Operations Center v2
+
+The Alert Operations Center is not a raw alert counter dashboard. It must behave like an operational/Nagios-style console:
+
+- show CRITICAL, UNKNOWN and WARNING queues separately;
+- show the affected layer, service, namespace/pod/instance when available;
+- expose a short next action and runbook reference directly in the table;
+- keep counters only as status headers, not as the main information source;
+- fail validation if the dashboard regresses to a label dump without operator context.
+
+The dashboard reads active alerts from the `ALERTS{alertstate="firing"}` metric. Because annotations are not reliably exposed as Prometheus labels, every PlatformInit alert rule also carries compact operational labels such as `operator_hint`, `runbook`, `category`, `service` and `lifecycle_ch`. These labels are intentionally static and low-cardinality.
