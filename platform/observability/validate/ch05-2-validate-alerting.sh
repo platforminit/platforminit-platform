@@ -134,3 +134,11 @@ else
 fi
 
 pass "CH05_2_ALERTING" "alerting provisioning validation completed"
+
+
+# Alert Operations Center depends on compact operational labels exposed via ALERTS{}.
+if kubectl -n "$ns" get vmrule platform-rules -o yaml | grep -q 'operator_hint:' &&    kubectl -n "$ns" get vmrule platform-rules -o yaml | grep -q 'runbook:' &&    kubectl -n "$ns" get vmrule platform-rules -o yaml | grep -q 'nagios_state:'; then
+  pass "ALERT_OPERATIONAL_LABELS" "alert rules expose operator_hint, runbook and nagios_state labels"
+else
+  fail "ALERT_OPERATIONAL_LABELS" "alert rules must expose operator_hint, runbook and nagios_state labels for the Alert Operations Center"
+fi
