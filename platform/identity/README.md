@@ -1,6 +1,6 @@
-# CH06 - Identity & SSO Foundation
+# CH04.5 - Identity Foundation
 
-CH06 introduces the PlatformInit identity layer based on Authentik.
+CH04.5 introduces the PlatformInit identity foundation based on Authentik. The legacy CH06 workflow is retained only for compatibility.
 
 ## Scope
 
@@ -62,13 +62,13 @@ Keep the trailing slash.
 
 ## Next phase
 
-After the identity stack is healthy:
+After the identity foundation is healthy:
 
-1. Create an OIDC provider/application pair for Grafana.
-2. Test Grafana SSO with a non-admin user.
-3. Create an OIDC provider/application pair for Argo CD.
-4. Test Argo CD SSO while retaining local admin as break-glass.
-5. Decide whether Traefik ForwardAuth should protect any future non-OIDC services.
+1. Run `04.6 - Enable Argo CD SSO` because Argo CD already exists after CH04.
+2. Run `05 - Deploy Observability Stack`.
+3. Run `05.1 - Enable Grafana SSO` after Grafana exists. This numbering is transitional; the CH05 redesign target is `05.5 - Enable Grafana SSO`.
+4. Keep local Argo CD and Grafana admin accounts as break-glass paths.
+5. Decide later whether Traefik ForwardAuth should protect any future non-OIDC services.
 
 
 ## CH05.1 Grafana SSO
@@ -85,7 +85,7 @@ Default Authentik provider/application slug: `grafana`.
 
 ## CH04.6 Argo CD SSO
 
-After Authentik is reachable and Grafana SSO has been validated, use `04.6 - Enable Argo CD SSO` to configure Argo CD OIDC from code. This keeps the local Argo CD `admin` account available as a break-glass path and stores the OIDC client secret in Kubernetes, not in GitHub secrets.
+After Authentik is reachable and the identity foundation has been validated, use `04.6 - Enable Argo CD SSO` to configure Argo CD OIDC from code. This keeps the local Argo CD `admin` account available as a break-glass path and stores the OIDC client secret in Kubernetes, not in GitHub secrets.
 
 Credential ownership model:
 

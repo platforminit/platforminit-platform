@@ -26,7 +26,7 @@ Credential ownership model:
 |---|---|---|
 | Grafana OAuth client ID | CH05.1 automation | `observability/grafana-authentik-oauth` Kubernetes secret |
 | Grafana OAuth client secret | CH05.1 automation | `observability/grafana-authentik-oauth` Kubernetes secret |
-| Authentik API token | CH06 baseline | `identity/authentik-bootstrap` Kubernetes secret |
+| Authentik API token | CH04.5 identity foundation | `identity/authentik-bootstrap` Kubernetes secret |
 
 The workflow input `grafana_provider_slug` controls the Authentik application slug. The default is `grafana`.
 
@@ -79,3 +79,8 @@ https://grafana.<PLATFORM_BASE_DOMAIN>/login
 ```
 
 Expected result: the login page shows an Authentik OAuth option, while username/password login remains available for break-glass access.
+
+
+## Lifecycle note
+
+`05.1 - Enable Grafana SSO` is the current transitional workflow name. The CH05 operational observability redesign target moves this responsibility to `05.5 - Enable Grafana SSO` after dashboard, alerting, security/audit and external-host onboarding workflows are split out.
