@@ -17,6 +17,7 @@ kubectl get ns "$ns" >/dev/null 2>&1 && pass "NAMESPACE" "$ns namespace exists" 
 
 EXPECTED_DASHBOARDS=(
   grafana-dashboard-00-platform-overview
+  grafana-dashboard-05-alert-operations-center
   grafana-dashboard-10-host-infrastructure
   grafana-dashboard-20-kubernetes-k3s
   grafana-dashboard-30-argocd-gitops
@@ -91,4 +92,28 @@ fi
 # CH05.3 will make host-side audit ingestion first-class. Until then this is
 # explicitly UNKNOWN/WARN rather than a hard failure so dashboard provisioning
 # can be validated independently from host collector onboarding.
-warn "SECURITY_AUDIT_SOURCE" "host audit ingestion is designed but not yet enforced by CH05.5; implement CH05.3 next"
+# The operator view should not be polluted by upstream/raw engineering dashboards.
+# CH05.1 intentionally keeps only PlatformInit operational dashboards visible.
+allowed_dashboards="grafana-dashboard-00-platform-overview grafana-dashboard-05-alert-operations-center grafana-dashboard-10-host-infrastructure grafana-dashboard-20-kubernetes-k3s grafana-dashboard-30-argocd-gitops grafana-dashboard-40-identity-sso grafana-dashboard-50-observability-self-monitoring grafana-dashboard-60-security-audit grafana-dashboard-90-application-template"
+stray_count=0
+while IFS= read -r cm_name; do
+  [[ -z "$cm_name" ]] && continue
+  case " $allowed_dashboards " in
+    *" $cm_name "*) ;;
+    *)
+      warn "DASHBOARD_NOISE" "unexpected Grafana dashboard ConfigMap remains: $cm_name"
+      stray_count=$((stray_count + 1))
+      ;;
+  esac
+done < <(kubectl -n "$ns" get configmap -l grafana_dashboard=1 -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+if [[ "$stray_count" -eq 0 ]]; then
+  pass "DASHBOARD_NOISE" "only PlatformInit operational dashboards are exposed"
+fi
+
+if kubectl -n "$ns" get configmap grafana-dashboard-05-alert-operations-center >/dev/null 2>&1; then
+  pass "ALERT_OPERATIONS_DASHBOARD" "Alert Operations Center dashboard is provisioned"
+else
+  fail "ALERT_OPERATIONS_DASHBOARD" "Alert Operations Center dashboard is missing"
+fi
+
+warn "SECURITY_AUDIT_SOURCE" "host audit ingestion is designed but not yet enforced by CH05.3; implement CH05.3 next"
