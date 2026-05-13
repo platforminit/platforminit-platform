@@ -324,5 +324,5 @@ render_tpl "$REPO_ROOT/manifests/sso/authentik-forward-auth.yaml.tpl" "$workdir/
 log "Applying Authentik-gated operations ingresses"
 kubectl apply -f "$workdir/operations-sso.yaml"
 log "Operations SSO applied"
-kubectl -n "$NAMESPACE" get middleware authentik-forward-auth
+kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth
 kubectl -n "$NAMESPACE" get ingress zabbix openobserve

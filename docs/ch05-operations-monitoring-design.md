@@ -77,3 +77,5 @@ Workflow rules:
 
 This preserves the non-interactive, temporary and audit-friendly A1 model while avoiding standing sudo for the `devops` user.
 
+
+Operational note: validation must query Traefik middleware using the fully qualified Kubernetes resource `middleware.traefik.io`. Do not use the ambiguous short resource name `middleware`, because clusters that still expose legacy Traefik CRDs may resolve it to `middlewares.traefik.containo.us` and report false NotFound errors after applying the current `traefik.io/v1alpha1` object.
