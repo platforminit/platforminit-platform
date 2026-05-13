@@ -4,7 +4,7 @@
 
 CH05 owns the base observability stack and the `observability-vmstack` Helm release, including Grafana.
 
-CH04.5 owns identity and Authentik. CH05.1 owns the Grafana SSO overlay because it needs Authentik-side state and Grafana-side Helm values.
+CH04.5 owns identity and Authentik. CH05.1 currently owns the Grafana SSO overlay because it needs Authentik-side state and Grafana-side Helm values. During the CH05 operational observability redesign this responsibility will move to CH05.5.
 
 ## Why CH05 needs an SSO-aware reconcile path
 
@@ -15,6 +15,6 @@ The CH05 orchestrator therefore preserves existing Helm values in `reconcile` mo
 ## Operational rule
 
 - Run CH05 `baseline` for clean observability installation or intentional reset.
-- Run CH06 and CH05.1 after CH05 baseline when SSO is required.
+- Run CH04.5 before CH05 so Authentik exists. Run CH05.1 after CH05 baseline when Grafana SSO is required.
 - Run CH05 `reconcile` for routine CH05 repairs after SSO is already enabled.
-- If CH05 `baseline` is rerun after SSO, rerun `05.1 - Enable Grafana SSO`.
+- If CH05 `baseline` is rerun after SSO, rerun `05.1 - Enable Grafana SSO`. Target numbering after the CH05 split is `05.5 - Enable Grafana SSO`.

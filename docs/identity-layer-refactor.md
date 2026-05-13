@@ -19,9 +19,11 @@ Application-specific SSO bindings remain separate follow-up workflows because th
 applications must already exist before they can be integrated:
 
 ```text
-05.1 - Enable Grafana SSO
 04.6 - Enable Argo CD SSO
+05.1 - Enable Grafana SSO
 ```
+
+`05.1 - Enable Grafana SSO` is transitional numbering. The CH05 operational observability redesign moves Grafana SSO to `05.5` after dashboard, alerting, security/audit and external-host onboarding workflows are split out.
 
 ## Rationale
 
@@ -46,9 +48,9 @@ For a clean rebuild use:
 03   - Install Kubernetes Cluster
 04   - Enable Platform (Ingress, TLS, ArgoCD)
 04.5 - Deploy Identity Foundation
+04.6 - Enable Argo CD SSO
 05   - Deploy Observability Stack
 05.1 - Enable Grafana SSO
-04.6 - Enable Argo CD SSO
 ```
 
 ## Compatibility
