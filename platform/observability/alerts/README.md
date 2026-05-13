@@ -52,3 +52,22 @@ runbook_url: Relative runbook path
 - Inhibit child alerts when a parent layer is down.
 - Group notifications by project, environment, category and service.
 - Suppress warning alerts when a critical alert for the same service is active.
+
+
+## Host alert source
+
+Host alerts must be built primarily from Node Exporter metrics. The first CH05.2 alerting implementation should cover:
+
+| Alert | Severity | Source | Intent |
+|---|---|---|---|
+| `HostNodeExporterDown` | critical | `up{job=~".*node-exporter.*|platform-node-exporter"}` | host telemetry unavailable |
+| `HostCpuHigh` | warning | `node_cpu_seconds_total` | sustained CPU pressure |
+| `HostMemoryPressure` | warning | `node_memory_*` | low available memory |
+| `HostDiskUsageHigh` | warning/critical | `node_filesystem_*` | filesystem capacity risk |
+| `HostInodeUsageHigh` | warning/critical | `node_filesystem_files*` | inode exhaustion risk |
+| `HostDiskIoPressure` | warning | `node_disk_*` | IO saturation investigation |
+| `HostNetworkErrors` | warning | `node_network_*_err*` | interface or network quality issue |
+| `HostRebootRequired` | warning | CH05.3 textfile metric | pending reboot after security patching |
+| `PlatformInitSplitStorageBroken` | critical | CH05.3 textfile metric | `/srv/data`, `/srv/db` or `/srv/observability` mount contract broken |
+
+Raw metric alerts should be grouped into human-facing OK/WARNING/CRITICAL/UNKNOWN states in the Alert Operations Center dashboard.

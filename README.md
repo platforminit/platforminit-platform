@@ -82,6 +82,7 @@ Internal backends:
 | Component | Public WebUI? | Usage |
 |---|---:|---|
 | Grafana | yes | dashboards, logs, alerts and operator console |
+| Node Exporter | no | first-class host metrics source for CH05 dashboards and alerts |
 | VictoriaMetrics | no | metrics backend / internal debug API |
 | VMAgent | no | scrape and remote-write pipeline |
 | Loki | no | log backend queried from Grafana |
