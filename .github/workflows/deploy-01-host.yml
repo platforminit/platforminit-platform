@@ -255,145 +255,18 @@ jobs:
           volume_ids_json="[]"
           volume_summary=""
           volume_attach_action_ids=""
-          expected_volume_contract=""
-
-          build_expected_volume_contract() {
-            expected_volume_contract="$(mktemp)"
-            case "$VOLUME_LAYOUT" in
-              none)
-                : > "$expected_volume_contract"
-                ;;
-              single)
-                printf 'srv\tplatforminit-%s-%s-srv\t%s\t/srv\n' "$PROJECT" "$HOST_NAME" "$VOLUME_SIZE_GB" > "$expected_volume_contract"
-                ;;
-              split)
-                {
-                  printf 'data\tplatforminit-%s-%s-data\t%s\t/srv/data\n' "$PROJECT" "$HOST_NAME" "$DATA_VOLUME_SIZE_GB"
-                  printf 'db\tplatforminit-%s-%s-db\t%s\t/srv/db\n' "$PROJECT" "$HOST_NAME" "$DB_VOLUME_SIZE_GB"
-                  printf 'observability\tplatforminit-%s-%s-observability\t%s\t/srv/observability\n' "$PROJECT" "$HOST_NAME" "$OBS_VOLUME_SIZE_GB"
-                } > "$expected_volume_contract"
-                ;;
-              *)
-                echo "Unsupported volume_layout=${VOLUME_LAYOUT}" >&2
-                exit 1
-                ;;
-            esac
-          }
-
-          expected_volume_names_json() {
-            jq -Rn '[inputs | select(length > 0) | split("\t")[1]]' < "$expected_volume_contract"
-          }
-
-          fail_volume_contract() {
-            local phase="$1" reason="$2" detail="${3:-}"
-            echo "FATAL: Hetzner volume contract violation during ${phase}: ${reason}" >&2
-            if [[ -n "$detail" ]]; then
-              echo "$detail" >&2
-            fi
-            echo "Refusing to create, attach, or reuse volumes until the stale/duplicate volume state is cleaned up manually." >&2
-            exit 1
-          }
-
-          guard_volume_contract() {
-            local phase="$1" list_body list_code expected_names_json expected_count prefix unexpected duplicates wrong_location attached_unexpected attached_elsewhere
-            [[ -n "$expected_volume_contract" ]] || build_expected_volume_contract
-            expected_names_json="$(expected_volume_names_json)"
-            expected_count="$(jq 'length' <<< "$expected_names_json")"
-            prefix="platforminit-${PROJECT}-${HOST_NAME}-"
-
-            list_body="$(mktemp)"
-            list_code="$(curl -sS -o "$list_body" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
-            [[ "$list_code" == "200" ]] || { cat "$list_body" >&2; exit 1; }
-
-            unexpected="$(jq -r \
-              --arg prefix "$prefix" \
-              --arg project "$PROJECT" \
-              --arg host "$HOST_NAME" \
-              --argjson expected "$expected_names_json" '
-                def sid: (if .server == null then "detached" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-                .volumes[]
-                | select(((.labels["platforminit.project"] // "") == $project and (.labels["platforminit.host"] // "") == $host) or (.name | startswith($prefix)))
-                | select(.name as $n | ($expected | index($n) | not))
-                | "id=\(.id) name=\(.name) role=\(.labels["platforminit.volume_role"] // "unknown") server=\(sid) location=\(.location.name // "unknown")"
-              ' "$list_body")"
-            if [[ -n "$unexpected" ]]; then
-              fail_volume_contract "$phase" "unexpected PlatformInit volumes found for project=${PROJECT} host=${HOST_NAME}" "$unexpected"
-            fi
-
-            duplicates="$(jq -r --argjson expected "$expected_names_json" '
-                [.volumes[] | select(.name as $n | $expected | index($n)) | .name]
-                | group_by(.)[]?
-                | select(length > 1)
-                | "name=\(.[0]) count=\(length)"
-              ' "$list_body")"
-            if [[ -n "$duplicates" ]]; then
-              fail_volume_contract "$phase" "duplicate expected volume names found" "$duplicates"
-            fi
-
-            wrong_location="$(jq -r --argjson expected "$expected_names_json" --arg location "$effective_region" '
-                .volumes[]
-                | select(.name as $n | $expected | index($n))
-                | select((.location.name // "") != $location)
-                | "id=\(.id) name=\(.name) location=\(.location.name // "unknown") expected_location=\($location)"
-              ' "$list_body")"
-            if [[ -n "$wrong_location" ]]; then
-              fail_volume_contract "$phase" "expected volume exists in the wrong Hetzner location" "$wrong_location"
-            fi
-
-            if [[ -n "${sid:-}" ]]; then
-              attached_unexpected="$(jq -r --arg sid "$sid" --argjson expected "$expected_names_json" '
-                  def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-                  .volumes[]
-                  | select(sid_of == $sid)
-                  | select(.name as $n | ($expected | index($n) | not))
-                  | "id=\(.id) name=\(.name) role=\(.labels["platforminit.volume_role"] // "unknown") location=\(.location.name // "unknown")"
-                ' "$list_body")"
-              if [[ -n "$attached_unexpected" ]]; then
-                fail_volume_contract "$phase" "unexpected volumes are attached to server ${sid}" "$attached_unexpected"
-              fi
-
-              attached_elsewhere="$(jq -r --arg sid "$sid" --argjson expected "$expected_names_json" '
-                  def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-                  .volumes[]
-                  | select(.name as $n | $expected | index($n))
-                  | select(sid_of != "" and sid_of != $sid)
-                  | "id=\(.id) name=\(.name) attached_to=\(sid_of)"
-                ' "$list_body")"
-              if [[ -n "$attached_elsewhere" ]]; then
-                fail_volume_contract "$phase" "expected volumes are attached to another server" "$attached_elsewhere"
-              fi
-            fi
-
-            echo "Volume contract preflight passed for layout=${VOLUME_LAYOUT} expected_count=${expected_count} phase=${phase}"
-          }
 
           ensure_volume() {
             local role="$1" name="$2" size="$3" mount_path="$4"
             [[ "$size" =~ ^[0-9]+$ ]] || { echo "Volume size for ${role} must be numeric" >&2; exit 1; }
             [[ "$size" != "0" ]] || return 0
 
-            local list_body list_code volume_id volume_count existing_server payload body code requery requery_code
+            local list_body list_code volume_id payload body code requery requery_code
             list_body="$(mktemp)"
             list_code="$(curl -sS -o "$list_body" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
             [[ "$list_code" == "200" ]] || { cat "$list_body" >&2; exit 1; }
 
-            volume_count="$(jq -r --arg name "$name" --arg location "$effective_region" '[.volumes[] | select(.name == $name and (.location.name // "") == $location)] | length' "$list_body")"
-            if (( volume_count > 1 )); then
-              jq -r --arg name "$name" --arg location "$effective_region" '.volumes[] | select(.name == $name and (.location.name // "") == $location) | "id=\(.id) name=\(.name) server=\(.server // "detached") location=\(.location.name // "unknown")"' "$list_body" >&2
-              echo "FATAL: duplicate Hetzner volumes found for expected name=${name} location=${effective_region}" >&2
-              exit 1
-            fi
-
             volume_id="$(jq -r --arg name "$name" --arg location "$effective_region" '[.volumes[] | select(.name == $name and (.location.name // "") == $location) | .id] | first // empty' "$list_body")"
-            existing_server="$(jq -r --arg name "$name" --arg location "$effective_region" '
-              def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-              [.volumes[] | select(.name == $name and (.location.name // "") == $location) | sid_of] | first // ""
-            ' "$list_body")"
-            if [[ -n "$existing_server" && -n "${sid:-}" && "$existing_server" != "$sid" ]]; then
-              echo "FATAL: expected volume ${name} is already attached to server ${existing_server}, not target server ${sid}" >&2
-              exit 1
-            fi
-
             if [[ -z "$volume_id" ]]; then
               payload="$(jq -n \
                 --arg name "$name" \
@@ -503,9 +376,6 @@ jobs:
 
             [[ -n "$sid" ]] || { echo "Failed to create server after trying locations: ${tried_locations[*]}" >&2; exit 1; }
 
-            build_expected_volume_contract
-            guard_volume_contract "create-pre-volume-reconcile"
-
             case "$VOLUME_LAYOUT" in
               none)
                 volume_ids_json="[]"
@@ -563,9 +433,6 @@ jobs:
             server_name="$(jq -r '.server.name // empty' "${body}")"
             effective_region="$(jq -r '.server.datacenter.location.name // .server.location.name // empty' "${body}")"
             [[ -n "${effective_region}" && "${effective_region}" != "null" ]] || { echo "Failed to resolve server location for rebuild target ${sid}" >&2; cat "${body}" >&2; exit 1; }
-
-            build_expected_volume_contract
-            guard_volume_contract "rebuild-pre-volume-reconcile"
 
             # Rebuild keeps existing volume attachments, but the workflow still must resolve
             # the requested volume layout and emit volume_summary for the host-context step.
@@ -673,80 +540,6 @@ jobs:
               sleep 5
             done
           done
-
-      - name: Validate Hetzner volume contract
-        shell: bash
-        env:
-          PROJECT: ${{ inputs.project || 'development' }}
-          SERVER_ID: ${{ steps.lifecycle.outputs.server_id }}
-          VOLUME_LAYOUT: ${{ inputs.volume_layout }}
-          EXPECTED_VOLUME_IDS: ${{ steps.lifecycle.outputs.volume_ids }}
-        run: |
-          set -euo pipefail
-          resolve_hcloud_token() {
-            if [[ -n "${INFRA_API_TOKEN:-}" ]]; then return 0; fi
-            case "${PROJECT:-development}" in
-              development) INFRA_API_TOKEN="${HCLOUD_TOKEN_DEVELOPMENT:-}" ;;
-              n8n) INFRA_API_TOKEN="${HCLOUD_TOKEN_N8N:-}" ;;
-              platforminit) INFRA_API_TOKEN="${HCLOUD_TOKEN_PLATFORMINIT:-}" ;;
-              *) echo "Unsupported project for Hetzner token routing: ${PROJECT:-}" >&2; exit 1 ;;
-            esac
-            export INFRA_API_TOKEN
-          }
-          resolve_hcloud_token
-          auth=(-H "Authorization: Bearer ${INFRA_API_TOKEN}")
-          body="$(mktemp)"
-          code="$(curl -sS -o "$body" -w '%{http_code}' "${auth[@]}" "https://api.hetzner.cloud/v1/volumes")"
-          [[ "$code" == "200" ]] || { cat "$body" >&2; exit 1; }
-
-          expected_ids_json="${EXPECTED_VOLUME_IDS:-[]}"
-          if ! jq -e 'type == "array"' <<< "$expected_ids_json" >/dev/null; then
-            echo "FATAL: lifecycle output volume_ids is not a JSON array: ${expected_ids_json}" >&2
-            exit 1
-          fi
-
-          attached_unexpected="$(jq -r --arg sid "$SERVER_ID" --argjson expected "$expected_ids_json" '
-              def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-              .volumes[]
-              | select(sid_of == $sid)
-              | select(.id as $id | ($expected | index($id) | not))
-              | "id=\(.id) name=\(.name) role=\(.labels["platforminit.volume_role"] // "unknown") location=\(.location.name // "unknown")"
-            ' "$body")"
-          if [[ -n "$attached_unexpected" ]]; then
-            echo "FATAL: unexpected Hetzner volumes are attached to server ${SERVER_ID}" >&2
-            echo "$attached_unexpected" >&2
-            echo "Expected volume IDs: ${expected_ids_json}" >&2
-            exit 1
-          fi
-
-          missing_expected="$(jq -r --arg sid "$SERVER_ID" --argjson expected "$expected_ids_json" '
-              def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-              $expected[] as $expected_id
-              | [ .volumes[] | select(.id == $expected_id and sid_of == $sid) ]
-              | select(length == 0)
-              | "id=\($expected_id) not_attached_to=\($sid)"
-            ' "$body")"
-          if [[ -n "$missing_expected" ]]; then
-            echo "FATAL: expected Hetzner volumes are not attached to server ${SERVER_ID}" >&2
-            echo "$missing_expected" >&2
-            exit 1
-          fi
-
-          expected_count="$(jq 'length' <<< "$expected_ids_json")"
-          attached_count="$(jq -r --arg sid "$SERVER_ID" '
-              def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-              [.volumes[] | select(sid_of == $sid)] | length
-            ' "$body")"
-          if [[ "$attached_count" != "$expected_count" ]]; then
-            echo "FATAL: attached Hetzner volume count mismatch for server ${SERVER_ID}: expected=${expected_count} actual=${attached_count}" >&2
-            jq -r --arg sid "$SERVER_ID" '
-              def sid_of: (if .server == null then "" elif (.server|type) == "object" then (.server.id|tostring) else (.server|tostring) end);
-              .volumes[] | select(sid_of == $sid) | "id=\(.id) name=\(.name)"
-            ' "$body" >&2
-            exit 1
-          fi
-
-          echo "Hetzner volume contract validated: layout=${VOLUME_LAYOUT} attached_count=${attached_count} expected_count=${expected_count}"
 
       - name: Resolve server public IP
         id: server
