@@ -41,7 +41,7 @@ rbac_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm -o js
 scopes_text="$(kubectl -n "${ARGOCD_NAMESPACE}" get configmap argocd-rbac-cm -o jsonpath='{.data.scopes}' 2>/dev/null || true)"
 
 [[ -z "${direct_oidc_text}" ]] && \
-  pass "ARGOCD_DIRECT_OIDC_DISABLED" "direct oidc.config is absent because CH06.2 uses Dex-backed SSO" || fail "ARGOCD_DIRECT_OIDC_DISABLED" "direct oidc.config is still present"
+  pass "ARGOCD_DIRECT_OIDC_DISABLED" "direct oidc.config is absent because CH04.6 uses Dex-backed SSO" || fail "ARGOCD_DIRECT_OIDC_DISABLED" "direct oidc.config is still present"
 
 echo "${config_text}" | grep -q 'name: Authentik' && \
   pass "ARGOCD_DEX_CONNECTOR_NAME" "Argo CD Dex connector is named Authentik" || fail "ARGOCD_DEX_CONNECTOR_NAME" "Dex connector missing Authentik name"

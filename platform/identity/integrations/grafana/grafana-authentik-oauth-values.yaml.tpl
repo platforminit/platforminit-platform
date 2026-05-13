@@ -1,5 +1,5 @@
-# CH06.1 Grafana SSO values overlay.
-# Rendered by scripts/ch06-enable-grafana-sso.sh and merged into the existing
+# CH05.1 Grafana SSO values overlay.
+# Rendered by scripts/ch05-1-enable-grafana-sso.sh and merged into the existing
 # observability-vmstack Helm release with --reuse-values.
 # This file intentionally contains no real secret values.
 

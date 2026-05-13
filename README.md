@@ -14,7 +14,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04 | platform services: ingress, TLS and Argo CD |
 | CH05 | observability: Grafana, VictoriaMetrics, Loki and Alloy |
 | CH06 | identity: Authentik SSO foundation |
-| CH06.1 | Grafana SSO integration with Authentik |
+| CH05.1 | Grafana SSO integration with Authentik |
 
 ## User-facing workflow order
 
@@ -35,7 +35,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 12 | `04 - Enable Platform (Ingress, TLS, ArgoCD)` | `platform-services-release-*` |
 | 13 | `05 - Deploy Observability Stack` | `observability-release-*` |
 | 14 | `06 - Deploy Identity Stack` | `identity-release-*` |
-| 15 | `06.1 - Enable Grafana SSO` | `identity-release-*` |
+| 15 | `05.1 - Enable Grafana SSO` | `identity-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -100,9 +100,9 @@ CH06 deploys Authentik:
 https://auth.<PLATFORM_BASE_DOMAIN>
 ```
 
-CH06.1 enables Grafana Generic OAuth against Authentik while keeping local Grafana admin login as the break-glass path.
+CH05.1 enables Grafana Generic OAuth against Authentik while keeping local Grafana admin login as the break-glass path.
 
-After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun. After CH05 `baseline` mode, rerun `06.1 - Enable Grafana SSO` if the Grafana SSO button disappears.
+After running CH05 in `reconcile` mode, CH05.1 usually does not need to be rerun. After CH05 `baseline` mode, rerun `05.1 - Enable Grafana SSO` if the Grafana SSO button disappears.
 
 ## Privilege model
 
@@ -132,7 +132,7 @@ After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun
 | Release model | `docs/release-model.md` |
 | CH05 dashboard guide | `platform/observability/docs/ch05-beginner-dashboard-guide.md` |
 | CH05 k3s monitoring runbook | `platform/observability/docs/ch05-k3s-monitoring-runbook.md` |
-| CH05/CH06 SSO interaction | `platform/observability/docs/ch05-ch06-sso-interaction.md` |
+| CH05/CH06 SSO interaction | `platform/observability/docs/ch05-ch05-1-sso-interaction.md` |
 
 ## Principles
 
@@ -146,6 +146,6 @@ After running CH05 in `reconcile` mode, CH06.1 usually does not need to be rerun
 
 ## Current lifecycle note
 
-Identity has been promoted into the early platform lifecycle. Use `04.5 - Deploy Identity Foundation` for Authentik core deployment plus PlatformInit scoped identity group bootstrap. The old `06 - Deploy Identity Stack` workflow is deprecated and retained only for compatibility. Application SSO bindings remain separate as `06.1 - Enable Grafana SSO` and `06.2 - Enable Argo CD SSO`.
+Identity has been promoted into the early platform lifecycle. Use `04.5 - Deploy Identity Foundation` for Authentik core deployment plus PlatformInit scoped identity group bootstrap. The old `06 - Deploy Identity Stack` workflow is deprecated and retained only for compatibility. Application SSO bindings remain separate as `05.1 - Enable Grafana SSO` and `04.6 - Enable Argo CD SSO`.
 
 See `docs/identity-layer-refactor.md`.

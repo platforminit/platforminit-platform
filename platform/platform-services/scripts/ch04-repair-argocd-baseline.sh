@@ -76,7 +76,7 @@ main() {
     return 0
   fi
 
-  log "Argo CD server baseline is degraded; removing CH06.2 OIDC config and repairing rollout"
+  log "Argo CD server baseline is degraded; removing CH04.6 OIDC config and repairing rollout"
   diagnose || true
   json_remove_oidc_config || true
 
@@ -98,7 +98,7 @@ main() {
   fi
 
   diagnose || true
-  echo "FATAL: Argo CD baseline repair failed; do not run CH06.2 until CH04 is clean" >&2
+  echo "FATAL: Argo CD baseline repair failed; do not run CH04.6 until CH04 is clean" >&2
   return 1
 }
 

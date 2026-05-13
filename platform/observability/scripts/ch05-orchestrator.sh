@@ -101,7 +101,7 @@ deploy_vm_stack() {
     --wait --timeout 15m
   )
 
-  # CH05 owns the Grafana Helm release. After CH06.1 enables SSO, reconcile mode
+  # CH05 owns the Grafana Helm release. After CH05.1 enables SSO, reconcile mode
   # must preserve the existing Grafana auth overlay instead of resetting the
   # release to the base observability values only.
   if [[ "${DEPLOY_MODE}" == "reconcile" ]] && helm -n "${NAMESPACE}" status observability-vmstack >/dev/null 2>&1; then
@@ -110,7 +110,7 @@ deploy_vm_stack() {
   fi
 
   if [[ "${DEPLOY_MODE}" == "baseline" ]] && kubectl -n "${NAMESPACE}" get secret grafana-authentik-oauth >/dev/null 2>&1; then
-    log "Grafana SSO secret detected; baseline mode may reset Grafana OAuth Helm values. Run 06.1 after CH05 baseline if SSO disappears."
+    log "Grafana SSO secret detected; baseline mode may reset Grafana OAuth Helm values. Run 05.1 after CH05 baseline if SSO disappears."
   fi
 
   helm "${helm_args[@]}"

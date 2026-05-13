@@ -1,4 +1,4 @@
-name: 04.6 - Enable Argo CD SSO
+name: 05.1 - Enable Grafana SSO
 
 on:
   workflow_dispatch:
@@ -31,20 +31,15 @@ on:
         description: Optional explicit IPv4 override for break-glass/debug
         required: false
         default: ''
-      argocd_provider_slug:
-        description: Authentik OAuth provider slug for Argo CD
+      grafana_provider_slug:
+        description: Authentik OAuth provider slug for Grafana
         required: true
-        default: argocd
+        default: grafana
         type: string
-      argocd_admin_group:
-        description: Authentik group mapped to Argo CD admin
+      vm_stack_chart_version:
+        description: VictoriaMetrics k8s stack Helm chart version pin
         required: true
-        default: PlatformInit Admins
-        type: string
-      authentik_argocd_admin_username:
-        description: Authentik username to add to the Argo CD admin group
-        required: true
-        default: akadmin
+        default: '0.72.5'
         type: string
 
 permissions:
@@ -127,7 +122,7 @@ jobs:
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Render remote Argo CD SSO script
+      - name: Render remote Grafana SSO script
         shell: bash
         run: |
           set -euo pipefail
@@ -136,19 +131,18 @@ jobs:
           set -euo pipefail
 
           usage() {
-            echo "Usage: $0 <launch|run> SHORT_SHA BASE_DOMAIN ARGOCD_PROVIDER_SLUG ARGOCD_ADMIN_GROUP AUTHENTIK_ARGOCD_ADMIN_USERNAME OWNER_USER" >&2
+            echo "Usage: $0 <launch|run> SHORT_SHA BASE_DOMAIN GRAFANA_PROVIDER_SLUG VM_STACK_CHART_VERSION OWNER_USER" >&2
             exit 2
           }
 
-          [[ $# -ge 7 ]] || usage
+          [[ $# -ge 6 ]] || usage
 
           ACTION="$1"
           SHORT_SHA="$2"
           BASE_DOMAIN="$3"
-          ARGOCD_PROVIDER_SLUG="$4"
-          ARGOCD_ADMIN_GROUP="$5"
-          AUTHENTIK_ARGOCD_ADMIN_USERNAME="$6"
-          OWNER_USER="$7"
+          GRAFANA_PROVIDER_SLUG="$4"
+          VM_STACK_CHART_VERSION="$5"
+          OWNER_USER="$6"
 
           [[ "${EUID}" -eq 0 ]] || { echo "ch06-remote.sh must run as root" >&2; exit 1; }
 
@@ -160,16 +154,16 @@ jobs:
 
           release_root="${PLATFORMINIT_IDENTITY_PATH}/platforminit"
           release_dir="${release_root}/${SHORT_SHA}"
-          tmp_root="/tmp/platforminit-argocd-sso"
+          tmp_root="/tmp/platforminit-grafana-sso"
           tmp_dir="${tmp_root}/${SHORT_SHA}"
           unpack_dir="${tmp_dir}/unpacked"
           report_dir="${release_root}/reports"
-          run_log="${tmp_dir}/ch04-6-argocd-sso-run-${SHORT_SHA}.log"
-          run_pid="${tmp_dir}/ch04-6-argocd-sso-run-${SHORT_SHA}.pid"
-          run_status="${tmp_dir}/ch04-6-argocd-sso-run-${SHORT_SHA}.status"
-          run_done="${tmp_dir}/ch04-6-argocd-sso-run-${SHORT_SHA}.done"
-          validate_log="${tmp_dir}/ch04-6-argocd-sso-validate-${SHORT_SHA}.log"
-          report_file="${report_dir}/ch04-6-argocd-sso-validate-${SHORT_SHA}.log"
+          run_log="${tmp_dir}/ch05-1-grafana-sso-run-${SHORT_SHA}.log"
+          run_pid="${tmp_dir}/ch05-1-grafana-sso-run-${SHORT_SHA}.pid"
+          run_status="${tmp_dir}/ch05-1-grafana-sso-run-${SHORT_SHA}.status"
+          run_done="${tmp_dir}/ch05-1-grafana-sso-run-${SHORT_SHA}.done"
+          validate_log="${tmp_dir}/ch05-1-grafana-sso-validate-${SHORT_SHA}.log"
+          report_file="${report_dir}/ch05-1-grafana-sso-validate-${SHORT_SHA}.log"
 
           ensure_owner_access() {
             mkdir -p "$tmp_dir"
@@ -188,7 +182,7 @@ jobs:
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             ensure_owner_access
-            nohup "$0" run "$SHORT_SHA" "$BASE_DOMAIN" "$ARGOCD_PROVIDER_SLUG" "$ARGOCD_ADMIN_GROUP" "$AUTHENTIK_ARGOCD_ADMIN_USERNAME" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
+            nohup "$0" run "$SHORT_SHA" "$BASE_DOMAIN" "$GRAFANA_PROVIDER_SLUG" "$VM_STACK_CHART_VERSION" "$OWNER_USER" >>"$run_log" 2>&1 < /dev/null &
             echo $! > "$run_pid"
             ensure_owner_access
             echo "launched pid=$(cat "$run_pid")"
@@ -219,13 +213,12 @@ jobs:
             env \
               KUBECONFIG="$KUBECONFIG" \
               BASE_DOMAIN="$BASE_DOMAIN" \
-              ARGOCD_OIDC_PROVIDER_SLUG="$ARGOCD_PROVIDER_SLUG" \
-              ARGOCD_ADMIN_GROUP="$ARGOCD_ADMIN_GROUP" \
-              AUTHENTIK_ARGOCD_ADMIN_USERNAME="$AUTHENTIK_ARGOCD_ADMIN_USERNAME" \
-              "$release_dir/scripts/ch04-6-enable-argocd-sso.sh"
+              GRAFANA_OIDC_PROVIDER_SLUG="$GRAFANA_PROVIDER_SLUG" \
+              VM_STACK_CHART_VERSION="$VM_STACK_CHART_VERSION" \
+              "$release_dir/scripts/ch05-1-enable-grafana-sso.sh"
 
-            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$BASE_DOMAIN" ARGOCD_OIDC_PROVIDER_SLUG="$ARGOCD_PROVIDER_SLUG" ARGOCD_ADMIN_GROUP="$ARGOCD_ADMIN_GROUP" AUTHENTIK_ARGOCD_ADMIN_USERNAME="$AUTHENTIK_ARGOCD_ADMIN_USERNAME" \
-              "$release_dir/validate/ch04-6-validate-argocd-sso.sh" | tee "$validate_log"
+            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$BASE_DOMAIN" GRAFANA_OIDC_PROVIDER_SLUG="$GRAFANA_PROVIDER_SLUG" \
+              "$release_dir/validate/ch05-1-validate-grafana-sso.sh" | tee "$validate_log"
             cp "$validate_log" "$report_file" || true
             ensure_owner_access
           }
@@ -238,31 +231,30 @@ jobs:
           EOS
           chmod +x /tmp/ch06-remote.sh
 
-      - name: Upload and launch Argo CD SSO enablement
+      - name: Upload and launch Grafana SSO enablement
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
           PLATFORM_BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
-          ARGOCD_OIDC_PROVIDER_SLUG: ${{ inputs.argocd_provider_slug }}
-          ARGOCD_ADMIN_GROUP: ${{ inputs.argocd_admin_group }}
-          AUTHENTIK_ARGOCD_ADMIN_USERNAME: ${{ inputs.authentik_argocd_admin_username }}
+          GRAFANA_OIDC_PROVIDER_SLUG: ${{ inputs.grafana_provider_slug }}
+          VM_STACK_CHART_VERSION: ${{ inputs.vm_stack_chart_version }}
         shell: bash
         run: |
           set -euo pipefail
 
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-argocd-sso/${SHORTSHA} /tmp/platforminit-run"
-          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-argocd-sso/${SHORTSHA}/identity-release.tar.gz"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-grafana-sso/${SHORTSHA} /tmp/platforminit-run"
+          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-grafana-sso/${SHORTSHA}/identity-release.tar.gz"
           scp -i ~/.ssh/id_ed25519 /tmp/ch06-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch06-remote.sh"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch06-remote.sh
-            sudo -n /tmp/platforminit-run/ch06-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${ARGOCD_OIDC_PROVIDER_SLUG}' '${ARGOCD_ADMIN_GROUP}' '${AUTHENTIK_ARGOCD_ADMIN_USERNAME}' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch06-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${GRAFANA_OIDC_PROVIDER_SLUG}' '${VM_STACK_CHART_VERSION}' '${HOST_LOGIN_USER}'
           "
-          echo "Remote Argo CD SSO enablement launched."
+          echo "Remote Grafana SSO enablement launched."
 
-      - name: Poll Argo CD SSO enablement
+      - name: Poll Grafana SSO enablement
         env:
           HOST: ${{ steps.server.outputs.public_ip }}
           HOST_LOGIN_USER: ${{ secrets.HOST_LOGIN_USER }}
@@ -270,10 +262,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          remote_tmp_dir="/tmp/platforminit-argocd-sso/${SHORTSHA}"
-          remote_run_log="${remote_tmp_dir}/ch04-6-argocd-sso-run-${SHORTSHA}.log"
-          remote_run_status="${remote_tmp_dir}/ch04-6-argocd-sso-run-${SHORTSHA}.status"
-          remote_run_done="${remote_tmp_dir}/ch04-6-argocd-sso-run-${SHORTSHA}.done"
+          remote_tmp_dir="/tmp/platforminit-grafana-sso/${SHORTSHA}"
+          remote_run_log="${remote_tmp_dir}/ch05-1-grafana-sso-run-${SHORTSHA}.log"
+          remote_run_status="${remote_tmp_dir}/ch05-1-grafana-sso-run-${SHORTSHA}.status"
+          remote_run_done="${remote_tmp_dir}/ch05-1-grafana-sso-run-${SHORTSHA}.done"
 
           max_attempts=60
           sleep_seconds=10
@@ -283,19 +275,19 @@ jobs:
               break
             fi
 
-            echo "[poll] CH04.6 Argo CD SSO still running (attempt ${attempt}/${max_attempts})"
+            echo "[poll] CH05.1 Grafana SSO still running (attempt ${attempt}/${max_attempts})"
             ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 30 '${remote_run_log}' 2>/dev/null || true"
             sleep "${sleep_seconds}"
           done
 
           if ! ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_run_done}'"; then
-            echo "Timed out waiting for CH04.6 Argo CD SSO to finish." >&2
+            echo "Timed out waiting for CH05.1 Grafana SSO to finish." >&2
             ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
             exit 1
           fi
 
           status="$(ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "cat '${remote_run_status}' 2>/dev/null || echo '__NO_STATUS__'" | tr -d '\r[:space:]')"
-          echo "Remote CH04.6 Argo CD SSO exit status: ${status}"
+          echo "Remote CH05.1 Grafana SSO exit status: ${status}"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "tail -n 200 '${remote_run_log}' 2>/dev/null || true"
           [[ "${status}" =~ ^[0-9]+$ ]] || exit 1
           [ "${status}" = "0" ] || exit "${status}"
@@ -310,10 +302,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./identity-reports
-          remote_tmp_dir="/tmp/platforminit-argocd-sso/${SHORTSHA}"
+          remote_tmp_dir="/tmp/platforminit-grafana-sso/${SHORTSHA}"
           for file in \
-            "ch04-6-argocd-sso-validate-${SHORTSHA}.log" \
-            "ch04-6-argocd-sso-run-${SHORTSHA}.log"
+            "ch05-1-grafana-sso-validate-${SHORTSHA}.log" \
+            "ch05-1-grafana-sso-run-${SHORTSHA}.log"
           do
             if ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "test -f '${remote_tmp_dir}/${file}'"; then
               scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:${remote_tmp_dir}/${file}" "./identity-reports/${file}"
@@ -324,7 +316,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ch04-6-argocd-sso-validate-${{ steps.artifact.outputs.short_sha }}
+          name: ch05-1-grafana-sso-validate-${{ steps.artifact.outputs.short_sha }}
           path: ./identity-reports/
           if-no-files-found: warn
           retention-days: 14
@@ -334,10 +326,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "CH04.6 Argo CD SSO run completed"
+            echo "CH05.1 Grafana SSO run completed"
             echo "artifact_run_id=${{ inputs.artifact_run_id }}"
             echo "artifact_id=${{ inputs.artifact_id }}"
             echo "short_sha=${{ steps.artifact.outputs.short_sha }}"
             echo "host_public_ip=${{ steps.server.outputs.public_ip }}"
-            echo "public_url=https://argocd.${{ secrets.PLATFORM_BASE_DOMAIN }}/login"
+            echo "public_url=https://grafana.${{ secrets.PLATFORM_BASE_DOMAIN }}/login"
           }

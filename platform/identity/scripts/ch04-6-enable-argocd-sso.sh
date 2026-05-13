@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-log(){ echo "[CH06.2][$(date -u +%FT%TZ)] $*"; }
+log(){ echo "[CH04.6][$(date -u +%FT%TZ)] $*"; }
 die(){ echo "FATAL: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 
@@ -52,7 +52,7 @@ validate_prerequisites() {
   kubectl -n "${ARGOCD_NAMESPACE}" get deploy/argocd-server >/dev/null 2>&1 || die "Missing deployment: ${ARGOCD_NAMESPACE}/argocd-server"
 
   # Do not fail the whole SSO reconciliation if Argo CD is already in a
-  # ProgressDeadlineExceeded state from a previous restart. CH06.2 is allowed
+  # ProgressDeadlineExceeded state from a previous restart. CH04.6 is allowed
   # to repair/restart argocd-server after reconciling the OIDC config.
   if ! kubectl -n "${ARGOCD_NAMESPACE}" rollout status deploy/argocd-server --timeout=30s >/dev/null 2>&1; then
     log "WARN: Argo CD server is not currently healthy; continuing so the SSO repair/restart path can run"
@@ -337,7 +337,7 @@ def resolve_oauth_signing_key():
 
     Without an explicit signing key, Authentik OAuth2 providers can fall back to
     symmetric HS* token signing. Argo CD/Dex is more reliable with a normal OIDC
-    JWKS-backed asymmetric provider, so CH06.2 treats signing_key as mandatory.
+    JWKS-backed asymmetric provider, so CH04.6 treats signing_key as mandatory.
     """
     keys = paginated_results("/api/v3/crypto/certificatekeypairs/?page_size=200")
     if not keys:
@@ -492,7 +492,7 @@ if algorithms:
     if symmetric_only:
         print(
             "OIDC discovery advertises only symmetric HS* signing algorithms; "
-            "CH06.2 requires an asymmetric Authentik signing_key for Argo CD/Dex",
+            "CH04.6 requires an asymmetric Authentik signing_key for Argo CD/Dex",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -599,11 +599,11 @@ PYCODE
 )"
   kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=merge -p "${cm_patch_payload}" >/dev/null
 
-  # CH06.2 uses Argo CD's bundled Dex as the broker for Authentik. Ensure
+  # CH04.6 uses Argo CD's bundled Dex as the broker for Authentik. Ensure
   # any previous direct oidc.config is removed so the two SSO modes do not
   # compete in the same argocd-cm.
   if [[ -n "${previous_dex}" ]]; then
-    log "Removing existing oidc.config because CH06.2 uses Dex-backed Authentik SSO"
+    log "Removing existing oidc.config because CH04.6 uses Dex-backed Authentik SSO"
     kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type=json \
       -p='[{"op":"remove","path":"/data/oidc.config"}]' >/dev/null 2>&1 || true
   fi
@@ -655,7 +655,7 @@ restore_previous_argocd_config() {
   # backups contain resourceVersion/uid/last-applied metadata and can conflict
   # with a ConfigMap modified by a later reconciliation attempt. Recovery must
   # be conflict-free and field-scoped. The only argocd-cm field introduced by
-  # CH06.2-managed SSO fields that can affect argocd-server startup are dex.config
+  # CH04.6-managed SSO fields that can affect argocd-server startup are dex.config
   # and leftover direct oidc.config, so remove those keys explicitly instead
   # of trying to replace the full ConfigMap object.
   log "Restoring Argo CD config with conflict-free field cleanup"

@@ -1,10 +1,10 @@
-# CH06.2 - Argo CD SSO Runbook
+# CH04.6 - Argo CD SSO Runbook
 
 ## Goal
 
 Enable Argo CD login through Authentik while keeping the local Argo CD admin account as a break-glass path.
 
-CH06.2 uses Argo CD's bundled Dex server as the Authentik OIDC broker. This matches the Authentik Argo CD integration model and avoids the direct `oidc.config` callback/token-verification path that previously produced browser-side `failed to verify the token` errors.
+CH04.6 uses Argo CD's bundled Dex server as the Authentik OIDC broker. This matches the Authentik Argo CD integration model and avoids the direct `oidc.config` callback/token-verification path that previously produced browser-side `failed to verify the token` errors.
 
 ## Authentik application/provider bootstrap
 
@@ -14,10 +14,10 @@ Credential ownership model:
 
 | Value | Owner | Storage |
 |---|---|---|
-| Argo CD OAuth client ID | CH06.2 automation | `argocd/argocd-authentik-oidc` Kubernetes secret |
-| Argo CD OAuth client secret | CH06.2 automation | `argocd/argocd-authentik-oidc` and `argocd/argocd-secret` Kubernetes secrets |
-| Dex client secret reference | CH06.2 automation | `argocd/argocd-secret` key `dex.authentik.clientSecret` |
-| Argo CD session signing key | CH04 / CH06.2 automation | `argocd/argocd-secret` key `server.secretkey` |
+| Argo CD OAuth client ID | CH04.6 automation | `argocd/argocd-authentik-oidc` Kubernetes secret |
+| Argo CD OAuth client secret | CH04.6 automation | `argocd/argocd-authentik-oidc` and `argocd/argocd-secret` Kubernetes secrets |
+| Dex client secret reference | CH04.6 automation | `argocd/argocd-secret` key `dex.authentik.clientSecret` |
+| Argo CD session signing key | CH04 / CH04.6 automation | `argocd/argocd-secret` key `server.secretkey` |
 | Authentik API token | CH06 baseline | `identity/authentik-bootstrap` Kubernetes secret |
 
 The workflow input `argocd_provider_slug` controls the Authentik application slug. The default is `argocd`.
@@ -38,7 +38,7 @@ The reconciled Authentik values are:
 
 ## Argo CD Dex connector
 
-CH06.2 writes `dex.config` into `argocd-cm` and removes any previous direct `oidc.config`:
+CH04.6 writes `dex.config` into `argocd-cm` and removes any previous direct `oidc.config`:
 
 ```yaml
 dex.config: |
@@ -69,7 +69,7 @@ g, PlatformInit Admins, role:admin
 
 The workflow input `argocd_admin_group` controls the group name. Keep this group small and use local `admin` only for break-glass recovery.
 
-CH06.2 also reconciles the matching Authentik group as an application-scoped group:
+CH04.6 also reconciles the matching Authentik group as an application-scoped group:
 
 - group name: `PlatformInit Admins` by default
 - `is_superuser`: `false`
@@ -83,7 +83,7 @@ The default direct member can be overridden with `AUTHENTIK_ARGOCD_ADMIN_USERNAM
 Run:
 
 ```text
-06.2 - Enable Argo CD SSO
+04.6 - Enable Argo CD SSO
 ```
 
 Recommended inputs:
@@ -113,7 +113,7 @@ kubectl -n argocd rollout status deploy/argocd-dex-server
 kubectl -n argocd rollout status deploy/argocd-server
 ```
 
-The direct `oidc.config` check should be empty. CH06.2 intentionally uses Dex-backed Authentik SSO.
+The direct `oidc.config` check should be empty. CH04.6 intentionally uses Dex-backed Authentik SSO.
 
 Browser test:
 
@@ -125,11 +125,11 @@ Expected result: the login page shows an Authentik login option, while the local
 
 ## Emergency recovery note
 
-If SSO configuration causes `argocd-server` to enter `CrashLoopBackOff`, CH06.2 removes `dex.config` and `oidc.config`, clears unhealthy server pods, and preserves a previously healthy control-plane pod where possible.
+If SSO configuration causes `argocd-server` to enter `CrashLoopBackOff`, CH04.6 removes `dex.config` and `oidc.config`, clears unhealthy server pods, and preserves a previously healthy control-plane pod where possible.
 
 ## Token verification recovery note
 
-If the browser shows `failed to verify the token`, first clear cookies and site data for both `argocd.<domain>` and `auth.<domain>`. If it persists, verify that CH06.2 is using Dex-backed config, not direct OIDC:
+If the browser shows `failed to verify the token`, first clear cookies and site data for both `argocd.<domain>` and `auth.<domain>`. If it persists, verify that CH04.6 is using Dex-backed config, not direct OIDC:
 
 ```bash
 kubectl -n argocd get cm argocd-cm -o jsonpath='{.data.dex\.config}'
