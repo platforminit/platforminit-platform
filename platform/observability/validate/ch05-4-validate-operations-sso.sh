@@ -12,8 +12,8 @@ ensure_cluster(){ need kubectl; [ -f "$KUBECONFIG" ] || die "Missing kubeconfig:
 
 ensure_cluster
 kubectl -n "$IDENTITY_NAMESPACE" get svc authentik-server >/dev/null
-kubectl -n "$NAMESPACE" get middleware authentik-forward-auth >/dev/null
-address="$(kubectl -n "$NAMESPACE" get middleware authentik-forward-auth -o jsonpath='{.spec.forwardAuth.address}' 2>/dev/null || true)"
+kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null
+address="$(kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth -o jsonpath='{.spec.forwardAuth.address}' 2>/dev/null || true)"
 case "$address" in
   *authentik-server.identity.svc.cluster.local*/outpost.goauthentik.io/auth/traefik*) ;;
   *) die "Unexpected forwardAuth address: ${address}" ;;

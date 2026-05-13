@@ -37,3 +37,5 @@ Do not require a separate `ak-outpost-*` Kubernetes service for the default Plat
 ## Dependency
 
 `04.5 - Deploy Identity Foundation` must be healthy before `05.4 - Enable Operations SSO` is executed.
+
+Operational note: validation must query Traefik middleware using the fully qualified Kubernetes resource `middleware.traefik.io`. Do not use the ambiguous short resource name `middleware`, because clusters that still expose legacy Traefik CRDs may resolve it to `middlewares.traefik.containo.us` and report false NotFound errors after applying the current `traefik.io/v1alpha1` object.
