@@ -109,6 +109,16 @@ Identity is deployed early in the lifecycle.
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
 | `05.4 - Enable Operations SSO` | Zabbix/OpenObserve → Authentik forward-auth | operations WebUIs |
 
+
+CH05 workflow privilege contract:
+
+```text
+A1 mode: observability
+Allowed privileged entrypoint: /tmp/platforminit-run/ch05-remote.sh *
+```
+
+CH05 workflows must not use generic `sudo -l` validation or ad-hoc runner names. The A1 grant is command-scoped and non-interactive.
+
 ## Privilege model
 
 - `01 - Create or Rebuild Host` provisions the machine and injects the automation key for initial root access.

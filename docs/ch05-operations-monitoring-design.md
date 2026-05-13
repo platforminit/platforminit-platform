@@ -45,3 +45,24 @@ The base deploy creates internal services only. `05.4` creates the public ingres
 ## Storage rule
 
 k3s data must be stored under `/srv/data/k3s`. This prevents accidental growth under the wrong partition and makes PVC-backed storage easier to audit.
+
+## A1 access elevation contract
+
+All CH05 operations workflows must use the existing scoped sudo contract from A1 Access Elevation.
+
+Required contract:
+
+```text
+mode: observability
+allowed sudo entrypoint: /tmp/platforminit-run/ch05-remote.sh *
+```
+
+Workflow rules:
+
+- do not call `sudo -n -l` as a validation step; scoped NOPASSWD rules may still require a password for generic sudo listing
+- do not execute `/tmp/platforminit-run/ch05-runner.sh` or any other ad-hoc sudo entrypoint
+- every CH05 workflow must upload the generated privileged runner as `/tmp/platforminit-run/ch05-remote.sh`
+- the final privileged call must be `sudo -n /tmp/platforminit-run/ch05-remote.sh ...`
+
+This preserves the non-interactive, temporary and audit-friendly A1 model while avoiding standing sudo for the `devops` user.
+

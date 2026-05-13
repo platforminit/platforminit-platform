@@ -118,11 +118,11 @@ jobs:
           ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Render remote CH05 runner
+      - name: Render remote CH05 privileged entrypoint
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/ch05-runner.sh <<'EOS'
+          cat > /tmp/ch05-remote.sh <<'EOS'
           #!/usr/bin/env bash
           set -euo pipefail
 
@@ -132,7 +132,7 @@ jobs:
           SCRIPT="$2"
           VALIDATE="$3"
           OWNER_USER="$4"
-          [[ "${EUID}" -eq 0 ]] || { echo "ch05-runner.sh must run as root" >&2; exit 1; }
+          [[ "${EUID}" -eq 0 ]] || { echo "ch05-remote.sh must run as root" >&2; exit 1; }
 
           if [[ -f /etc/platforminit/host-context.env ]]; then
             # shellcheck disable=SC1091
@@ -172,7 +172,7 @@ jobs:
           chown -R "${OWNER_USER}:${OWNER_USER}" "$tmp_dir" 2>/dev/null || true
           chmod -R u+rwX,go+rX "$tmp_dir" 2>/dev/null || true
           EOS
-          chmod +x /tmp/ch05-runner.sh
+          chmod +x /tmp/ch05-remote.sh
 
       - name: Upload and run CH05 component
         env:
@@ -191,12 +191,11 @@ jobs:
           mkdir -p ./operations-reports
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/observability-release.tar.gz"
-          scp -i ~/.ssh/id_ed25519 /tmp/ch05-runner.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-runner.sh"
+          scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
-            chmod +x /tmp/platforminit-run/ch05-runner.sh
-            sudo -n -l >/dev/null
-            sudo -n /tmp/platforminit-run/ch05-runner.sh '${SHORTSHA}' 'ch05-deploy-zabbix.sh' 'ch05-validate-zabbix.sh' '${HOST_LOGIN_USER}'
+            chmod +x /tmp/platforminit-run/ch05-remote.sh
+            sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' 'ch05-deploy-zabbix.sh' 'ch05-validate-zabbix.sh' '${HOST_LOGIN_USER}'
           "
 
       - name: Fetch CH05 reports
