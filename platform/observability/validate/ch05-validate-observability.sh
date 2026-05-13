@@ -67,10 +67,14 @@ fi
 
 
 PLATFORM_DASHBOARDS=(
-  grafana-dashboard-platform-start-here
-  grafana-dashboard-platform-cluster-overview
-  grafana-dashboard-platform-node-overview
-  grafana-dashboard-platform-logs-overview
+  grafana-dashboard-00-platform-overview
+  grafana-dashboard-10-host-infrastructure
+  grafana-dashboard-20-kubernetes-k3s
+  grafana-dashboard-30-argocd-gitops
+  grafana-dashboard-40-identity-sso
+  grafana-dashboard-50-observability-self-monitoring
+  grafana-dashboard-60-security-audit
+  grafana-dashboard-90-application-template
 )
 for dashboard_cm in "${PLATFORM_DASHBOARDS[@]}"; do
   if kubectl -n "$ns" get configmap "$dashboard_cm" >/dev/null 2>&1; then
@@ -86,7 +90,7 @@ noise_dashboards="$(kubectl -n "$ns" get configmap \
 if [[ -n "${noise_dashboards// }" ]]; then
   fail "DASHBOARD_NOISE_POLICY" "non-PlatformInit dashboard ConfigMaps still present: ${noise_dashboards}"
 else
-  pass "DASHBOARD_NOISE_POLICY" "only PlatformInit beginner dashboards are provisioned"
+  pass "DASHBOARD_NOISE_POLICY" "only PlatformInit operational dashboards are provisioned"
 fi
 
 if kubectl -n "$ns" get ingress grafana >/dev/null 2>&1; then
@@ -101,7 +105,7 @@ else
   fail "GRAFANA_TLS" "grafana certificate missing"
 fi
 
-# CH05.1 may enable Grafana SSO after the CH05 baseline deploy. CH05 itself does
+# CH05.5 may enable Grafana SSO after the CH05 baseline deploy. CH05 itself does
 # not require SSO, but it should make auth overlay drift visible when the OAuth
 # credential secret exists and Grafana no longer renders the Generic OAuth block.
 if kubectl -n "$ns" get secret grafana-authentik-oauth >/dev/null 2>&1; then
@@ -109,7 +113,7 @@ if kubectl -n "$ns" get secret grafana-authentik-oauth >/dev/null 2>&1; then
   if echo "$grafana_ini" | grep -q '\[auth.generic_oauth\]' && echo "$grafana_ini" | grep -q '^enabled = true'; then
     pass "GRAFANA_SSO_OVERLAY" "Grafana SSO overlay is present"
   else
-    warn "GRAFANA_SSO_OVERLAY" "grafana-authentik-oauth secret exists, but Grafana Generic OAuth is not enabled; run 05.1 after CH05 baseline"
+    warn "GRAFANA_SSO_OVERLAY" "grafana-authentik-oauth secret exists, but Grafana Generic OAuth is not enabled; run 05.5 after CH05 baseline"
   fi
 fi
 

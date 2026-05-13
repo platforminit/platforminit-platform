@@ -232,7 +232,7 @@ The CH05 lifecycle should be split by responsibility.
 | `05.4 - Onboard External Host` | n8n and future host collectors |
 | `05.5 - Enable Grafana SSO` | Authentik OAuth integration and break-glass validation |
 
-The current `05.1 - Enable Grafana SSO` workflow should be treated as transitional until the CH05 split is implemented.
+`05.5 - Enable Grafana SSO` is the active Grafana SSO workflow after dashboard provisioning. `05.2`, `05.3` and `05.4` remain planned implementation steps.
 
 ## Reuse vs rebuild
 

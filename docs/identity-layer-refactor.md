@@ -20,10 +20,10 @@ applications must already exist before they can be integrated:
 
 ```text
 04.6 - Enable Argo CD SSO
-05.1 - Enable Grafana SSO
+05.5 - Enable Grafana SSO
 ```
 
-`05.1 - Enable Grafana SSO` is transitional numbering. The CH05 operational observability redesign moves Grafana SSO to `05.5` after dashboard, alerting, security/audit and external-host onboarding workflows are split out.
+`05.5 - Enable Grafana SSO` is the active Grafana SSO binding workflow after `05.1 - Provision Dashboards`. `05.2`, `05.3` and `05.4` remain planned CH05 implementation steps.
 
 ## Rationale
 
@@ -50,7 +50,7 @@ For a clean rebuild use:
 04.5 - Deploy Identity Foundation
 04.6 - Enable Argo CD SSO
 05   - Deploy Observability Stack
-05.1 - Enable Grafana SSO
+05.5 - Enable Grafana SSO
 ```
 
 ## Compatibility
