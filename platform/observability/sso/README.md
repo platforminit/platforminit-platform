@@ -30,6 +30,7 @@ Do not require a separate `ak-outpost-*` Kubernetes service for the default Plat
 - verify `identity/authentik-server` is healthy
 - read the `identity/authentik-bootstrap` API token
 - reconcile Authentik proxy providers and applications for Zabbix and OpenObserve
+- set both provider authorization and provider invalidation flows (`default-provider-authorization-implicit-consent`, `default-provider-invalidation-flow`)
 - attach the providers to the embedded proxy outpost when the outpost is visible through the API
 - create Traefik forward-auth middleware and public ingresses
 
