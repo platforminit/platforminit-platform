@@ -53,21 +53,23 @@ runbook_url: Relative runbook path
 - Group notifications by project, environment, category and service.
 - Suppress warning alerts when a critical alert for the same service is active.
 
+## CH05.2 implementation baseline
 
-## Host alert source
+`05.2 - Provision Alerting` applies `platform/observability/manifests/alerts/platform-vmrule.yaml`.
 
-Host alerts must be built primarily from Node Exporter metrics. The first CH05.2 alerting implementation should cover:
+The first implementation focuses on actionable platform operations alerts:
 
-| Alert | Severity | Source | Intent |
-|---|---|---|---|
-| `HostNodeExporterDown` | critical | `up{job=~".*node-exporter.*|platform-node-exporter"}` | host telemetry unavailable |
-| `HostCpuHigh` | warning | `node_cpu_seconds_total` | sustained CPU pressure |
-| `HostMemoryPressure` | warning | `node_memory_*` | low available memory |
-| `HostDiskUsageHigh` | warning/critical | `node_filesystem_*` | filesystem capacity risk |
-| `HostInodeUsageHigh` | warning/critical | `node_filesystem_files*` | inode exhaustion risk |
-| `HostDiskIoPressure` | warning | `node_disk_*` | IO saturation investigation |
-| `HostNetworkErrors` | warning | `node_network_*_err*` | interface or network quality issue |
-| `HostRebootRequired` | warning | CH05.3 textfile metric | pending reboot after security patching |
-| `PlatformInitSplitStorageBroken` | critical | CH05.3 textfile metric | `/srv/data`, `/srv/db` or `/srv/observability` mount contract broken |
+| Category | Examples | Source |
+|---|---|---|
+| host | Node Exporter down, CPU high, memory pressure, disk/inode usage | Node Exporter |
+| cluster | node not ready, crashlooping pods, pending/failed pods, unavailable deployments, PVC usage | kube-state-metrics / kubelet |
+| platform | Argo CD unavailable, Argo CD application drift | kube-state-metrics / Argo CD metrics |
+| identity | Authentik deployment unavailable | kube-state-metrics |
+| observability | Grafana, VMAgent, VictoriaMetrics, Loki and Alertmanager availability | kube-state-metrics / up{} |
 
-Raw metric alerts should be grouped into human-facing OK/WARNING/CRITICAL/UNKNOWN states in the Alert Operations Center dashboard.
+The rule set intentionally prioritizes clear operator signals over exhaustive raw metric coverage.
+
+## Routing status
+
+CH05.2 v1 provisions alert rules and validates Alertmanager presence. Notification routing remains conservative: alerts are visible in Grafana and Alertmanager, but external notification fanout should be added later when the alert noise budget is proven.
+

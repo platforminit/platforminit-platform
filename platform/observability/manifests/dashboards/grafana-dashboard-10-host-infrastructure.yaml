@@ -4,13 +4,13 @@ metadata:
   name: grafana-dashboard-10-host-infrastructure
   namespace: observability
   labels:
-    grafana_dashboard: '1'
+    grafana_dashboard: "1"
     app.kubernetes.io/part-of: platforminit
     app.kubernetes.io/component: observability
     platforminit.io/dashboard-tier: operational
     platforminit.io/dashboard-role: host
 data:
-  10-host-infrastructure.json: |-
+  10-host-infrastructure.json: |
     {
       "uid": "host-infrastructure",
       "title": "PlatformInit / 10 - Host Infrastructure",
@@ -68,21 +68,6 @@ data:
             }
           },
           {
-            "name": "host",
-            "type": "query",
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${datasource}"
-            },
-            "query": "label_values(up{job=~\".*node-exporter.*|platform-node-exporter\"}, instance)",
-            "includeAll": true,
-            "allValue": ".*",
-            "current": {
-              "text": "All",
-              "value": "$__all"
-            }
-          },
-          {
             "name": "namespace",
             "type": "query",
             "datasource": {
@@ -111,7 +96,7 @@ data:
           },
           "options": {
             "mode": "markdown",
-            "content": "This dashboard answers: **is the host healthy enough to run the platform?** It uses **Node Exporter** as the primary host telemetry source, but presents curated operator panels instead of a noisy raw Node Exporter dashboard. It supports the current dev host and future n8n/external hosts once CH05.4 onboarding is implemented."
+            "content": "This dashboard answers: **is the host healthy enough to run the platform?** It is host-oriented and will support future n8n/external hosts once CH05.4 onboarding is implemented."
           }
         },
         {
@@ -131,7 +116,7 @@ data:
           },
           "targets": [
             {
-              "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$host\"}[5m])) * 100)",
+              "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
               "refId": "A"
             }
           ],
@@ -191,7 +176,7 @@ data:
           },
           "targets": [
             {
-              "expr": "(1 - (node_memory_MemAvailable_bytes{instance=~\"$host\"} / node_memory_MemTotal_bytes{instance=~\"$host\"})) * 100",
+              "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
               "refId": "A"
             }
           ],
@@ -251,7 +236,7 @@ data:
           },
           "targets": [
             {
-              "expr": "max by(instance,mountpoint) ((1 - node_filesystem_avail_bytes{instance=~\"$host\",fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"} / node_filesystem_size_bytes{instance=~\"$host\",fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"}) * 100)",
+              "expr": "max by(instance,mountpoint) ((1 - node_filesystem_avail_bytes{fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"} / node_filesystem_size_bytes{fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"}) * 100)",
               "refId": "A"
             }
           ],
@@ -311,7 +296,7 @@ data:
           },
           "targets": [
             {
-              "expr": "max by(instance,mountpoint) ((1 - node_filesystem_files_free{instance=~\"$host\",fstype!=\"\"} / node_filesystem_files{instance=~\"$host\",fstype!=\"\"}) * 100)",
+              "expr": "max by(instance,mountpoint) ((1 - node_filesystem_files_free{fstype!=\"\"} / node_filesystem_files{fstype!=\"\"}) * 100)",
               "refId": "A"
             }
           ],
@@ -371,7 +356,7 @@ data:
           },
           "targets": [
             {
-              "expr": "(1 - (node_memory_SwapFree_bytes{instance=~\"$host\"} / node_memory_SwapTotal_bytes{instance=~\"$host\"})) * 100",
+              "expr": "(1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) * 100",
               "refId": "A"
             }
           ],
@@ -431,7 +416,7 @@ data:
           },
           "targets": [
             {
-              "expr": "max(time() - node_boot_time_seconds{instance=~\"$host\"})",
+              "expr": "max(time() - node_boot_time_seconds)",
               "refId": "A"
             }
           ],
@@ -474,7 +459,7 @@ data:
           },
           "targets": [
             {
-              "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$host\"}[5m])) * 100)",
+              "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
               "refId": "A",
               "legendFormat": "{{instance}}"
             }
@@ -514,7 +499,7 @@ data:
           },
           "targets": [
             {
-              "expr": "(1 - (node_memory_MemAvailable_bytes{instance=~\"$host\"} / node_memory_MemTotal_bytes{instance=~\"$host\"})) * 100",
+              "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
               "refId": "A",
               "legendFormat": "{{instance}}"
             }
@@ -554,7 +539,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by(instance,device) (rate(node_network_receive_bytes_total{instance=~\"$host\",device!~\"lo|veth.*|cni.*|flannel.*\"}[5m]) + rate(node_network_transmit_bytes_total{instance=~\"$host\",device!~\"lo|veth.*|cni.*|flannel.*\"}[5m]))",
+              "expr": "sum by(instance,device) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|cni.*|flannel.*\"}[5m]) + rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|cni.*|flannel.*\"}[5m]))",
               "refId": "A",
               "legendFormat": "{{instance}} {{device}}"
             }
@@ -594,7 +579,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by(instance,device) (rate(node_disk_read_bytes_total{instance=~\"$host\"}[5m]) + rate(node_disk_written_bytes_total{instance=~\"$host\"}[5m]))",
+              "expr": "sum by(instance,device) (rate(node_disk_read_bytes_total[5m]) + rate(node_disk_written_bytes_total[5m]))",
               "refId": "A",
               "legendFormat": "{{instance}} {{device}}"
             }
@@ -634,7 +619,7 @@ data:
           },
           "targets": [
             {
-              "expr": "(1 - node_filesystem_avail_bytes{instance=~\"$host\",fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"} / node_filesystem_size_bytes{instance=~\"$host\",fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"}) * 100 > 80",
+              "expr": "(1 - node_filesystem_avail_bytes{fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"} / node_filesystem_size_bytes{fstype!=\"\",mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"}) * 100 > 80",
               "refId": "A",
               "format": "table",
               "instant": true
@@ -674,7 +659,7 @@ data:
           },
           "targets": [
             {
-              "expr": "node_systemd_unit_state{state=\"failed\",instance=~\"$host\"} == 1",
+              "expr": "node_systemd_unit_state{state=\"failed\"} == 1",
               "refId": "A",
               "format": "table",
               "instant": true
@@ -704,7 +689,7 @@ data:
           "description": "",
           "gridPos": {
             "x": 0,
-            "y": 25,
+            "y": 21,
             "w": 24,
             "h": 7
           },
@@ -727,77 +712,6 @@ data:
             "enableLogDetails": true,
             "dedupStrategy": "none",
             "sortOrder": "Descending"
-          }
-        },
-        {
-          "id": 15,
-          "type": "stat",
-          "title": "Node Exporter scrape",
-          "description": "1 means host telemetry is being scraped. 0 means host dashboards and host alerts are not trustworthy.",
-          "gridPos": {
-            "x": 0,
-            "y": 21,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "max(up{job=~\".*node-exporter.*|platform-node-exporter\",instance=~\"$host\"})",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "decimals": 0,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": null
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "reduceOptions": {
-              "values": false,
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": ""
-            },
-            "orientation": "auto",
-            "textMode": "auto",
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "auto"
-          }
-        },
-        {
-          "id": 16,
-          "type": "text",
-          "title": "Host telemetry contract",
-          "gridPos": {
-            "x": 6,
-            "y": 21,
-            "w": 18,
-            "h": 4
-          },
-          "options": {
-            "mode": "markdown",
-            "content": "**Node Exporter stays enabled.** Raw upstream dashboards are hidden from the default operator view, but this dashboard and CH05.2 host alerts use Node Exporter as the source of truth. CH05.3 should add textfile collector metrics for PlatformInit split storage, reboot-required, failed services and audit state."
           }
         }
       ]

@@ -38,7 +38,9 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 13 | `04.5 - Deploy Identity Foundation` | `identity-release-*` |
 | 14 | `04.6 - Enable Argo CD SSO` | `identity-release-*` |
 | 15 | `05 - Deploy Observability Stack` | `observability-release-*` |
-| 16 | `05.1 - Enable Grafana SSO` | `identity-release-*` |
+| 16 | `05.1 - Provision Dashboards` | `observability-release-*` |
+| 17 | `05.2 - Provision Alerting` | `observability-release-*` |
+| 18 | `05.5 - Enable Grafana SSO` | `identity-release-*` |
 
 Target CH05 redesign order:
 
@@ -82,7 +84,6 @@ Internal backends:
 | Component | Public WebUI? | Usage |
 |---|---:|---|
 | Grafana | yes | dashboards, logs, alerts and operator console |
-| Node Exporter | no | first-class host metrics source for CH05 dashboards and alerts |
 | VictoriaMetrics | no | metrics backend / internal debug API |
 | VMAgent | no | scrape and remote-write pipeline |
 | Loki | no | log backend queried from Grafana |
@@ -122,7 +123,7 @@ See:
 
 ## Identity and SSO
 
-Identity has been promoted into the early platform lifecycle. Authentik is deployed by CH04.5, Argo CD SSO is enabled by CH04.6 and Grafana SSO currently remains in CH05.1 during the observability transition.
+Identity has been promoted into the early platform lifecycle. Authentik is deployed by CH04.5, Argo CD SSO is enabled by CH04.6 and Grafana SSO has moved to CH05.5 so dashboards and alerting exist before the final operator login polish.
 
 Public identity UI:
 
@@ -135,9 +136,9 @@ Current SSO bindings:
 | Workflow | Binding | Notes |
 |---|---|---|
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | browser login validated during identity refactor |
-| `05.1 - Enable Grafana SSO` | Grafana → Authentik | transitional numbering; target is `05.5` after CH05 split |
+| `05.5 - Enable Grafana SSO` | Grafana → Authentik | run after CH05, CH05.1 and CH05.2 are healthy |
 
-After running CH05 in `baseline` mode, rerun the Grafana SSO workflow if the Grafana SSO button disappears.
+After running CH05 in `baseline` mode, rerun `05.5 - Enable Grafana SSO` if the Grafana SSO button disappears.
 
 ## Privilege model
 

@@ -12,7 +12,6 @@ The goal is not only to deploy metrics and logging components. CH05 must provide
 - Grafana datasource provisioning
 - Operational dashboard set
 - Kubernetes and node baseline telemetry
-- Node Exporter as first-class host telemetry source
 - Observability self-monitoring
 - Security & Audit Monitoring
 - External host onboarding design for n8n and future hosts
@@ -36,50 +35,12 @@ The current stack is retained.
 | Grafana | keep | dashboards, logs, alerts, operator console |
 | VictoriaMetrics | keep | metrics backend |
 | VMAgent | keep | scrape and remote-write pipeline |
-| Node Exporter | keep | host CPU, memory, filesystem, network, disk IO and textfile collector metrics |
 | Loki | keep | log backend |
 | Alloy | keep | Kubernetes and host log collector |
 | Alertmanager | keep | alert grouping and routing |
 | Argo CD inventory app | keep | GitOps visibility for CH05 resources |
 
-The redesign focuses on UX, labels, dashboards, alerts and security monitoring rather than replacing the stack. Node Exporter is explicitly retained as the host telemetry foundation; only raw/noisy upstream dashboards are hidden from the default operator experience.
-
-
-## Host telemetry policy
-
-Node Exporter is a core CH05 component. It must remain enabled for every Kubernetes node and future onboarded host. PlatformInit does not use the raw upstream Node Exporter dashboard as the primary operator UI; instead, curated PlatformInit dashboards and alerts are built on top of Node Exporter metrics.
-
-Required Node Exporter metric coverage:
-
-```text
-node_cpu_seconds_total
-node_memory_MemAvailable_bytes
-node_memory_MemTotal_bytes
-node_filesystem_avail_bytes
-node_filesystem_size_bytes
-node_filesystem_files_free
-node_network_receive_bytes_total
-node_network_transmit_bytes_total
-node_disk_read_bytes_total
-node_disk_written_bytes_total
-node_boot_time_seconds
-up{job=~".*node-exporter.*|platform-node-exporter"}
-```
-
-Future CH05.3 should extend Node Exporter with the textfile collector for PlatformInit-specific host state:
-
-```text
-platforminit_storage_split_layout_ok
-platforminit_srv_data_mounted
-platforminit_srv_db_mounted
-platforminit_srv_observability_mounted
-platforminit_reboot_required
-platforminit_failed_systemd_units
-platforminit_access_elevation_active
-platforminit_audit_log_present
-```
-
-This keeps Linux telemetry and PlatformInit host compliance visible through the same host dashboard and alerting pipeline.
+The redesign focuses on UX, labels, dashboards, alerts and security monitoring rather than replacing the stack.
 
 ## Operational state model
 
@@ -259,7 +220,6 @@ The registered Application tracks only the Kubernetes manifests under `platform/
 - `security/README.md`
 - `external-hosts/README.md`
 - `workflows/README.md`
-- `node-exporter/README.md`
 - `docs/ch05-beginner-dashboard-guide.md`
 - `docs/ch05-k3s-monitoring-runbook.md`
 - `docs/ch05-ch05-1-sso-interaction.md`
