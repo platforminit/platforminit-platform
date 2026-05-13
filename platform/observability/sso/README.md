@@ -4,18 +4,34 @@ All public CH05 WebUIs must require Authentik login.
 
 ## Model
 
-The default model is edge authentication through Traefik + Authentik forward-auth:
+The default model is edge authentication through Traefik and the Authentik embedded proxy outpost endpoint:
 
 ```text
 browser -> Traefik ingress -> Authentik forward-auth -> Zabbix/OpenObserve service
 ```
 
-This keeps Zabbix and OpenObserve simple while preventing direct unauthenticated public access.
+PlatformInit's CH04.5 Authentik deployment exposes the embedded outpost endpoint through the existing Kubernetes service:
+
+```text
+authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+```
+
+Do not require a separate `ak-outpost-*` Kubernetes service for the default PlatformInit install unless CH04.5 is explicitly changed to deploy a standalone outpost later.
 
 ## Protected UIs
 
 - `https://zabbix.<PLATFORM_BASE_DOMAIN>`
 - `https://logs.<PLATFORM_BASE_DOMAIN>`
+
+## Authentik objects reconciled by `05.4`
+
+`05.4 - Enable Operations SSO` must:
+
+- verify `identity/authentik-server` is healthy
+- read the `identity/authentik-bootstrap` API token
+- reconcile Authentik proxy providers and applications for Zabbix and OpenObserve
+- attach the providers to the embedded proxy outpost when the outpost is visible through the API
+- create Traefik forward-auth middleware and public ingresses
 
 ## Dependency
 
