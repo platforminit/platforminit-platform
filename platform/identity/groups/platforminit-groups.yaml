@@ -30,25 +30,32 @@
       "scope": "application:argocd"
     },
     {
-      "name": "Grafana Admins",
-      "slug": "grafana-admins",
-      "description": "Grafana organization administrators.",
+      "name": "Operations Admins",
+      "slug": "operations-admins",
+      "description": "Administrators for the CH05 operations WebUIs protected by Authentik.",
       "is_superuser": false,
-      "scope": "application:grafana"
+      "scope": "application:operations"
     },
     {
-      "name": "Grafana Editors",
-      "slug": "grafana-editors",
-      "description": "Grafana dashboard editors.",
+      "name": "Operations Viewers",
+      "slug": "operations-viewers",
+      "description": "Read-only users for CH05 operations WebUIs protected by Authentik.",
       "is_superuser": false,
-      "scope": "application:grafana"
+      "scope": "application:operations"
     },
     {
-      "name": "Grafana Viewers",
-      "slug": "grafana-viewers",
-      "description": "Grafana dashboard viewers.",
+      "name": "Zabbix Admins",
+      "slug": "zabbix-admins",
+      "description": "Administrators for the Zabbix operational monitoring UI.",
       "is_superuser": false,
-      "scope": "application:grafana"
+      "scope": "application:zabbix"
+    },
+    {
+      "name": "OpenObserve Admins",
+      "slug": "openobserve-admins",
+      "description": "Administrators for the OpenObserve RCA log UI.",
+      "is_superuser": false,
+      "scope": "application:openobserve"
     },
     {
       "name": "Authentik Admins",

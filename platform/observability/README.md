@@ -1,91 +1,70 @@
-# CH05 Observability
+# CH05 - Operations Monitoring
 
-CH05 provides the observability foundation for the single-node k3s PlatformInit environment.
+CH05 is the PlatformInit operations layer. It intentionally replaces the previous Grafana/VictoriaMetrics/Loki/Alloy default stack with a smaller operator-first model.
 
-## Scope
-
-- Metrics via VictoriaMetrics stack
-- Logs via Loki and Alloy
-- Alerting via VMAlert and Alertmanager
-- Grafana datasource provisioning
-- Beginner-friendly PlatformInit dashboards
-- Kubernetes and node baseline telemetry
-
-## Public UI policy
-
-Grafana is the only public CH05 WebUI:
+## Default architecture
 
 ```text
-https://grafana.<PLATFORM_BASE_DOMAIN>
+Zabbix      -> what is broken?
+Vector      -> collect platform, Kubernetes and host logs
+OpenObserve -> why did it break? searchable RCA logs
+Authentik   -> mandatory login gate for public operational WebUIs
 ```
 
-VictoriaMetrics, Loki and Alloy are internal services. They should be accessed through Grafana or temporary `kubectl port-forward` during debugging.
+## Public WebUIs
 
-## Dashboard policy
+Public WebUIs are exposed only after `05.4 - Enable Operations SSO` applies the Authentik forward-auth middleware.
 
-PlatformInit intentionally disables/prunes noisy upstream dashboards from the VictoriaMetrics Kubernetes stack and provisions the following operational dashboards:
+| URL | Purpose | Auth model |
+|---|---|---|
+| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik forward-auth |
+| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik forward-auth |
 
-| Dashboard | Purpose |
-|---|---|
-| `PlatformInit / 00 - Start Here` | first health view after deploy/recreate |
-| `PlatformInit / Cluster Overview` | cluster, pod, namespace and restart overview |
-| `PlatformInit / Node Overview` | host CPU, RAM, disk, filesystem and network |
-| `PlatformInit / Logs Overview` | Loki logs through Grafana |
+Vector has no public WebUI.
 
-This keeps the default experience beginner-friendly and avoids kubeadm/control-plane dashboards that are noisy on single-node k3s.
+## Workflow order
 
-## Deployment
+| Order | Workflow | Purpose |
+|---:|---|---|
+| 15 | `05 - Deploy Zabbix Monitoring` | deploy Zabbix DB, server, web UI service and agent baseline |
+| 16 | `05.1 - Deploy OpenObserve` | deploy searchable logs backend |
+| 17 | `05.2 - Deploy Vector Logging` | deploy Vector DaemonSet and log shipping config |
+| 18 | `05.3 - Onboard External Host` | reserve onboarding contract for n8n/future hosts |
+| 19 | `05.4 - Enable Operations SSO` | expose Zabbix/OpenObserve through Authentik-gated ingresses |
 
-Use:
+## Removed default components
+
+The following components are not PlatformInit defaults anymore:
+
+- Grafana
+- VictoriaMetrics
+- VMAgent
+- VMAlert
+- Alertmanager
+- Loki
+- Alloy
+- provisioned Grafana dashboards
+
+They may return later as optional advanced modules, but they must not be part of the default CH05 lifecycle.
+
+## Storage contract
+
+CH05 must avoid uncontrolled growth under the Kubernetes data directory. Persistent application data is stored through k3s PVCs, and the k3s data directory itself must be under `/srv/data/k3s`.
+
+Expected host layout:
 
 ```text
-00 - Build Platform Artifacts
-05 - Deploy Observability Stack
+/srv/data/k3s        -> k3s data-dir and local-path PVC backing storage
+/srv/db              -> reserved DB volume mount
+/srv/observability   -> release artifacts, validation logs, operational reports
 ```
-
-For normal updates after CH06.1 Grafana SSO has been enabled, prefer:
-
-```text
-deploy_mode: reconcile
-```
-
-If CH05 is run in `baseline` mode after SSO was enabled, rerun:
-
-```text
-06.1 - Enable Grafana SSO
-```
-
-## Validation contract
-
-CH05 must validate that Grafana is reachable **and** VictoriaMetrics contains useful data:
-
-```text
-VM_QUERY_UP
-VM_QUERY_NODE
-VM_QUERY_KSM
-```
-
-The validation also checks that the PlatformInit beginner dashboards are present and that non-PlatformInit dashboard ConfigMaps have been pruned.
 
 ## Documentation
 
-- `docs/ch05-beginner-dashboard-guide.md`
-- `docs/ch05-k3s-monitoring-runbook.md`
-- `docs/ch05-ch06-sso-interaction.md`
-
-## Grafana datasource policy
-
-VictoriaMetrics remains the single default Grafana datasource. Loki is provisioned as a non-default datasource to avoid Grafana startup failures caused by multiple defaults in the same organization.
-
-## Argo CD inventory registration
-
-CH05 deploys the observability stack with Helm from the GitHub Actions workflow.
-After deployment, `scripts/ch05-register-argocd-apps.sh` registers a
-non-destructive Argo CD `Application` named `ch05-observability` so the layer is
-visible in the Argo CD UI.
-
-The registered Application tracks only the Kubernetes manifests under
-`platform/observability/manifests`. Helm-owned releases such as
-`observability-vmstack`, `loki`, and `alloy` remain workflow-owned until a
-separate GitOps migration intentionally moves those releases under Argo CD
-ownership.
+- `docs/ch05-operations-monitoring-design.md`
+- `docs/ch05-migration-from-grafana-stack.md`
+- `platform/observability/zabbix/README.md`
+- `platform/observability/vector/README.md`
+- `platform/observability/openobserve/README.md`
+- `platform/observability/sso/README.md`
+- `platform/observability/rules/platforminit-operations-rules.md`

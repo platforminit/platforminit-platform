@@ -46,6 +46,56 @@ resolve_authentik_api_token() {
   export AUTHENTIK_BOOTSTRAP_TOKEN
 }
 
+wait_for_authentik_api_token() {
+  local timeout_seconds="${AUTHENTIK_TOKEN_READY_TIMEOUT_SECONDS:-600}"
+  local interval_seconds="${AUTHENTIK_TOKEN_READY_INTERVAL_SECONDS:-10}"
+  export AUTHENTIK_TOKEN_READY_TIMEOUT_SECONDS="${timeout_seconds}"
+  export AUTHENTIK_TOKEN_READY_INTERVAL_SECONDS="${interval_seconds}"
+  log "Waiting for Authentik bootstrap API token readiness against ${AUTHENTIK_BASE_URL}"
+
+  python3 - <<'PYTOKEN'
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+base_url = os.environ["AUTHENTIK_BASE_URL"].rstrip("/")
+token = os.environ["AUTHENTIK_BOOTSTRAP_TOKEN"]
+timeout = int(os.environ.get("AUTHENTIK_TOKEN_READY_TIMEOUT_SECONDS", "600"))
+interval = int(os.environ.get("AUTHENTIK_TOKEN_READY_INTERVAL_SECONDS", "10"))
+deadline = time.time() + timeout
+last_error = "not checked"
+headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+while time.time() < deadline:
+    req = urllib.request.Request(f"{base_url}/api/v3/core/users/me/", method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            payload = json.loads(raw) if raw else {}
+            username = payload.get("username") or payload.get("user", {}).get("username") or "authenticated"
+            print(f"Authentik API token is ready for user: {username}")
+            sys.exit(0)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace").strip()
+        last_error = f"HTTP {exc.code}: {body}"
+        if exc.code not in (401, 403):
+            print(f"Unexpected Authentik API readiness error: {last_error}", file=sys.stderr)
+    except urllib.error.URLError as exc:
+        last_error = str(exc)
+    time.sleep(interval)
+
+print(
+    f"Timed out after {timeout}s waiting for Authentik bootstrap API token to become valid. "
+    f"Last error: {last_error}",
+    file=sys.stderr,
+)
+sys.exit(1)
+PYTOKEN
+}
+
 validate_prerequisites() {
   need kubectl
   need python3
@@ -69,7 +119,7 @@ start_authentik_api_port_forward() {
 
   log "Starting local Authentik API port-forward on 127.0.0.1:${AUTHENTIK_LOCAL_PORT}"
   kubectl --kubeconfig "${KUBECONFIG}" -n "${IDENTITY_NAMESPACE}" \
-    port-forward svc/authentik-server "127.0.0.1:${AUTHENTIK_LOCAL_PORT}:80" \
+    port-forward --address 127.0.0.1 svc/authentik-server "${AUTHENTIK_LOCAL_PORT}:80" \
     >/tmp/ch04-5-authentik-port-forward.log 2>&1 &
   PORT_FORWARD_PID="$!"
 
@@ -251,6 +301,7 @@ main() {
   validate_prerequisites
   start_authentik_api_port_forward
   resolve_authentik_api_token
+  wait_for_authentik_api_token
   bootstrap_identity_model
   log "CH04.5 identity foundation bootstrap completed"
 }

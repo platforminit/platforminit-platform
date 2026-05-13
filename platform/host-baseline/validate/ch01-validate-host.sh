@@ -74,6 +74,55 @@ else
   fi
 fi
 
+
+section "## Volume layout"
+if [[ -f /etc/platforminit/host-context.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/platforminit/host-context.env
+  res PASS HOST_CONTEXT "host context present" "/etc/platforminit/host-context.env"
+else
+  PLATFORMINIT_VOLUME_LAYOUT="single"
+  PLATFORMINIT_SRV_PATH="/srv"
+  PLATFORMINIT_DATA_PATH="/srv/data"
+  PLATFORMINIT_DB_PATH="/srv/db"
+  PLATFORMINIT_OBSERVABILITY_PATH="/srv/observability"
+  res WARN HOST_CONTEXT "host context missing; using legacy single-volume assumptions"
+fi
+PLATFORMINIT_VOLUME_LAYOUT="${PLATFORMINIT_VOLUME_LAYOUT:-single}"
+PLATFORMINIT_SRV_PATH="${PLATFORMINIT_SRV_PATH:-/srv}"
+PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
+PLATFORMINIT_DB_PATH="${PLATFORMINIT_DB_PATH:-/srv/db}"
+PLATFORMINIT_OBSERVABILITY_PATH="${PLATFORMINIT_OBSERVABILITY_PATH:-/srv/observability}"
+check_mount(){
+  local id="$1" path="$2"
+  if mountpoint -q "$path"; then
+    res PASS "$id" "$path is mounted" "$(findmnt -n -o SOURCE,SIZE,USE% "$path" 2>/dev/null || true)"
+  else
+    res FAIL "$id" "$path is not mounted" "missing" "mounted persistent volume"
+  fi
+}
+case "$PLATFORMINIT_VOLUME_LAYOUT" in
+  none)
+    [[ -d "$PLATFORMINIT_SRV_PATH" ]] && res PASS VOLUME_LAYOUT_NONE "no persistent volume layout selected" "$PLATFORMINIT_SRV_PATH exists" || res FAIL VOLUME_LAYOUT_NONE "$PLATFORMINIT_SRV_PATH missing"
+    ;;
+  single)
+    check_mount VOLUME_SRV_MOUNT "$PLATFORMINIT_SRV_PATH"
+    ;;
+  split)
+    if mountpoint -q /srv && ! grep -qE $'^[^\t]+\t[^\t]+\t[^\t]+\t/srv$' /etc/platforminit/volume-layout.tsv 2>/dev/null; then
+      res FAIL VOLUME_STALE_SRV_MOUNT "/srv is mounted even though split layout expects /srv/data, /srv/db and /srv/observability" "$(findmnt -n -o SOURCE /srv 2>/dev/null || true)" "no direct /srv mount in split layout"
+    else
+      res PASS VOLUME_NO_STALE_SRV_MOUNT "no stale /srv mount detected for split layout"
+    fi
+    check_mount VOLUME_DATA_MOUNT "$PLATFORMINIT_DATA_PATH"
+    check_mount VOLUME_DB_MOUNT "$PLATFORMINIT_DB_PATH"
+    check_mount VOLUME_OBSERVABILITY_MOUNT "$PLATFORMINIT_OBSERVABILITY_PATH"
+    ;;
+  *)
+    res FAIL VOLUME_LAYOUT_SUPPORTED "unsupported volume layout: $PLATFORMINIT_VOLUME_LAYOUT"
+    ;;
+esac
+
 section "## Baseline evidence"
 AUDIT_DIR="${PLATFORMINIT_AUDIT_DIR:-/srv/platforminit/audit}"
 LEGACY_AUDIT_DIR="/var/lib/platforminit/audit"

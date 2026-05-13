@@ -10,12 +10,10 @@ if [[ -f /etc/platforminit/host-context.env ]]; then
   # shellcheck disable=SC1091
   source /etc/platforminit/host-context.env
 fi
-PLATFORMINIT_VOLUME_LAYOUT="${PLATFORMINIT_VOLUME_LAYOUT:-single}"
-if [[ "$PLATFORMINIT_VOLUME_LAYOUT" == "split" ]]; then
-  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
-else
-  PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv}"
-fi
+# PlatformInit k3s storage contract:
+# k3s data must live under /srv/data/k3s so local-path PVC storage does not
+# silently grow on the wrong filesystem/partition.
+PLATFORMINIT_DATA_PATH="${PLATFORMINIT_DATA_PATH:-/srv/data}"
 DATA_DIR="${K3S_DATA_DIR:-${PLATFORMINIT_DATA_PATH}/k3s}"
 TLS_DOMAIN="k3s.sysadminhomelab.hu"
 K3S_CONFIG="/etc/rancher/k3s/config.yaml"
