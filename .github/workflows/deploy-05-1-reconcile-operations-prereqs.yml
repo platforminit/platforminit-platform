@@ -197,9 +197,44 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./operations-reports
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
-          scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/observability-release.tar.gz"
-          scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
+          SSH_OPTS=(
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=10
+            -o ConnectTimeout=20
+            -o ConnectionAttempts=1
+            -i ~/.ssh/id_ed25519
+          )
+          SCP_OPTS=(
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=10
+            -o ConnectTimeout=20
+            -o ConnectionAttempts=1
+            -i ~/.ssh/id_ed25519
+          )
+          retry_io() {
+            local attempt=1
+            local max_attempts=6
+            local delay=5
+            local rc=0
+            while (( attempt <= max_attempts )); do
+              "$@" && return 0
+              rc=$?
+              echo "WARN: remote command failed with rc=${rc} on attempt ${attempt}/${max_attempts}. Retrying after ${delay}s..." >&2
+              sleep "${delay}"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+              (( delay > 45 )) && delay=45
+            done
+            echo "FATAL: remote command failed after ${max_attempts} attempts: $*" >&2
+            return "${rc}"
+          }
+          retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
+          retry_io scp "${SCP_OPTS[@]}" "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/observability-release.tar.gz"
+          retry_io scp "${SCP_OPTS[@]}" /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
           {
             [[ -n "${BASE_DOMAIN:-}" ]] || { echo "FATAL: PLATFORM_BASE_DOMAIN secret is required; CH05 does not hardcode domains." >&2; exit 1; }
             printf 'BASE_DOMAIN=%q\n' "${BASE_DOMAIN}"
@@ -212,8 +247,8 @@ jobs:
             printf 'ZABBIX_ADMIN_USER=%q\n' "${ZABBIX_ADMIN_USER:-Admin}"
             printf 'ZABBIX_ADMIN_PASSWORD=%q\n' "${ZABBIX_ADMIN_PASSWORD:-zabbix}"
           } > ./ch05.env
-          scp -i ~/.ssh/id_ed25519 ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
+          retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
+          retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh
             sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' 'ch05-reconcile-operations-prereqs.sh' 'ch05-validate-operations-prereqs.sh' '${HOST_LOGIN_USER}'
@@ -229,7 +264,7 @@ jobs:
         run: |
           set +e
           mkdir -p ./operations-reports
-          scp -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/*.log" ./operations-reports/ 2>/dev/null || true
+          scp -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/*.log" ./operations-reports/ 2>/dev/null || true
           find ./operations-reports -type f -maxdepth 1 -print -exec tail -n 80 {} \;
 
       - name: Upload CH05 reports

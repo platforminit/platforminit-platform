@@ -196,6 +196,8 @@ PermitRootLogin no
 PasswordAuthentication no
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
+LoginGraceTime 20
+MaxStartups 50:30:200
 EOFSSH
 sshd -t
 systemctl restart ssh || systemctl restart sshd; }

@@ -184,3 +184,6 @@ git checkout -b refactor/ch05-argocd-owned-operations-stack
 - Authentik login required for public WebUIs
 - low-resource single-node defaults
 - clear operator alerts over raw telemetry dashboards
+
+
+See `docs/ssh-maxstartups-and-workflow-retry.md` for the SSH MaxStartups and workflow retry contract.

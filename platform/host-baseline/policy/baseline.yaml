@@ -31,6 +31,8 @@ ssh:
   pubkey_authentication: "yes"
   max_auth_tries: 3
   x11_forwarding: "no"
+  login_grace_time: 20
+  max_startups: "50:30:200"
 
 firewall:
   default_incoming: deny
@@ -55,6 +57,8 @@ fim:
         - "PasswordAuthentication no"
         - "PubkeyAuthentication yes"
         - "AuthorizedKeysFile .ssh/authorized_keys"
+        - "LoginGraceTime 20"
+        - "MaxStartups 50:30:200"
     - path: /etc/sudoers.d/itadmin-platforminit
       contains:
         - "itadmin ALL=(root) NOPASSWD: /usr/local/sbin/platforminit-grant-sudo *"

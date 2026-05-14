@@ -69,11 +69,13 @@ PubkeyAuthentication $(yq -r '.ssh.pubkey_authentication' "$POLICY_FILE")
 MaxAuthTries $(yq -r '.ssh.max_auth_tries' "$POLICY_FILE")
 X11Forwarding $(yq -r '.ssh.x11_forwarding' "$POLICY_FILE")
 AuthorizedKeysFile .ssh/authorized_keys
+LoginGraceTime $(yq -r '.ssh.login_grace_time // 20' "$POLICY_FILE")
+MaxStartups $(yq -r '.ssh.max_startups // "50:30:200"' "$POLICY_FILE")
 EOFSSH
 install -d -m 755 /run/sshd
 sshd -t
 systemctl restart ssh || systemctl restart sshd
-baseline_event "ssh_hardening" "ok" "root disabled, password auth disabled"
+baseline_event "ssh_hardening" "ok" "root disabled, password auth disabled, MaxStartups tuned"
 
 ufw --force reset
 ufw default "$(yq -r '.firewall.default_incoming' "$POLICY_FILE")" incoming
