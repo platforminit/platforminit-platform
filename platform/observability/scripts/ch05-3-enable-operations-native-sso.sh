@@ -160,6 +160,60 @@ def ensure_user_in_group(username,group_pk,group_name):
     if group_pk not in groups:
         groups.append(group_pk); request("PATCH",f"/api/v3/core/users/{user['pk']}/",{"groups":groups})
         print(f"Added Authentik user {username} to {group_name}")
+
+def user_details(user):
+    pk=user.get("pk") or user.get("id")
+    if not pk:
+        return user
+    try:
+        return request("GET",f"/api/v3/core/users/{pk}/")
+    except Exception:
+        return user
+
+def sync_operations_group_membership(group_pk,group_name,admin_username):
+    """Make the intended Authentik operators explicit before provisioning app users.
+
+    The Zabbix SAML integration is intentionally not JIT-driven yet. Zabbix
+    only lets a SAML login complete when the incoming username already exists
+    with a valid role/group. To avoid the recurring "authorized via SSO, but
+    logging in to Zabbix failed" error, every active Authentik superuser and
+    the configured bootstrap admin are placed into PlatformInit Operations and
+    later mirrored into Zabbix.
+    """
+    for user in paginated_results("/api/v3/core/users/?page_size=200"):
+        username=user.get("username")
+        if not username:
+            continue
+        is_superuser=bool(user.get("is_superuser"))
+        is_active=user.get("is_active", True)
+        if username == admin_username or (is_superuser and is_active):
+            ensure_user_in_group(username,group_pk,group_name)
+
+def operations_user_records(group_pk,admin_username):
+    records={}
+    for user in paginated_results("/api/v3/core/users/?page_size=200"):
+        username=user.get("username")
+        if not username:
+            continue
+        detail=user_details(user)
+        groups=group_pk_list(detail.get("groups",[]))
+        if group_pk in groups or username == admin_username:
+            records[username]={
+                "username":username,
+                "name":detail.get("name") or username,
+                "email":detail.get("email") or "",
+                "is_superuser":bool(detail.get("is_superuser")),
+            }
+    if admin_username and admin_username not in records:
+        records[admin_username]={"username":admin_username,"name":admin_username,"email":"","is_superuser":False}
+    return [records[k] for k in sorted(records)]
+
+def write_zabbix_user_sync_file(group_pk,admin_username):
+    users=operations_user_records(group_pk,admin_username)
+    with open("/tmp/platforminit-zabbix-users.json","w",encoding="utf-8") as fh:
+        json.dump(users,fh)
+    print("Prepared Zabbix SAML user sync list: "+", ".join(u["username"] for u in users))
+
 def ensure_saml_mapping(name,saml_name,expression,friendly_name=""):
     existing=first_by_name("/api/v3/propertymappings/provider/saml/",name)
     payload={"name":name,"saml_name":saml_name,"friendly_name":friendly_name,"expression":expression}
@@ -332,13 +386,14 @@ request("GET","/api/v3/core/users/me/")
 authorization_flow=flow_pk("default-provider-authorization-implicit-consent")
 invalidation_flow=flow_pk("default-provider-invalidation-flow")
 ops_group_pk=ensure_group(operations_group_name)
-ensure_user_in_group(admin_username,ops_group_pk,operations_group_name)
+sync_operations_group_membership(ops_group_pk,operations_group_name,admin_username)
+write_zabbix_user_sync_file(ops_group_pk,admin_username)
 cleanup_proxy_provider("PlatformInit Zabbix")
 cleanup_proxy_provider("PlatformInit OpenObserve")
 ensure_saml_provider(authorization_flow,invalidation_flow)
 ensure_oauth2_provider(authorization_flow,invalidation_flow)
 with open("/tmp/platforminit-openobserve-sso.env","w",encoding="utf-8") as fh:
-    env={"O2_DEX_ENABLED":"true","O2_DEX_CLIENT_ID":openobserve_client_id,"O2_DEX_CLIENT_SECRET":openobserve_client_secret,"O2_DEX_BASE_URL":f"{authentik_public_host}/application/o/{openobserve_slug}/","O2_DEX_REDIRECT_URL":f"{logs_host}/config/redirect","O2_CALLBACK_URL":f"{logs_host}/web/cb","O2_DEX_SCOPES":"openid profile email groups offline_access","O2_DEX_GROUP_ATTRIBUTE":"groups","O2_DEX_ROLE_ATTRIBUTE":"groups","O2_DEX_DEFAULT_ORG":"default"}
+    env={"O2_DEX_ENABLED":"true","O2_DEX_CLIENT_ID":openobserve_client_id,"O2_DEX_CLIENT_SECRET":openobserve_client_secret,"O2_DEX_BASE_URL":f"{authentik_public_host}/application/o","O2_DEX_AUTH_EP_SUFFIX":"/authorize/","O2_DEX_TOKEN_EP_SUFFIX":"/token/","O2_DEX_KEYS_EP_SUFFIX":f"/{openobserve_slug}/jwks/","O2_DEX_REDIRECT_URL":f"{logs_host}/config/redirect","O2_CALLBACK_URL":f"{logs_host}/web/cb","O2_DEX_SCOPES":"openid profile email groups offline_access","O2_DEX_GROUP_ATTRIBUTE":"groups","O2_DEX_ROLE_ATTRIBUTE":"groups","O2_DEX_DEFAULT_ORG":"default"}
     for k,v in env.items(): fh.write(f"{k}={v}\n")
 with open("/tmp/platforminit-zabbix-saml.json","w",encoding="utf-8") as fh:
     json.dump({"idp_entityid":f"{authentik_public_host}/application/saml/{zabbix_slug}/metadata/","sso_url":f"{authentik_public_host}/application/saml/{zabbix_slug}/sso/binding/redirect/","slo_url":f"{authentik_public_host}/application/saml/{zabbix_slug}/slo/binding/redirect/","sp_entityid":zabbix_host,"username_attribute":"username","bootstrap_user":admin_username},fh)
@@ -398,35 +453,73 @@ def first(items):
     return items[0] if items else None
 
 token=login()
-# Make the Authentik bootstrap user usable for Zabbix SAML. Local Admin remains break-glass.
-try:
+# Mirror Authentik PlatformInit Operations users into Zabbix for SAML login.
+# Local Admin remains break-glass. SAML login in Zabbix fails unless the
+# incoming username already exists with a valid frontend role/group.
+def load_saml_users():
+    try:
+        users=json.load(open("/tmp/platforminit-zabbix-users.json",encoding="utf-8"))
+        if isinstance(users,list) and users:
+            return users
+    except Exception as exc:
+        print(f"WARN: Could not read Authentik/Zabbix SAML user sync file: {exc}")
+    return [{"username":bootstrap_user,"name":bootstrap_user,"email":""}]
+
+def split_display_name(value, fallback):
+    value=(value or "").strip()
+    if not value or value == fallback:
+        return "", fallback
+    parts=value.split()
+    if len(parts) == 1:
+        return "", parts[0]
+    return " ".join(parts[:-1]), parts[-1]
+
+def ensure_zabbix_saml_users():
     groups=rpc("usergroup.get", {"output":["usrgrpid","name"],"filter":{"name":["Zabbix administrators"]}}, token) or []
     group=first(groups) or first(rpc("usergroup.get", {"output":["usrgrpid","name"],"search":{"name":"Admin"}}, token) or [])
     roles=rpc("role.get", {"output":["roleid","name","type"],"filter":{"name":["Super admin role"]}}, token) or []
     role=first(roles) or first([r for r in (rpc("role.get", {"output":["roleid","name","type"]}, token) or []) if str(r.get("type"))=="3" or "super" in str(r.get("name","")).lower()])
-    if group and role:
-        existing=rpc("user.get", {"output":["userid","username","alias"],"filter":{"username":[bootstrap_user]}}, token) or []
+    if not group or not role:
+        print("WARN: Could not find Zabbix admin group/role; SAML user sync was skipped")
+        return
+    for user in load_saml_users():
+        username=(user.get("username") or "").strip()
+        if not username:
+            continue
+        display_name=user.get("name") or username
+        name,surname=split_display_name(display_name, username)
+        existing=rpc("user.get", {"output":["userid","username","alias"],"filter":{"username":[username]}}, token) or []
         if not existing:
             try:
-                existing=rpc("user.get", {"output":["userid","username","alias"],"filter":{"alias":[bootstrap_user]}}, token) or []
+                existing=rpc("user.get", {"output":["userid","username","alias"],"filter":{"alias":[username]}}, token) or []
             except Exception:
                 existing=[]
-        payload={"username":bootstrap_user,"passwd":secrets.token_urlsafe(24),"roleid":role["roleid"],"usrgrps":[{"usrgrpid":group["usrgrpid"]}]}
+        payload={
+            "username":username,
+            "roleid":role["roleid"],
+            "usrgrps":[{"usrgrpid":group["usrgrpid"]}],
+            "name":name,
+            "surname":surname,
+        }
         if existing:
             userid=existing[0]["userid"]
-            rpc("user.update", {"userid":userid,"roleid":role["roleid"],"usrgrps":[{"usrgrpid":group["usrgrpid"]}]}, token)
-            print(f"Updated Zabbix SAML bootstrap user {bootstrap_user}")
+            update_payload={"userid":userid,"roleid":role["roleid"],"usrgrps":[{"usrgrpid":group["usrgrpid"]}],"name":name,"surname":surname}
+            rpc("user.update", update_payload, token)
+            print(f"Updated Zabbix SAML user {username}")
         else:
+            create_payload=dict(payload)
+            create_payload["passwd"]=secrets.token_urlsafe(24)
             try:
-                rpc("user.create", payload, token)
+                rpc("user.create", create_payload, token)
             except Exception:
-                payload["alias"]=payload.pop("username")
-                rpc("user.create", payload, token)
-            print(f"Created Zabbix SAML bootstrap user {bootstrap_user}")
-    else:
-        print("WARN: Could not find Zabbix admin group/role; SAML auth is configured but user bootstrap was skipped")
+                create_payload["alias"]=create_payload.pop("username")
+                rpc("user.create", create_payload, token)
+            print(f"Created Zabbix SAML user {username}")
+
+try:
+    ensure_zabbix_saml_users()
 except Exception as exc:
-    print(f"WARN: Zabbix SAML bootstrap user reconciliation skipped: {exc}")
+    print(f"WARN: Zabbix SAML user reconciliation skipped: {exc}")
 
 def api_version():
     try:
