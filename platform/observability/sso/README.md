@@ -54,3 +54,7 @@ This avoids Zabbix/SimpleSAML runtime failures such as:
 ```text
 Unable to extract public key
 ```
+
+## Runtime restart ordering
+
+`05.3` configures the Zabbix API before requesting any `zabbix-web` restart. Restarting first can invalidate the service port-forward target and produce `network namespace is closed` / `lost connection to pod`. Any restart requested by `05.3` is intentionally non-blocking; `05.2`/`05.4` own readiness validation.

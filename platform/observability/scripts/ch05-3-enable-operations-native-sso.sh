@@ -526,8 +526,11 @@ start_authentik_api_port_forward
 configure_authentik_native_sso
 configure_openobserve_sso_secret
 configure_zabbix_saml_secret
-request_operations_runtime_restart
+# Configure Zabbix through the currently healthy frontend before requesting any restart.
+# Restarting first can invalidate the port-forward target and produce: network namespace is closed.
+kubectl -n "$NAMESPACE" rollout status deployment/zabbix-web --timeout=90s >/dev/null || die "Zabbix web deployment is not ready before API configuration"
 start_zabbix_api_port_forward
 configure_zabbix_saml_api
+request_operations_runtime_restart
 log "Operations native SSO prerequisites applied; runtime resources remain Argo CD-owned"
 kubectl -n "$NAMESPACE" get secret openobserve-sso zabbix-saml-certs >/dev/null

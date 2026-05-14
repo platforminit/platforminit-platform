@@ -70,7 +70,7 @@ Argo CD:
 
 ## Timeout rule
 
-`05.3 - Enable Operations Native SSO` must not wait for OpenObserve rollout. If OpenObserve needs to restart after SSO secret changes, that belongs to the Argo CD sync/operations lifecycle, not the identity binding workflow.
+`05.3 - Enable Operations Native SSO` must not wait for OpenObserve or Zabbix rollout. It may request a non-blocking restart after SSO secret changes, but readiness belongs to the Argo CD sync/operations lifecycle and final validation.
 
 ## CH05 Argo CD sync guardrail
 
