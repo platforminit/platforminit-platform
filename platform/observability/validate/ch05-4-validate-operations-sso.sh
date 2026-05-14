@@ -4,30 +4,23 @@ log(){ echo "[$(basename "$0")][$(date -u +%FT%TZ)] $*"; }
 die(){ echo "FATAL: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
-IDENTITY_NAMESPACE="${IDENTITY_NAMESPACE:-identity}"
 BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
 ensure_cluster(){ need kubectl; [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"; kubectl get nodes >/dev/null; }
-
 ensure_cluster
-kubectl -n "$IDENTITY_NAMESPACE" get svc authentik-server >/dev/null
-kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null
-address="$(kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth -o jsonpath='{.spec.forwardAuth.address}' 2>/dev/null || true)"
-case "$address" in
-  *authentik-server.identity.svc.cluster.local*/outpost.goauthentik.io/auth/traefik*) ;;
-  *) die "Unexpected forwardAuth address: ${address}" ;;
-esac
 kubectl -n "$NAMESPACE" get ingress zabbix openobserve >/dev/null
-expected_issuer="letsencrypt-${ISSUER_MODE:-prod}"
-for cert in zabbix-tls openobserve-tls; do
-  if kubectl -n "$NAMESPACE" get certificate "$cert" >/dev/null 2>&1; then
-    issuer="$(kubectl -n "$NAMESPACE" get certificate "$cert" -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
-    [[ "$issuer" == "$expected_issuer" ]] || die "Unexpected issuer for $cert: $issuer expected $expected_issuer"
-  fi
+kubectl -n "$NAMESPACE" get secret openobserve-sso zabbix-saml-certs >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/openobserve --timeout=60s >/dev/null
+kubectl -n "$NAMESPACE" rollout status deploy/zabbix-web --timeout=60s >/dev/null
+kubectl -n "$NAMESPACE" get deploy/openobserve -o jsonpath='{.spec.template.spec.containers[0].image}' | grep -q 'openobserve-enterprise' || die "OpenObserve is not using the Enterprise image"
+kubectl -n "$NAMESPACE" get deploy/openobserve -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].secretRef.name}' | grep -q 'openobserve-sso' || die "OpenObserve SSO secret is not mounted"
+kubectl -n "$NAMESPACE" get deploy/zabbix-web -o jsonpath='{.spec.template.spec.containers[0].env[*].name}' | grep -q 'ZBX_SSO_SETTINGS' || die "Zabbix SAML runtime env is missing"
+kubectl -n "$NAMESPACE" get deploy/zabbix-web -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[*].name}' | grep -q 'zabbix-saml-certs' || die "Zabbix SAML certificate volume is not mounted"
+if kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null 2>&1; then
+  die "Stale forward-auth middleware exists; CH05.4 must use native app SSO, not proxy-only access gate"
+fi
+for host in "zabbix.${BASE_DOMAIN}" "logs.${BASE_DOMAIN}"; do
+  kubectl -n "$NAMESPACE" get ingress -o json | grep -q "$host" || die "Missing ingress host: $host"
 done
-zabbix_host="$(kubectl -n "$NAMESPACE" get ingress zabbix -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
-logs_host="$(kubectl -n "$NAMESPACE" get ingress openobserve -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
-[[ "$zabbix_host" == "zabbix.${BASE_DOMAIN}" ]] || die "Unexpected Zabbix host: ${zabbix_host}"
-[[ "$logs_host" == "logs.${BASE_DOMAIN}" ]] || die "Unexpected OpenObserve host: ${logs_host}"
-echo "PASS: Operations SSO ingress objects present and routed through Authentik embedded outpost endpoint"
+echo "PASS: Operations WebUIs use native SSO model (Zabbix SAML + OpenObserve Enterprise OIDC)"

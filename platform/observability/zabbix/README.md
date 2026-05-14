@@ -2,27 +2,15 @@
 
 Zabbix is the primary PlatformInit operational monitoring UI.
 
-Its job is to answer:
-
-```text
-What is broken?
-Where is it broken?
-How severe is it?
-Since when?
-```
-
-## Role
-
-- host/service state monitoring
-- Nagios-like problem list
-- severity-driven alerts
-- storage, CPU, memory and service checks
-- future external host onboarding
-
 ## Public access
 
-Zabbix is not exposed directly by the base deploy. `05.4 - Enable Operations SSO` creates `https://zabbix.<PLATFORM_BASE_DOMAIN>` and protects it with Authentik forward-auth.
+`05.4 - Enable Operations Native SSO` creates `https://zabbix.<PLATFORM_BASE_DOMAIN>` and configures native SAML login through Authentik.
 
-## Storage
+```text
+ACS URL: https://zabbix.<PLATFORM_BASE_DOMAIN>/index_sso.php?acs
+SLS URL: https://zabbix.<PLATFORM_BASE_DOMAIN>/index_sso.php?sls
+SP entity ID: https://zabbix.<PLATFORM_BASE_DOMAIN>
+Username attribute: email
+```
 
-Zabbix PostgreSQL uses a PVC. On the PlatformInit k3s contract, the backing local-path storage must live under `/srv/data/k3s`.
+The local Zabbix admin remains the break-glass account.

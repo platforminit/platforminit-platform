@@ -55,3 +55,12 @@ Do not commit any generated Authentik secret values. Store them as GitHub reposi
 - `OPENOBSERVE_ROOT_USER_PASSWORD`: Optional root password for first OpenObserve bootstrap. If empty and no existing Kubernetes secret is present, the workflow generates one inside the cluster and stores it in `operations/openobserve-root`.
 
 Do not add Grafana secrets to the default lifecycle. Grafana is not a CH05 default component.
+
+
+## CH05 Operations SSO optional secrets
+
+| Secret | Purpose | Required |
+|---|---|---|
+| `OPENOBSERVE_OIDC_CLIENT_SECRET` | Stable Authentik OAuth2 client secret for OpenObserve Enterprise SSO. If omitted, `05.4` generates and stores one in Kubernetes. | no |
+| `ZABBIX_ADMIN_USER` | Zabbix break-glass admin username used by `05.4` to configure SAML through the Zabbix API. Defaults to `Admin`. | no |
+| `ZABBIX_ADMIN_PASSWORD` | Zabbix break-glass admin password used by `05.4` to configure SAML through the Zabbix API. Defaults to `zabbix`. | no |

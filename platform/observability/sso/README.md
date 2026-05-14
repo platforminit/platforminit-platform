@@ -1,55 +1,30 @@
-# Operations SSO
+# Operations Native SSO
 
-All public CH05 WebUIs must require Authentik login.
+All public CH05 WebUIs must use Authentik as the identity provider. The target is native application SSO, not only reverse-proxy access gating.
 
 ## Model
 
-The default model is edge authentication through Traefik and the Authentik embedded proxy outpost endpoint:
-
 ```text
-browser -> Traefik ingress -> Authentik forward-auth -> Zabbix/OpenObserve service
+Zabbix WebUI      -> Authentik SAML
+OpenObserve UI   -> OpenObserve Enterprise OIDC/SSO with Authentik
+Vector           -> no WebUI
 ```
-
-PlatformInit's CH04.5 Authentik deployment exposes the embedded outpost endpoint through the existing Kubernetes service:
-
-```text
-authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
-```
-
-Do not require a separate `ak-outpost-*` Kubernetes service for the default PlatformInit install unless CH04.5 is explicitly changed to deploy a standalone outpost later.
-
-## Protected UIs
-
-- `https://zabbix.<PLATFORM_BASE_DOMAIN>`
-- `https://logs.<PLATFORM_BASE_DOMAIN>`
 
 ## Authentik objects reconciled by `05.4`
 
-`05.4 - Enable Operations SSO` must:
+`05.4 - Enable Operations Native SSO` must:
 
-- verify `identity/authentik-server` is healthy
-- read the `identity/authentik-bootstrap` API token
-- reconcile Authentik proxy providers and applications for Zabbix and OpenObserve
-- set both provider authorization and provider invalidation flows (`default-provider-authorization-implicit-consent`, `default-provider-invalidation-flow`)
-- attach the providers to the embedded proxy outpost when the outpost is visible through the API
-- create Traefik forward-auth middleware and public ingresses
+- create/update the `PlatformInit Operations` Authentik group
+- create/update the `PlatformInit Zabbix` SAML provider and application
+- create/update the `PlatformInit OpenObserve` OAuth2/OIDC provider and application
+- create/update `operations/openobserve-sso` for OpenObserve Enterprise
+- configure Zabbix SAML through the Zabbix API
+- create public Traefik ingresses for Zabbix and OpenObserve
 
+## Why forward-auth was removed
 
-## Public host and TLS contract
+The previous proxy-provider model only verified the browser at Traefik. It did not create a native Zabbix/OpenObserve session, so clicking the app in Authentik did not log the user into the target application.
 
-Operations SSO must not redirect users to `0.0.0.0:9000` or an internal Kubernetes URL. The embedded outpost configuration must use the public Authentik URL:
+## Zabbix break-glass
 
-```text
-authentik_host=https://auth.<PLATFORM_BASE_DOMAIN>
-authentik_host_browser=https://auth.<PLATFORM_BASE_DOMAIN>
-```
-
-The `05.4 - Enable Operations SSO` workflow reconciles this on the embedded outpost through the Authentik API. CH04.5 also sets `AUTHENTIK_HOST` and `AUTHENTIK_HOST_BROWSER` on the Authentik server/worker deployments for future rebuilds.
-
-For browser-facing operations WebUIs, run `05.4` with `issuer_mode=prod`. If a staging certificate was previously issued for `zabbix.<domain>` or `logs.<domain>`, `05.4` removes stale certificate material when switching issuer modes so cert-manager can request a trusted certificate.
-
-## Dependency
-
-`04.5 - Deploy Identity Foundation` must be healthy before `05.4 - Enable Operations SSO` is executed.
-
-Operational note: validation must query Traefik middleware using the fully qualified Kubernetes resource `middleware.traefik.io`. Do not use the ambiguous short resource name `middleware`, because clusters that still expose legacy Traefik CRDs may resolve it to `middlewares.traefik.containo.us` and report false NotFound errors after applying the current `traefik.io/v1alpha1` object.
+The local Zabbix admin account remains available as break-glass. `ZABBIX_ADMIN_USER` and `ZABBIX_ADMIN_PASSWORD` may be provided as GitHub secrets for SAML automation; otherwise the workflow tries `Admin` / `zabbix`. The Authentik `akadmin` user is reconciled as a Zabbix SAML bootstrap admin so the Authentik application tile can open a usable Zabbix session.
