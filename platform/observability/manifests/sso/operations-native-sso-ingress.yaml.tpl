@@ -1,22 +1,3 @@
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: authentik-forward-auth
-  namespace: operations
-spec:
-  forwardAuth:
-    # The PlatformInit Authentik Helm deployment exposes the embedded proxy outpost
-    # through the authentik-server service. Do not depend on a separate
-    # ak-outpost-* Kubernetes service unless CH04.5 explicitly deploys one later.
-    address: http://authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
-    trustForwardHeader: true
-    authResponseHeaders:
-      - X-authentik-username
-      - X-authentik-groups
-      - X-authentik-email
-      - X-authentik-name
-      - X-authentik-uid
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -25,7 +6,6 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-__ISSUER_MODE__
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: operations-authentik-forward-auth@kubernetescrd
     traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
   ingressClassName: traefik
@@ -53,7 +33,6 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-__ISSUER_MODE__
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: operations-authentik-forward-auth@kubernetescrd
     traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
   ingressClassName: traefik
