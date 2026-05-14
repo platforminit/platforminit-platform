@@ -87,3 +87,16 @@ Expected host layout:
 - `platform/observability/openobserve/README.md`
 - `platform/observability/sso/README.md`
 - `platform/observability/rules/platforminit-operations-rules.md`
+
+## CH05 Argo CD sync guardrail
+
+The `operations-stack` Application is registered without automated sync. This is intentional: Zabbix, OpenObserve and Vector depend on non-Git prerequisite secrets created by `05.1 - Reconcile Operations Prerequisites`. The safe lifecycle is:
+
+```text
+05   Register Operations Stack    -> creates Argo CD Application only
+05.1 Reconcile Operations Prerequisites -> creates required runtime secrets
+05.2 Sync Operations Stack        -> explicitly starts Argo CD sync and waits for health
+```
+
+If Vector shows `secret "openobserve-root" not found`, run `05.1` and then rerun `05.2`. Do not enable automated sync before prerequisite reconciliation.
+

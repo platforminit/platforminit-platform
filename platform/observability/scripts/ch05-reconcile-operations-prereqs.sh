@@ -71,3 +71,8 @@ else
 fi
 log "Operations prerequisites reconciled"
 kubectl -n "$NAMESPACE" get secret zabbix-postgres openobserve-root openobserve-sso zabbix-saml-certs >/dev/null
+# Recover pods that may have been created by an earlier accidental/automated Argo sync before prerequisites existed.
+if kubectl -n "$NAMESPACE" get daemonset vector >/dev/null 2>&1; then
+  log "Restarting Vector pods after prerequisite reconciliation"
+  kubectl -n "$NAMESPACE" delete pod -l app.kubernetes.io/name=vector --ignore-not-found=true >/dev/null 2>&1 || true
+fi

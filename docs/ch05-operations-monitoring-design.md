@@ -90,3 +90,20 @@ CH05 workflows must not use generic `sudo -l` validation or ad-hoc runner names.
 ## TLS contract
 
 Browser-facing operations UIs use production certificates by default. Staging issuer mode is only for ACME/debug testing and intentionally produces an untrusted certificate warning.
+
+## CH05 Argo CD sync guardrail
+
+The `operations-stack` Application is registered without automated sync. This is intentional: Zabbix, OpenObserve and Vector depend on non-Git prerequisite secrets created by `05.1 - Reconcile Operations Prerequisites`. The safe lifecycle is:
+
+```text
+05   Register Operations Stack    -> creates Argo CD Application only
+05.1 Reconcile Operations Prerequisites -> creates required runtime secrets
+05.2 Sync Operations Stack        -> explicitly starts Argo CD sync and waits for health
+```
+
+If Vector shows `secret "openobserve-root" not found`, run `05.1` and then rerun `05.2`. Do not enable automated sync before prerequisite reconciliation.
+
+
+## Vector Kubernetes log collection contract
+
+Vector runs as a DaemonSet and uses the `kubernetes_logs` source. The pod must expose `VECTOR_SELF_NODE_NAME` from `spec.nodeName` so Vector can bind itself to the local node. Missing this environment variable causes a collector startup failure and leaves the `operations-stack` Argo CD Application in `Progressing` health even when all manifests are synced.

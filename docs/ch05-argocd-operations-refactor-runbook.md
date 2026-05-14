@@ -71,3 +71,16 @@ Argo CD:
 ## Timeout rule
 
 `05.3 - Enable Operations Native SSO` must not wait for OpenObserve rollout. If OpenObserve needs to restart after SSO secret changes, that belongs to the Argo CD sync/operations lifecycle, not the identity binding workflow.
+
+## CH05 Argo CD sync guardrail
+
+The `operations-stack` Application is registered without automated sync. This is intentional: Zabbix, OpenObserve and Vector depend on non-Git prerequisite secrets created by `05.1 - Reconcile Operations Prerequisites`. The safe lifecycle is:
+
+```text
+05   Register Operations Stack    -> creates Argo CD Application only
+05.1 Reconcile Operations Prerequisites -> creates required runtime secrets
+05.2 Sync Operations Stack        -> explicitly starts Argo CD sync and waits for health
+```
+
+If Vector shows `secret "openobserve-root" not found`, run `05.1` and then rerun `05.2`. Do not enable automated sync before prerequisite reconciliation.
+

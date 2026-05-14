@@ -107,6 +107,12 @@ spec:
           env:
             - name: PLATFORMINIT_PROJECT
               value: development
+            # Required by Vector's kubernetes_logs source so the agent can scope collection to this node.
+            # Without this, Vector can start-crash with a configuration error and Argo CD remains Progressing.
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           volumeMounts:
             - name: config
               mountPath: /etc/vector
