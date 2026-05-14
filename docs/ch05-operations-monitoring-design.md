@@ -10,7 +10,8 @@ PlatformInit defaults to:
 Zabbix                 -> operational state and alerts
 Vector                 -> low-footprint log collection
 OpenObserve Enterprise -> searchable logs and RCA
-Authentik              -> native app SSO for public WebUIs
+Local login            -> mandatory break-glass access for public WebUIs
+Authentik              -> optional native app SSO
 Argo CD                -> runtime resource ownership
 ```
 
@@ -43,16 +44,26 @@ This avoids timeout-prone `kubectl apply && rollout wait` scripts, reduces A1 su
 | `05 - Register Operations Stack` | apply Operations AppProject and Argo CD Application |
 | `05.1 - Reconcile Operations Prerequisites` | create/preserve secrets used by Zabbix/OpenObserve/Vector |
 | `05.2 - Sync Operations Stack` | wait for Argo CD to make the stack Synced/Healthy |
-| `05.3 - Enable Operations Native SSO` | reconcile Authentik SAML/OIDC and app-level SSO settings; no rollout wait |
-| `05.4 - Validate Operations Stack` | runtime and ownership validation |
+| `05.3 - Enable Operations Native SSO` | optional: reconcile Authentik SAML/OIDC and app-level SSO settings; no rollout wait |
+| `05.4 - Validate Operations Stack` | runtime and ownership validation; SSO only when explicitly requested |
 
 ## WebUI rule
 
-Zabbix and OpenObserve must not rely on proxy-only forward-auth as their final authentication model. The desired behavior is native application login through Authentik:
+Zabbix and OpenObserve must keep local break-glass login available. Native application login through Authentik is the preferred SSO integration, but it is not a base runtime health requirement:
 
 - Zabbix uses Authentik as a SAML IdP.
 - OpenObserve uses Enterprise SSO/OIDC with Authentik.
 - Vector has no WebUI.
+
+## Runtime-first validation decision
+
+CH05 base success is deliberately separated from SSO success. The local login test proved that Zabbix and OpenObserve can operate correctly without native Authentik SSO. Therefore:
+
+- local break-glass access is mandatory for every public operations WebUI;
+- `05.4` defaults to `VALIDATION_MODE=runtime`;
+- failed SSO mapping must not make the base operations stack failed;
+- strict SSO checks are enabled only with `VALIDATION_MODE=runtime_with_sso`;
+- SSO bugs are integration issues, not CH05 runtime blockers.
 
 ## OpenObserve Enterprise contract
 
@@ -117,6 +128,13 @@ Vector runs as a DaemonSet and uses the `kubernetes_logs` source. The pod must e
 `05.2 - Sync Operations Stack` must not rely on opaque `kubectl rollout status` output alone.
 The validation layer performs explicit readiness checks for deployments and daemonsets and prints pod/events diagnostics before failing.
 This prevents false blind failures such as a generic `timed out waiting for the condition` after Argo CD already reports `Synced/Healthy`.
+
+Validation modes:
+
+```text
+VALIDATION_MODE=runtime           # default; runtime + local break-glass reachability
+VALIDATION_MODE=runtime_with_sso  # strict; also requires native SSO prerequisites
+```
 
 Runtime readiness expectations:
 

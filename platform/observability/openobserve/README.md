@@ -19,3 +19,8 @@ Redirect URL: https://logs.<PLATFORM_BASE_DOMAIN>/config/redirect
 Callback URL: https://logs.<PLATFORM_BASE_DOMAIN>/web/cb
 Issuer/Base URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
 ```
+
+
+## Break-glass access
+
+Local login must remain available and is part of the base CH05 runtime contract. Native Authentik SSO is optional and must not be the only operator access path.

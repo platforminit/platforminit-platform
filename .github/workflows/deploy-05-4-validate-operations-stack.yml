@@ -43,6 +43,14 @@ on:
         description: Git revision for Argo CD to sync. Default is the artifact commit SHA.
         required: false
         default: ''
+      validation_mode:
+        description: Validation scope. runtime validates local break-glass/runtime health only; runtime_with_sso also requires native Authentik SSO prerequisites.
+        required: false
+        default: runtime
+        type: choice
+        options:
+          - runtime
+          - runtime_with_sso
 
 
 permissions:
@@ -192,6 +200,7 @@ jobs:
           OPENOBSERVE_OIDC_CLIENT_SECRET: ${{ secrets.OPENOBSERVE_OIDC_CLIENT_SECRET }}
           ZABBIX_ADMIN_USER: ${{ secrets.ZABBIX_ADMIN_USER }}
           ZABBIX_ADMIN_PASSWORD: ${{ secrets.ZABBIX_ADMIN_PASSWORD }}
+          VALIDATION_MODE: ${{ inputs.validation_mode || 'runtime' }}
 
         shell: bash
         run: |
@@ -246,6 +255,7 @@ jobs:
             printf 'OPENOBSERVE_OIDC_CLIENT_SECRET=%q\n' "${OPENOBSERVE_OIDC_CLIENT_SECRET:-}"
             printf 'ZABBIX_ADMIN_USER=%q\n' "${ZABBIX_ADMIN_USER:-Admin}"
             printf 'ZABBIX_ADMIN_PASSWORD=%q\n' "${ZABBIX_ADMIN_PASSWORD:-zabbix}"
+            printf 'VALIDATION_MODE=%q\n' "${VALIDATION_MODE:-runtime}"
           } > ./ch05.env
           retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "

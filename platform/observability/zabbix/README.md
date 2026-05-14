@@ -14,3 +14,8 @@ Username attribute: username
 ```
 
 The local Zabbix admin remains the break-glass account.
+
+
+## Break-glass access
+
+Local login must remain available and is part of the base CH05 runtime contract. Native Authentik SSO is optional and must not be the only operator access path.
