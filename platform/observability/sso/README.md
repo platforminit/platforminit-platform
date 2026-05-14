@@ -1,22 +1,31 @@
-# Operations SSO
+# Operations Native SSO
 
-All public CH05 WebUIs must require Authentik login.
+All public CH05 WebUIs must use Authentik as the identity provider. The target is native application SSO, not only reverse-proxy access gating.
 
 ## Model
 
-The default model is edge authentication through Traefik + Authentik forward-auth:
-
 ```text
-browser -> Traefik ingress -> Authentik forward-auth -> Zabbix/OpenObserve service
+Zabbix WebUI      -> Authentik SAML
+OpenObserve UI   -> OpenObserve Enterprise OIDC/SSO with Authentik
+Vector           -> no WebUI
 ```
 
-This keeps Zabbix and OpenObserve simple while preventing direct unauthenticated public access.
+## Authentik objects reconciled by `05.3`
 
-## Protected UIs
+`05.3 - Enable Operations Native SSO` must:
 
-- `https://zabbix.<PLATFORM_BASE_DOMAIN>`
-- `https://logs.<PLATFORM_BASE_DOMAIN>`
+- create/update the `PlatformInit Operations` Authentik group
+- create/update the `PlatformInit Zabbix` SAML provider and application
+- create/update the `PlatformInit OpenObserve` OAuth2/OIDC provider and application
+- create/update `operations/openobserve-sso` for OpenObserve Enterprise
+- create/update `operations/zabbix-saml-certs` with the Authentik IdP certificate
+- configure Zabbix SAML through the Zabbix API
+- leave public Traefik ingresses under Argo CD ownership
 
-## Dependency
+## Why forward-auth was removed
 
-`04.5 - Deploy Identity Foundation` must be healthy before `05.4 - Enable Operations SSO` is executed.
+The previous proxy-provider model only verified the browser at Traefik. It did not create a native Zabbix/OpenObserve session, so clicking the app in Authentik did not log the user into the target application.
+
+## Zabbix break-glass
+
+The local Zabbix admin account remains available as break-glass. `ZABBIX_ADMIN_USER` and `ZABBIX_ADMIN_PASSWORD` may be provided as GitHub secrets for SAML automation; otherwise the workflow tries `Admin` / `zabbix`. The Authentik `akadmin` user is reconciled as a Zabbix SAML bootstrap admin so the Authentik application tile can open a usable Zabbix session.

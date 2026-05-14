@@ -113,6 +113,18 @@ deploy_authentik() {
     --wait --timeout 20m
 }
 
+
+configure_authentik_public_host() {
+  local public_host="https://auth.${BASE_DOMAIN}"
+  log "Configuring Authentik public host for embedded outpost: ${public_host}"
+  kubectl -n "${NAMESPACE}" set env deployment/authentik-server \
+    AUTHENTIK_HOST="${public_host}" \
+    AUTHENTIK_HOST_BROWSER="${public_host}" >/dev/null
+  kubectl -n "${NAMESPACE}" set env deployment/authentik-worker \
+    AUTHENTIK_HOST="${public_host}" \
+    AUTHENTIK_HOST_BROWSER="${public_host}" >/dev/null
+}
+
 render_apply_ingress() {
   local tmp_dir=""
   tmp_dir="$(mktemp -d)"
@@ -149,6 +161,7 @@ main() {
   apply_secrets
   install_repos
   deploy_authentik
+  configure_authentik_public_host
   render_apply_ingress
   wait_for_rollouts
   log "CH06 identity deploy completed with deploy_mode=${DEPLOY_MODE} issuer=${CLUSTER_ISSUER} url=https://auth.${BASE_DOMAIN}"

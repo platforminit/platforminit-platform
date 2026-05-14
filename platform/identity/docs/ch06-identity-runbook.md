@@ -8,7 +8,7 @@ CH06 is retained only for compatibility. Normal lifecycle execution uses CH04.5 
 |---|---|
 | `04.5 - Deploy Identity Foundation` | Authentik core and identity model |
 | `04.6 - Enable Argo CD SSO` | Argo CD login through Authentik |
-| `05.4 - Enable Operations SSO` | Zabbix/OpenObserve WebUIs through Authentik forward-auth |
+| `05.3 - Enable Operations Native SSO` | Zabbix SAML and OpenObserve Enterprise OIDC through Authentik |
 
 ## Required secrets for Authentik
 

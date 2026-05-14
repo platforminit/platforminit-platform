@@ -1,19 +1,21 @@
-# OpenObserve RCA Logs
+# OpenObserve Enterprise RCA Logs
 
 OpenObserve is the searchable log backend for CH05.
 
-Its job is to answer:
+## Edition
+
+PlatformInit uses the OpenObserve Enterprise image because native SSO/RBAC are Enterprise features.
 
 ```text
-Why did this break?
-What exact error line explains it?
-Which pod/service/host emitted it?
+public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
 ```
 
 ## Public access
 
-OpenObserve is not exposed directly by the base deploy. `05.4 - Enable Operations SSO` creates `https://logs.<PLATFORM_BASE_DOMAIN>` and protects it with Authentik forward-auth.
+`05.2 - Sync Operations Stack` exposes `https://logs.<PLATFORM_BASE_DOMAIN>` through the Argo CD-owned ingress. `05.3 - Enable Operations Native SSO` configures Authentik OIDC through the `operations/openobserve-sso` Kubernetes Secret; it does not wait for or restart the OpenObserve deployment.
 
-## Retention note
-
-Keep retention intentionally short on the development host. PlatformInit is not trying to build an enterprise log warehouse on a single CAX31 node.
+```text
+Redirect URL: https://logs.<PLATFORM_BASE_DOMAIN>/config/redirect
+Callback URL: https://logs.<PLATFORM_BASE_DOMAIN>/web/cb
+Issuer/Base URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
+```

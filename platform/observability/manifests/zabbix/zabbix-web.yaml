@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/part-of: platforminit-operations
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: zabbix-web
@@ -42,6 +44,14 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: PHP_TZ
               value: Europe/Budapest
+            - name: ZBX_SSO_IDP_CERT
+              value: /usr/share/zabbix/conf/certs/idp.crt
+            - name: ZBX_SSO_SETTINGS
+              value: '{"strict":false,"use_proxy_headers":true}'
+          volumeMounts:
+            - name: zabbix-saml-certs
+              mountPath: /usr/share/zabbix/conf/certs
+              readOnly: true
           ports:
             - name: http
               containerPort: 8080
@@ -52,6 +62,11 @@ spec:
             limits:
               cpu: 500m
               memory: 768Mi
+      volumes:
+        - name: zabbix-saml-certs
+          secret:
+            secretName: zabbix-saml-certs
+            optional: true
 ---
 apiVersion: v1
 kind: Service

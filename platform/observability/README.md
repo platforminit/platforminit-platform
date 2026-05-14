@@ -1,24 +1,43 @@
 # CH05 - Operations Monitoring
 
-CH05 is the PlatformInit operations layer. It intentionally replaces the previous Grafana/VictoriaMetrics/Loki/Alloy default stack with a smaller operator-first model.
+CH05 is the PlatformInit operations layer. It uses an operator-first model instead of the previous Grafana/VictoriaMetrics/Loki/Alloy stack.
 
 ## Default architecture
 
 ```text
-Zabbix      -> what is broken?
-Vector      -> collect platform, Kubernetes and host logs
-OpenObserve -> why did it break? searchable RCA logs
-Authentik   -> mandatory login gate for public operational WebUIs
+Zabbix                 -> what is broken?
+Vector                 -> collect platform, Kubernetes and host logs
+OpenObserve Enterprise -> why did it break? searchable RCA logs
+Authentik              -> native application SSO
+Argo CD                -> owner of runtime Kubernetes resources
+```
+
+## GitOps ownership boundary
+
+CH05 is a post-CH04 platform workload. Runtime resources must be Argo CD-owned:
+
+```text
+Argo CD owns:
+- Namespace
+- Deployments / DaemonSets
+- Services
+- Ingresses
+- PVCs
+- ConfigMaps
+
+GitHub Actions owns only:
+- prerequisite secrets
+- Authentik provider/application reconciliation
+- Argo CD Application registration
+- sync request / validation
 ```
 
 ## Public WebUIs
 
-Public WebUIs are exposed only after `05.4 - Enable Operations SSO` applies the Authentik forward-auth middleware.
-
 | URL | Purpose | Auth model |
 |---|---|---|
-| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik forward-auth |
-| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik forward-auth |
+| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | native Authentik SAML |
+| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | OpenObserve Enterprise OIDC via Authentik |
 
 Vector has no public WebUI.
 
@@ -26,11 +45,11 @@ Vector has no public WebUI.
 
 | Order | Workflow | Purpose |
 |---:|---|---|
-| 15 | `05 - Deploy Zabbix Monitoring` | deploy Zabbix DB, server, web UI service and agent baseline |
-| 16 | `05.1 - Deploy OpenObserve` | deploy searchable logs backend |
-| 17 | `05.2 - Deploy Vector Logging` | deploy Vector DaemonSet and log shipping config |
-| 18 | `05.3 - Onboard External Host` | reserve onboarding contract for n8n/future hosts |
-| 19 | `05.4 - Enable Operations SSO` | expose Zabbix/OpenObserve through Authentik-gated ingresses |
+| 15 | `05 - Register Operations Stack` | create/update Argo CD AppProject + Application |
+| 16 | `05.1 - Reconcile Operations Prerequisites` | create/preserve DB/root/SSO prerequisite secrets |
+| 17 | `05.2 - Sync Operations Stack` | let Argo CD reconcile Zabbix, OpenObserve and Vector |
+| 18 | `05.3 - Enable Operations Native SSO` | reconcile Authentik SAML/OIDC bindings and app-level SSO settings; no rollout wait |
+| 19 | `05.4 - Validate Operations Stack` | validate Argo CD ownership, runtime health, ingress and SSO prerequisites |
 
 ## Removed default components
 

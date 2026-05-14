@@ -1,14 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: openobserve-root
-  namespace: operations
-type: Opaque
-stringData:
-  ZO_ROOT_USER_EMAIL: admin@sysadminhomelab.hu
-  ZO_ROOT_USER_PASSWORD: changeme-openobserve-root
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: openobserve-data
@@ -30,6 +20,8 @@ metadata:
     app.kubernetes.io/part-of: platforminit-operations
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: openobserve
@@ -40,14 +32,21 @@ spec:
     spec:
       containers:
         - name: openobserve
-          image: public.ecr.aws/zinclabs/openobserve:latest
+          image: public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:
                 name: openobserve-root
+            - secretRef:
+                name: openobserve-sso
+                optional: true
           env:
             - name: ZO_DATA_DIR
               value: /data
+            - name: ZO_LOCAL_MODE
+              value: "true"
+            - name: ZO_TELEMETRY
+              value: "false"
           ports:
             - name: http
               containerPort: 5080
