@@ -107,3 +107,17 @@ If Vector shows `secret "openobserve-root" not found`, run `05.1` and then rerun
 ## Vector Kubernetes log collection contract
 
 Vector runs as a DaemonSet and uses the `kubernetes_logs` source. The pod must expose `VECTOR_SELF_NODE_NAME` from `spec.nodeName` so Vector can bind itself to the local node. Missing this environment variable causes a collector startup failure and leaves the `operations-stack` Argo CD Application in `Progressing` health even when all manifests are synced.
+
+## CH05 validation contract
+
+`05.2 - Sync Operations Stack` must not rely on opaque `kubectl rollout status` output alone.
+The validation layer performs explicit readiness checks for deployments and daemonsets and prints pod/events diagnostics before failing.
+This prevents false blind failures such as a generic `timed out waiting for the condition` after Argo CD already reports `Synced/Healthy`.
+
+Runtime readiness expectations:
+
+- `operations-stack` Argo CD Application is `Synced` and `Healthy`.
+- Zabbix PostgreSQL, Zabbix Server, Zabbix Web and OpenObserve deployments have the desired number of updated and available replicas.
+- Zabbix Agent2 and Vector daemonsets have all desired pods updated and ready.
+- Vector requires `VECTOR_SELF_NODE_NAME` from `spec.nodeName` for Kubernetes log collection.
+
