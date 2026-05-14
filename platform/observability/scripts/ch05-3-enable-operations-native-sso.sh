@@ -186,24 +186,40 @@ def scope_mapping_pks():
     except Exception as exc:
         print(f"WARN: could not create custom groups scope mapping: {exc}",file=sys.stderr)
     return results
+def canonicalize_certificate_pem(raw):
+    """Return exactly one PEM certificate block without API wrappers or comments.
+
+    Zabbix/SimpleSAML is strict here. Extra text around the PEM block can produce:
+    "Unable to extract public key".
+    """
+    import re
+    if not isinstance(raw, str):
+        return None
+    match=re.search(r"-----BEGIN CERTIFICATE-----\s+.*?\s+-----END CERTIFICATE-----", raw, re.S)
+    if not match:
+        return None
+    lines=[line.strip() for line in match.group(0).strip().splitlines() if line.strip()]
+    return "\n".join(lines)+"\n"
+
 def certificate_pem_from_pair(pair):
     for key in ("certificate_data","certificate","certificate_pem","cert","public_certificate","certificate_chain"):
-        val=pair.get(key)
-        if isinstance(val,str) and "BEGIN CERTIFICATE" in val:
-            return val
+        pem=canonicalize_certificate_pem(pair.get(key))
+        if pem:
+            return pem
     pk=pair.get("pk") or pair.get("uuid")
     if pk:
         for path in (f"/api/v3/crypto/certificatekeypairs/{pk}/view_certificate/", f"/api/v3/crypto/certificatekeypairs/{pk}/"):
             try:
                 raw=request("GET",path,accept_json=False)
-                if "BEGIN CERTIFICATE" in raw:
-                    return raw
+                pem=canonicalize_certificate_pem(raw)
+                if pem:
+                    return pem
                 try:
                     obj=json.loads(raw)
                     for key in ("certificate_data","certificate","certificate_pem","cert","public_certificate","certificate_chain"):
-                        val=obj.get(key)
-                        if isinstance(val,str) and "BEGIN CERTIFICATE" in val:
-                            return val
+                        pem=canonicalize_certificate_pem(obj.get(key))
+                        if pem:
+                            return pem
                 except Exception:
                     pass
             except Exception:
@@ -256,7 +272,7 @@ def ensure_saml_provider(authorization_flow,invalidation_flow):
         pk=created["pk"]; print(f"Created Authentik SAML provider PlatformInit Zabbix pk={pk}")
     ensure_application("PlatformInit Zabbix",zabbix_slug,pk,f"{zabbix_host}/index_sso.php","PlatformInit operational monitoring UI")
     with open("/tmp/platforminit-zabbix-idp.crt","w",encoding="utf-8") as fh:
-        fh.write(cert_pem.strip()+"\n")
+        fh.write(canonicalize_certificate_pem(cert_pem) or cert_pem.strip()+"\n")
 def ensure_oauth2_provider(authorization_flow,invalidation_flow):
     scopes=scope_mapping_pks()
     payload={"name":"PlatformInit OpenObserve","authorization_flow":authorization_flow,"invalidation_flow":invalidation_flow,"client_type":"confidential","client_id":openobserve_client_id,"client_secret":openobserve_client_secret,"redirect_uris":[{"matching_mode":"strict","url":f"{logs_host}/config/redirect"}],"include_claims_in_id_token":True,"sub_mode":"hashed_user_id","issuer_mode":"per_provider","property_mappings":scopes}
@@ -303,9 +319,22 @@ configure_openobserve_sso_secret(){
 configure_zabbix_saml_secret(){
   log "Reconciling Zabbix SAML IdP certificate secret"
   [[ -f /tmp/platforminit-zabbix-idp.crt ]] || die "Missing generated Zabbix IdP certificate"
+  # Zabbix/SimpleSAML requires a clean PEM certificate. Validate before storing it in Kubernetes.
+  openssl x509 -in /tmp/platforminit-zabbix-idp.crt -noout -subject >/tmp/ch05-zabbix-idp-cert-check.txt 2>&1 || {
+    cat /tmp/ch05-zabbix-idp-cert-check.txt >&2 || true
+    die "Generated Authentik IdP certificate is not a valid PEM certificate"
+  }
   cp /tmp/platforminit-zabbix-idp.crt /tmp/platforminit-zabbix-sp.crt
   kubectl -n "$NAMESPACE" create secret generic zabbix-saml-certs     --from-file=idp.crt=/tmp/platforminit-zabbix-idp.crt     --from-file=sp.crt=/tmp/platforminit-zabbix-sp.crt     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  log "Zabbix SAML certificate secret reconciled; zabbix-web volume is Argo CD-owned"
+  log "Zabbix SAML certificate secret reconciled; zabbix-web will be restarted without waiting"
+}
+
+request_operations_runtime_restart(){
+  log "Requesting non-blocking Operations runtime restart after SSO secret updates"
+  # CH05.3 remains an identity binding workflow: it requests restarts but does not wait for rollout.
+  # CH05.2 / CH05.4 are responsible for Argo CD health and readiness validation.
+  kubectl -n "$NAMESPACE" rollout restart deployment/openobserve >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" rollout restart deployment/zabbix-web >/dev/null 2>&1 || true
 }
 configure_zabbix_saml_api(){
   log "Configuring Zabbix SAML settings through JSON-RPC API"
@@ -450,6 +479,7 @@ PY
 ensure_cluster
 need curl
 need python3
+need openssl
 kubectl get ns "${IDENTITY_NAMESPACE}" >/dev/null 2>&1 || die "Missing identity namespace. Run 04.5 first."
 kubectl -n "${IDENTITY_NAMESPACE}" rollout status deploy/authentik-server --timeout=60s >/dev/null || die "Authentik server is not healthy"
 kubectl -n "${IDENTITY_NAMESPACE}" get svc authentik-server >/dev/null 2>&1 || die "Missing Authentik server service. Run 04.5 first."
@@ -460,6 +490,7 @@ start_authentik_api_port_forward
 configure_authentik_native_sso
 configure_openobserve_sso_secret
 configure_zabbix_saml_secret
+request_operations_runtime_restart
 start_zabbix_api_port_forward
 configure_zabbix_saml_api
 log "Operations native SSO prerequisites applied; runtime resources remain Argo CD-owned"
