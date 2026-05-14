@@ -42,6 +42,10 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: PHP_TZ
               value: Europe/Budapest
+            - name: ZBX_SSO_IDP_CERT
+              value: /usr/share/zabbix/conf/certs/idp.crt
+            - name: ZBX_SSO_SETTINGS
+              value: '{"strict":false,"use_proxy_headers":true}'
           ports:
             - name: http
               containerPort: 8080

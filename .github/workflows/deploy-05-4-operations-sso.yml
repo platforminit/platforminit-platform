@@ -1,4 +1,4 @@
-name: 05.4 - Enable Operations SSO
+name: 05.4 - Enable Operations Native SSO
 
 on:
   workflow_dispatch:
@@ -172,7 +172,15 @@ jobs:
           export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
           test -f "$KUBECONFIG" || { echo "Missing kubeconfig at $KUBECONFIG" >&2; exit 1; }
 
-          env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-prod}"             OPENOBSERVE_ROOT_USER_EMAIL="${OPENOBSERVE_ROOT_USER_EMAIL:-}"             OPENOBSERVE_ROOT_USER_PASSWORD="${OPENOBSERVE_ROOT_USER_PASSWORD:-}"             "$release_dir/scripts/$SCRIPT"
+          remote_env_file="${tmp_dir}/ch05-4-remote.env"
+          if [[ -f "$remote_env_file" ]]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$remote_env_file"
+            set +a
+          fi
+
+          env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-prod}"             OPENOBSERVE_ROOT_USER_EMAIL="${OPENOBSERVE_ROOT_USER_EMAIL:-}"             OPENOBSERVE_ROOT_USER_PASSWORD="${OPENOBSERVE_ROOT_USER_PASSWORD:-}"             OPENOBSERVE_OIDC_CLIENT_SECRET="${OPENOBSERVE_OIDC_CLIENT_SECRET:-}"             ZABBIX_ADMIN_USER="${ZABBIX_ADMIN_USER:-Admin}"             ZABBIX_ADMIN_PASSWORD="${ZABBIX_ADMIN_PASSWORD:-zabbix}"             "$release_dir/scripts/$SCRIPT"
 
           env             KUBECONFIG="$KUBECONFIG"             BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"             ISSUER_MODE="${ISSUER_MODE:-prod}"             "$release_dir/validate/$VALIDATE" | tee "$validate_log"
 
@@ -192,6 +200,9 @@ jobs:
           ISSUER_MODE: ${{ inputs.issuer_mode || 'prod' }}
           OPENOBSERVE_ROOT_USER_EMAIL: ${{ secrets.OPENOBSERVE_ROOT_USER_EMAIL }}
           OPENOBSERVE_ROOT_USER_PASSWORD: ${{ secrets.OPENOBSERVE_ROOT_USER_PASSWORD }}
+          OPENOBSERVE_OIDC_CLIENT_SECRET: ${{ secrets.OPENOBSERVE_OIDC_CLIENT_SECRET }}
+          ZABBIX_ADMIN_USER: ${{ secrets.ZABBIX_ADMIN_USER }}
+          ZABBIX_ADMIN_PASSWORD: ${{ secrets.ZABBIX_ADMIN_PASSWORD }}
 
         shell: bash
         run: |
@@ -200,6 +211,16 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/observability-release.tar.gz"
           scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
+          {
+            printf 'BASE_DOMAIN=%q\n' "${BASE_DOMAIN:-sysadminhomelab.hu}"
+            printf 'ISSUER_MODE=%q\n' "${ISSUER_MODE:-prod}"
+            printf 'OPENOBSERVE_ROOT_USER_EMAIL=%q\n' "${OPENOBSERVE_ROOT_USER_EMAIL:-}"
+            printf 'OPENOBSERVE_ROOT_USER_PASSWORD=%q\n' "${OPENOBSERVE_ROOT_USER_PASSWORD:-}"
+            printf 'OPENOBSERVE_OIDC_CLIENT_SECRET=%q\n' "${OPENOBSERVE_OIDC_CLIENT_SECRET:-}"
+            printf 'ZABBIX_ADMIN_USER=%q\n' "${ZABBIX_ADMIN_USER:-Admin}"
+            printf 'ZABBIX_ADMIN_PASSWORD=%q\n' "${ZABBIX_ADMIN_PASSWORD:-zabbix}"
+          } > ./ch05-4-remote.env
+          scp -i ~/.ssh/id_ed25519 ./ch05-4-remote.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05-4-remote.env"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh

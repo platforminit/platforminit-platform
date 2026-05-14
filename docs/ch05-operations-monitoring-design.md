@@ -7,82 +7,65 @@ CH05 is no longer a Grafana-first observability stack. It is an operator-first o
 PlatformInit defaults to:
 
 ```text
-Zabbix      -> operational state and alerts
-Vector      -> low-footprint log collection
-OpenObserve -> searchable logs and RCA
-Authentik   -> mandatory login for public WebUIs
+Zabbix                 -> operational state and alerts
+Vector                 -> low-footprint log collection
+OpenObserve Enterprise -> searchable logs and RCA
+Authentik              -> native app SSO for public WebUIs
 ```
-
-## Why the previous model was removed
-
-The previous Grafana/VictoriaMetrics/Loki/Alloy model solved telemetry collection but did not solve the operator workflow:
-
-```text
-what failed?
-where did it fail?
-why did it fail?
-what should I inspect next?
-```
-
-It also introduced too many moving parts for the default single-node PlatformInit use case.
 
 ## Workflow split
 
 | Workflow | Responsibility |
 |---|---|
 | `05 - Deploy Zabbix Monitoring` | state-first monitoring |
-| `05.1 - Deploy OpenObserve` | searchable RCA logs |
+| `05.1 - Deploy OpenObserve` | OpenObserve Enterprise log/RCA backend |
 | `05.2 - Deploy Vector Logging` | log collection |
 | `05.3 - Onboard External Host` | future n8n/customer host agent onboarding |
-| `05.4 - Enable Operations SSO` | Authentik-gated public WebUIs |
+| `05.4 - Enable Operations Native SSO` | native Authentik SSO for Zabbix and OpenObserve |
 
 ## WebUI rule
 
-Zabbix and OpenObserve must not be exposed publicly without Authentik.
+Zabbix and OpenObserve must not rely on proxy-only forward-auth as their final authentication model. The desired behavior is native application login through Authentik:
 
-The base deploy creates internal services only. `05.4` creates the public ingresses and attaches the Authentik forward-auth middleware.
+- Zabbix uses Authentik as a SAML IdP.
+- OpenObserve uses Enterprise SSO/OIDC with Authentik.
+- Vector has no WebUI.
 
+The base deploy creates internal services only. `05.4` creates public ingresses and reconciles native SSO objects.
 
-## Authentik operations SSO contract
+## OpenObserve Enterprise contract
 
-`05.4 - Enable Operations SSO` uses the existing `authentik-server` service from CH04.5 as the embedded outpost endpoint:
+OpenObserve Enterprise is used because SSO/RBAC are Enterprise features. The Enterprise tier is available free under the documented ingestion allowance, but it is not the same license model as the OSS image.
 
 ```text
-http://authentik-server.identity.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+image: public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
+public URL: https://logs.<PLATFORM_BASE_DOMAIN>
+redirect URL: https://logs.<PLATFORM_BASE_DOMAIN>/config/redirect
+callback URL: https://logs.<PLATFORM_BASE_DOMAIN>/web/cb
+issuer/base URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
 ```
 
-The default PlatformInit identity deployment does not require a separate `ak-outpost-*` service. `05.4` reconciles Authentik proxy providers/applications for Zabbix and OpenObserve, then creates the Traefik middleware and public ingresses. The proxy provider payload must include both `authorization_flow` and `invalidation_flow` because current Authentik provider APIs require both fields for proxy providers.
+## Zabbix SAML contract
 
-## Storage rule
+```text
+public URL: https://zabbix.<PLATFORM_BASE_DOMAIN>
+ACS URL: https://zabbix.<PLATFORM_BASE_DOMAIN>/index_sso.php?acs
+SLS URL: https://zabbix.<PLATFORM_BASE_DOMAIN>/index_sso.php?sls
+SP entity ID: https://zabbix.<PLATFORM_BASE_DOMAIN>
+username attribute: username
+```
 
-k3s data must be stored under `/srv/data/k3s`. This prevents accidental growth under the wrong partition and makes PVC-backed storage easier to audit.
+`05.4` reconciles the Authentik SAML provider/application, mounts the Authentik IdP certificate into Zabbix Web, configures Zabbix through its API, and bootstraps the Authentik `akadmin` user as a Zabbix SAML admin. The local Zabbix admin remains the break-glass account.
 
 ## A1 access elevation contract
-
-All CH05 operations workflows must use the existing scoped sudo contract from A1 Access Elevation.
-
-Required contract:
 
 ```text
 mode: observability
 allowed sudo entrypoint: /tmp/platforminit-run/ch05-remote.sh *
 ```
 
-Workflow rules:
+CH05 workflows must not use generic `sudo -l` validation or ad-hoc runner names.
 
-- do not call `sudo -n -l` as a validation step; scoped NOPASSWD rules may still require a password for generic sudo listing
-- do not execute `/tmp/platforminit-run/ch05-runner.sh` or any other ad-hoc sudo entrypoint
-- every CH05 workflow must upload the generated privileged runner as `/tmp/platforminit-run/ch05-remote.sh`
-- the final privileged call must be `sudo -n /tmp/platforminit-run/ch05-remote.sh ...`
+## TLS contract
 
-This preserves the non-interactive, temporary and audit-friendly A1 model while avoiding standing sudo for the `devops` user.
-
-
-Operational note: validation must query Traefik middleware using the fully qualified Kubernetes resource `middleware.traefik.io`. Do not use the ambiguous short resource name `middleware`, because clusters that still expose legacy Traefik CRDs may resolve it to `middlewares.traefik.containo.us` and report false NotFound errors after applying the current `traefik.io/v1alpha1` object.
-
-
-## CH05.4 public redirect and TLS contract
-
-Operations SSO must use `https://auth.<PLATFORM_BASE_DOMAIN>` as the public Authentik/outpost host. Redirects to `0.0.0.0:9000`, `localhost`, or cluster-internal service names are considered failed validation.
-
-The browser-facing operations ingresses should use the production Let's Encrypt issuer for trusted certificates. Staging issuer mode is only for ACME/debug testing and will intentionally produce an untrusted certificate warning in browsers.
+Use `issuer_mode=prod` for browser-facing operations UIs. Staging issuer mode is only for ACME/debug testing and intentionally produces an untrusted certificate warning.

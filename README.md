@@ -14,7 +14,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04 | platform services: ingress, TLS and Argo CD |
 | CH04.5 | identity foundation: Authentik, identity namespace, groups, technical users and validation |
 | CH04.6 | Argo CD SSO integration with Authentik |
-| CH05 | operations monitoring: Zabbix, Vector, OpenObserve and Authentik-gated WebUIs |
+| CH05 | operations monitoring: Zabbix, Vector, OpenObserve Enterprise and native Authentik SSO |
 | CH06 | deprecated identity compatibility workflow; do not use for normal lifecycle execution |
 
 ## User-facing workflow order
@@ -40,7 +40,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 16 | `05.1 - Deploy OpenObserve` | `observability-release-*` |
 | 17 | `05.2 - Deploy Vector Logging` | `observability-release-*` |
 | 18 | `05.3 - Onboard External Host` | `observability-release-*` |
-| 19 | `05.4 - Enable Operations SSO` | `observability-release-*` |
+| 19 | `05.4 - Enable Operations Native SSO` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -65,18 +65,18 @@ CH05 is an operator-first replacement for the previous Grafana/VictoriaMetrics/L
 ```text
 Zabbix      -> what is broken?
 Vector      -> collect logs
-OpenObserve -> why did it break?
-Authentik   -> mandatory login gate for public operations WebUIs
+OpenObserve Enterprise -> why did it break?
+Authentik            -> native app SSO for public operations WebUIs
 ```
 
 Public operations WebUIs:
 
 | URL | Purpose | Login |
 |---|---|---|
-| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik |
-| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik |
+| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik SAML |
+| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik OIDC via OpenObserve Enterprise SSO |
 
-The base CH05 deploys create internal services first. Public ingresses are created only by `05.4 - Enable Operations SSO`. `05.4` must use the public Authentik host `https://auth.<PLATFORM_BASE_DOMAIN>` for redirects and should be run with the production issuer for browser-trusted WebUI certificates.
+The base CH05 deploys create internal services first. Public ingresses are created only by `05.4 - Enable Operations Native SSO`. `05.4` must use the public Authentik host `https://auth.<PLATFORM_BASE_DOMAIN>` for redirects and should be run with the production issuer for browser-trusted WebUI certificates.
 
 Removed as default components:
 
@@ -107,7 +107,7 @@ Identity is deployed early in the lifecycle.
 |---|---|---|
 | `04.5 - Deploy Identity Foundation` | Authentik core | required before app SSO |
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
-| `05.4 - Enable Operations SSO` | Zabbix/OpenObserve → Authentik forward-auth | operations WebUIs |
+| `05.4 - Enable Operations Native SSO` | Zabbix SAML + OpenObserve Enterprise OIDC → Authentik | operations WebUIs |
 
 
 CH05 workflow privilege contract:
@@ -140,7 +140,7 @@ Recommended branch for this redesign:
 
 ```bash
 git checkout dev
-git checkout -b feat/ch05-operations-stack-redesign
+git checkout -b fix/ch05-native-sso-openobserve-enterprise
 ```
 
 ## Documentation index

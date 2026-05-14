@@ -40,14 +40,21 @@ spec:
     spec:
       containers:
         - name: openobserve
-          image: public.ecr.aws/zinclabs/openobserve:latest
+          image: public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:
                 name: openobserve-root
+            - secretRef:
+                name: openobserve-sso
+                optional: true
           env:
             - name: ZO_DATA_DIR
               value: /data
+            - name: ZO_LOCAL_MODE
+              value: "true"
+            - name: ZO_TELEMETRY
+              value: "false"
           ports:
             - name: http
               containerPort: 5080
