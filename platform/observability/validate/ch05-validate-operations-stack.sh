@@ -92,7 +92,11 @@ wait_daemonset_ready(){
 }
 
 start_port_forward(){
-  local svc="$1" local_port="$2" remote_port="$3" log_file="/tmp/ch05-validate-${svc}.portforward.log" pid_var="$4"
+  local svc="$1"
+  local local_port="$2"
+  local remote_port="$3"
+  local pid_var="$4"
+  local log_file="/tmp/ch05-validate-${svc}.portforward.log"
   kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 "svc/${svc}" "${local_port}:${remote_port}" >"$log_file" 2>&1 &
   local pid="$!"
   printf -v "$pid_var" '%s' "$pid"

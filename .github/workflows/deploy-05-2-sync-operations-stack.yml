@@ -223,13 +223,17 @@ jobs:
             while (( attempt <= max_attempts )); do
               "$@" && return 0
               rc=$?
-              echo "WARN: remote command failed with rc=${rc} on attempt ${attempt}/${max_attempts}. Retrying after ${delay}s..." >&2
+              if [[ "${rc}" != "255" ]]; then
+                echo "FATAL: command failed with non-transport rc=${rc}; not retrying: $*" >&2
+                return "${rc}"
+              fi
+              echo "WARN: SSH transport failed with rc=${rc} on attempt ${attempt}/${max_attempts}. Retrying after ${delay}s..." >&2
               sleep "${delay}"
               attempt=$((attempt + 1))
               delay=$((delay * 2))
               (( delay > 45 )) && delay=45
             done
-            echo "FATAL: remote command failed after ${max_attempts} attempts: $*" >&2
+            echo "FATAL: SSH transport failed after ${max_attempts} attempts: $*" >&2
             return "${rc}"
           }
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
