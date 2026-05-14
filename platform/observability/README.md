@@ -112,3 +112,11 @@ Expected generated hosts:
 - `logs.<BASE_DOMAIN>`
 
 If `PLATFORM_BASE_DOMAIN` is missing, CH05 workflows fail closed instead of falling back to a hardcoded domain.
+
+Stale files from the previous static-host / forward-auth model are forbidden, especially:
+
+```text
+platform/observability/manifests/sso/operations-native-sso-ingress.yaml
+```
+
+That file hardcoded concrete Zabbix and log hostnames; CH05 now generates hosts from Helm parameters instead.

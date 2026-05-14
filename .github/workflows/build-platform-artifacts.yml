@@ -51,6 +51,37 @@ jobs:
           set -euo pipefail
           python3 tools/platforminit_ops/check_host_name_contract.py .
 
+      - name: Validate CH05 domain parameterization
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking CH05 for hardcoded PlatformInit development domains and stale SSO manifests..."
+
+          forbidden_files=(
+            "platform/observability/manifests/sso/operations-native-sso-ingress.yaml"
+          )
+
+          for file in "${forbidden_files[@]}"; do
+            if [[ -e "$file" ]]; then
+              echo "Forbidden stale CH05 manifest detected: $file" >&2
+              echo "This file belongs to the retired forward-auth/static-host model and must be removed." >&2
+              exit 1
+            fi
+          done
+
+          matches="$(grep -RInE 'sysadminhomelab\.hu|zabbix\.sysadminhomelab\.hu|logs\.sysadminhomelab\.hu' \
+            platform/observability .github/workflows/deploy-05*.yml 2>/dev/null || true)"
+
+          if [[ -n "$matches" ]]; then
+            echo "Forbidden CH05 hardcoded domain references detected:" >&2
+            echo "$matches" >&2
+            echo "Use PLATFORM_BASE_DOMAIN / BASE_DOMAIN and Helm parameters instead." >&2
+            exit 1
+          fi
+
+          echo "PASS: CH05 domain parameterization contract is clean."
+
       - name: Package ${{ matrix.component_name }}
         id: pkg
         shell: bash
