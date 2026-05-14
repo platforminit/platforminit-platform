@@ -18,6 +18,15 @@ export KUBECONFIG
 need kubectl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
+
+OBSERVABILITY_STORAGE_ROOT="${OBSERVABILITY_STORAGE_ROOT:-/srv/observability/data}"
+log "Ensuring CH05 observability storage directories under ${OBSERVABILITY_STORAGE_ROOT}"
+mkdir -p   "${OBSERVABILITY_STORAGE_ROOT}/zabbix-postgres"   "${OBSERVABILITY_STORAGE_ROOT}/openobserve"   "${OBSERVABILITY_STORAGE_ROOT}/vector"
+chmod 0775 "${OBSERVABILITY_STORAGE_ROOT}" "${OBSERVABILITY_STORAGE_ROOT}/zabbix-postgres" "${OBSERVABILITY_STORAGE_ROOT}/openobserve" "${OBSERVABILITY_STORAGE_ROOT}/vector" 2>/dev/null || true
+if ! findmnt -T /srv/observability >/dev/null 2>&1; then
+  log "WARN: /srv/observability is not a dedicated mountpoint on this host; CH05 data will still use ${OBSERVABILITY_STORAGE_ROOT}, but it may live on the root filesystem unless host volume layout is split."
+fi
+
 kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create ns "$NAMESPACE" >/dev/null
 rand(){ openssl rand -base64 32 2>/dev/null || python3 - <<'PY'
 import secrets

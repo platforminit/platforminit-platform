@@ -14,7 +14,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04 | platform services: ingress, TLS and Argo CD |
 | CH04.5 | identity foundation: Authentik, identity namespace, groups, technical users and validation |
 | CH04.6 | Argo CD SSO integration with Authentik |
-| CH05 | operations monitoring: Zabbix, Vector, OpenObserve Enterprise, local break-glass access and optional native Authentik SSO |
+| CH05 | operations monitoring: Zabbix, Vector, OpenObserve Enterprise and native Authentik SSO |
 | CH06 | deprecated identity compatibility workflow; do not use for normal lifecycle execution |
 
 ## User-facing workflow order
@@ -66,16 +66,15 @@ CH05 is an operator-first replacement for the previous Grafana/VictoriaMetrics/L
 Zabbix      -> what is broken?
 Vector      -> collect logs
 OpenObserve Enterprise -> why did it break?
-Local login   -> mandatory break-glass access for operations WebUIs
-Authentik     -> optional native app SSO integration
+Authentik            -> native app SSO for public operations WebUIs
 ```
 
 Public operations WebUIs:
 
 | URL | Purpose | Login |
 |---|---|---|
-| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | local break-glass login required; optional Authentik SAML |
-| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | local break-glass login required; optional Authentik OIDC via OpenObserve Enterprise |
+| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik SAML |
+| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik OIDC via OpenObserve Enterprise SSO |
 
 After CH04, CH05 runtime resources are Argo CD-owned. GitHub Actions only register the Argo CD Application, reconcile prerequisite secrets/identity bindings, request sync/refresh, and validate. The public ingresses are part of the GitOps-owned operations stack and use production certificates for browser-trusted WebUIs.
 
@@ -102,20 +101,6 @@ Argo CD        -> Deployments, DaemonSets, Services, Ingresses, PVCs, ConfigMaps
 
 This prevents long workflow timeouts, sudo grant expiry, SSH session fragility and untracked runtime drift.
 
-## CH05 validation model
-
-Base CH05 success is runtime-first:
-
-```text
-operations-stack = Synced/Healthy
-Zabbix local login path is reachable
-OpenObserve local login path is reachable
-Vector is running
-Ingress/TLS exists
-```
-
-Native Authentik SSO is validated separately. `05.4 - Validate Operations Stack` defaults to `validation_mode=runtime`. Use `validation_mode=runtime_with_sso` only when the goal is to make SSO a release gate.
-
 ## Storage contract
 
 k3s must use:
@@ -134,7 +119,7 @@ Identity is deployed early in the lifecycle.
 |---|---|---|
 | `04.5 - Deploy Identity Foundation` | Authentik core | required before app SSO |
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
-| `05.3 - Enable Operations Native SSO` | Zabbix SAML + OpenObserve Enterprise OIDC → Authentik | optional identity binding only; no app rollout; not a base runtime requirement |
+| `05.3 - Enable Operations Native SSO` | Zabbix SAML + OpenObserve Enterprise OIDC → Authentik | identity binding only; no app rollout |
 
 
 CH05 workflow privilege contract:
@@ -181,7 +166,6 @@ git checkout -b refactor/ch05-argocd-owned-operations-stack
 | Release model | `docs/release-model.md` |
 | CH05 operations monitoring design | `docs/ch05-operations-monitoring-design.md` |
 | CH05 Argo CD refactor runbook | `docs/ch05-argocd-operations-refactor-runbook.md` |
-| CH05 break-glass / optional SSO decision | `docs/ch05-local-break-glass-and-optional-sso.md` |
 | CH05 migration from previous stack | `docs/ch05-migration-from-grafana-stack.md` |
 | Zabbix monitoring | `platform/observability/zabbix/README.md` |
 | Vector logging | `platform/observability/vector/README.md` |
@@ -197,10 +181,22 @@ git checkout -b refactor/ch05-argocd-owned-operations-stack
 - no hardcoded secrets
 - no standing sudo for runtime automation users
 - public UIs only where they provide operator value
-- local break-glass login required for public operations WebUIs
-- native Authentik SSO is optional and must not block base runtime validation
+- Authentik login required for public WebUIs
 - low-resource single-node defaults
 - clear operator alerts over raw telemetry dashboards
 
 
 See `docs/ssh-maxstartups-and-workflow-retry.md` for the SSH MaxStartups and workflow retry contract.
+
+### CH05 storage contract
+
+CH05 observability data is intentionally kept separate from the generic k3s local-path storage tree:
+
+```text
+/srv/data/k3s              -> k3s runtime and container runtime data
+/srv/data/k3s/storage      -> generic local-path PVC storage
+/srv/observability/data    -> CH05 observability persistent data
+```
+
+Zabbix PostgreSQL and OpenObserve use static Retain hostPath PVs under `/srv/observability/data`. Vector stores its local buffer/checkpoint data under `/srv/observability/data/vector`. See `docs/ch05-observability-storage-contract.md`.
+

@@ -149,4 +149,6 @@ spec:
           hostPath:
             path: /var/log/containers
         - name: data
-          emptyDir: {}
+          hostPath:
+            path: /srv/observability/data/vector
+            type: DirectoryOrCreate

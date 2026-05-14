@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: platforminit-zabbix-postgres-data
+  labels:
+    app.kubernetes.io/name: zabbix-postgres
+    app.kubernetes.io/part-of: platforminit-operations
+    platforminit.io/storage-scope: observability
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /srv/observability/data/zabbix-postgres
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: platforminit-openobserve-data
+  labels:
+    app.kubernetes.io/name: openobserve
+    app.kubernetes.io/part-of: platforminit-operations
+    platforminit.io/storage-scope: observability
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /srv/observability/data/openobserve
+    type: DirectoryOrCreate
