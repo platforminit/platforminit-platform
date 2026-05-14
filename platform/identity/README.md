@@ -64,7 +64,7 @@ After the identity foundation is healthy:
 
 1. Run `04.6 - Enable Argo CD SSO` because Argo CD already exists after CH04.
 2. Run the CH05 operations stack: Zabbix, OpenObserve and Vector.
-3. Run `05.4 - Enable Operations SSO` to expose Zabbix and OpenObserve through Authentik forward-auth.
+3. Run `05.3 - Enable Operations Native SSO` to configure native Zabbix SAML and OpenObserve Enterprise OIDC through Authentik.
 
 ## CH04.6 Argo CD SSO
 
@@ -82,13 +82,9 @@ Default admin group mapping: `PlatformInit Admins` → `role:admin`.
 
 ## CH05 Operations SSO
 
-Zabbix and OpenObserve are protected at the ingress layer through Authentik forward-auth.
+Zabbix and OpenObserve use native application SSO through Authentik: Zabbix via SAML and OpenObserve Enterprise via OIDC.
 
-The public WebUIs are created only by:
-
-```text
-05.4 - Enable Operations SSO
-```
+The public WebUI ingresses are Argo CD-owned as part of the CH05 operations stack. `05.3 - Enable Operations Native SSO` only reconciles the Authentik providers/applications and app-level SSO settings.
 
 Protected URLs:
 

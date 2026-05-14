@@ -36,11 +36,11 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 12 | `04 - Enable Platform (Ingress, TLS, ArgoCD)` | `platform-services-release-*` |
 | 13 | `04.5 - Deploy Identity Foundation` | `identity-release-*` |
 | 14 | `04.6 - Enable Argo CD SSO` | `identity-release-*` |
-| 15 | `05 - Deploy Zabbix Monitoring` | `observability-release-*` |
-| 16 | `05.1 - Deploy OpenObserve` | `observability-release-*` |
-| 17 | `05.2 - Deploy Vector Logging` | `observability-release-*` |
-| 18 | `05.3 - Onboard External Host` | `observability-release-*` |
-| 19 | `05.4 - Enable Operations Native SSO` | `observability-release-*` |
+| 15 | `05 - Register Operations Stack` | `observability-release-*` |
+| 16 | `05.1 - Reconcile Operations Prerequisites` | `observability-release-*` |
+| 17 | `05.2 - Sync Operations Stack` | `observability-release-*` |
+| 18 | `05.3 - Enable Operations Native SSO` | `observability-release-*` |
+| 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -76,7 +76,7 @@ Public operations WebUIs:
 | `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik SAML |
 | `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik OIDC via OpenObserve Enterprise SSO |
 
-The base CH05 deploys create internal services first. Public ingresses are created only by `05.4 - Enable Operations Native SSO`. `05.4` must use the public Authentik host `https://auth.<PLATFORM_BASE_DOMAIN>` for redirects and should be run with the production issuer for browser-trusted WebUI certificates.
+After CH04, CH05 runtime resources are Argo CD-owned. GitHub Actions only register the Argo CD Application, reconcile prerequisite secrets/identity bindings, request sync/refresh, and validate. The public ingresses are part of the GitOps-owned operations stack and use production certificates for browser-trusted WebUIs.
 
 Removed as default components:
 
@@ -88,6 +88,18 @@ Removed as default components:
 - Loki
 - Alloy
 - provisioned Grafana dashboards
+
+
+## CH05 GitOps ownership rule
+
+After CH04 has installed Argo CD, CH05 must not deploy long-running application resources through SSH scripts. The ownership boundary is:
+
+```text
+GitHub Actions -> short bootstrap / secrets / Authentik API / Argo CD sync request / validation
+Argo CD        -> Deployments, DaemonSets, Services, Ingresses, PVCs, ConfigMaps
+```
+
+This prevents long workflow timeouts, sudo grant expiry, SSH session fragility and untracked runtime drift.
 
 ## Storage contract
 
@@ -107,7 +119,7 @@ Identity is deployed early in the lifecycle.
 |---|---|---|
 | `04.5 - Deploy Identity Foundation` | Authentik core | required before app SSO |
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
-| `05.4 - Enable Operations Native SSO` | Zabbix SAML + OpenObserve Enterprise OIDC → Authentik | operations WebUIs |
+| `05.3 - Enable Operations Native SSO` | Zabbix SAML + OpenObserve Enterprise OIDC → Authentik | identity binding only; no app rollout |
 
 
 CH05 workflow privilege contract:
@@ -136,11 +148,11 @@ CH05 workflows must not use generic `sudo -l` validation or ad-hoc runner names.
 | `dev` | active integration branch |
 | `feat/*` / `fix/*` | isolated delivery branches |
 
-Recommended branch for this redesign:
+Recommended branch for this refactor:
 
 ```bash
 git checkout dev
-git checkout -b fix/ch05-native-sso-openobserve-enterprise
+git checkout -b refactor/ch05-argocd-owned-operations-stack
 ```
 
 ## Documentation index
@@ -153,6 +165,7 @@ git checkout -b fix/ch05-native-sso-openobserve-enterprise
 | Day-2 operations | `docs/day2-ops.md` |
 | Release model | `docs/release-model.md` |
 | CH05 operations monitoring design | `docs/ch05-operations-monitoring-design.md` |
+| CH05 Argo CD refactor runbook | `docs/ch05-argocd-operations-refactor-runbook.md` |
 | CH05 migration from previous stack | `docs/ch05-migration-from-grafana-stack.md` |
 | Zabbix monitoring | `platform/observability/zabbix/README.md` |
 | Vector logging | `platform/observability/vector/README.md` |

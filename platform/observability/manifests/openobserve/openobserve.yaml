@@ -1,14 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: openobserve-root
-  namespace: operations
-type: Opaque
-stringData:
-  ZO_ROOT_USER_EMAIL: admin@sysadminhomelab.hu
-  ZO_ROOT_USER_PASSWORD: changeme-openobserve-root
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: openobserve-data
@@ -30,6 +20,8 @@ metadata:
     app.kubernetes.io/part-of: platforminit-operations
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: openobserve

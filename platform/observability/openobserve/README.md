@@ -12,7 +12,7 @@ public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
 
 ## Public access
 
-`05.4 - Enable Operations Native SSO` creates `https://logs.<PLATFORM_BASE_DOMAIN>` and configures Authentik OIDC through the `operations/openobserve-sso` Kubernetes Secret.
+`05.2 - Sync Operations Stack` exposes `https://logs.<PLATFORM_BASE_DOMAIN>` through the Argo CD-owned ingress. `05.3 - Enable Operations Native SSO` configures Authentik OIDC through the `operations/openobserve-sso` Kubernetes Secret; it does not wait for or restart the OpenObserve deployment.
 
 ```text
 Redirect URL: https://logs.<PLATFORM_BASE_DOMAIN>/config/redirect

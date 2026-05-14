@@ -10,16 +10,17 @@ OpenObserve UI   -> OpenObserve Enterprise OIDC/SSO with Authentik
 Vector           -> no WebUI
 ```
 
-## Authentik objects reconciled by `05.4`
+## Authentik objects reconciled by `05.3`
 
-`05.4 - Enable Operations Native SSO` must:
+`05.3 - Enable Operations Native SSO` must:
 
 - create/update the `PlatformInit Operations` Authentik group
 - create/update the `PlatformInit Zabbix` SAML provider and application
 - create/update the `PlatformInit OpenObserve` OAuth2/OIDC provider and application
 - create/update `operations/openobserve-sso` for OpenObserve Enterprise
+- create/update `operations/zabbix-saml-certs` with the Authentik IdP certificate
 - configure Zabbix SAML through the Zabbix API
-- create public Traefik ingresses for Zabbix and OpenObserve
+- leave public Traefik ingresses under Argo CD ownership
 
 ## Why forward-auth was removed
 
