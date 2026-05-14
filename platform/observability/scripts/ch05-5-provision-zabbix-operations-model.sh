@@ -16,6 +16,46 @@ ZABBIX_AGENT_PORT="${ZABBIX_AGENT_PORT:-10050}"
 
 export KUBECONFIG ZABBIX_API_URL ZABBIX_ADMIN_USER ZABBIX_ADMIN_PASSWORD PLATFORM_HOST_NAME ZABBIX_AGENT_ENDPOINT ZABBIX_AGENT_PORT
 
+revision_matches(){
+  local expected="$1"
+  local actual="$2"
+  [[ -z "$expected" ]] && return 0
+  [[ -z "$actual" ]] && return 1
+  [[ "$actual" == "$expected" ]] && return 0
+  [[ "$actual" == "$expected"* ]] && return 0
+  [[ "$expected" == "$actual"* ]] && return 0
+  return 1
+}
+
+ensure_operations_stack_source_ready(){
+  log "Checking Argo CD operations-stack source before Zabbix API provisioning"
+  local app_json target_revision expected_revision
+  app_json="$(kubectl -n argocd get application.argoproj.io operations-stack -o json 2>/dev/null)" || die "Missing Argo CD Application operations-stack. Run 05 - Register Operations Stack and 05.2 before 05.5."
+  target_revision="$(printf '%s' "$app_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("spec",{}).get("source",{}).get("targetRevision", ""))')"
+  expected_revision="${TARGET_REVISION:-}"
+  if ! revision_matches "$expected_revision" "$target_revision"; then
+    die "operations-stack targetRevision=${target_revision} does not match this artifact targetRevision=${expected_revision}. Run 05 - Register Operations Stack and 05.2 with the current 00 artifact before 05.5."
+  fi
+  APP_JSON="$app_json" python3 - <<'PY_APP_CHECK'
+import json, os
+app=json.loads(os.environ['APP_JSON'])
+resources=app.get("status", {}).get("resources", []) or []
+match=None
+for r in resources:
+    if r.get("kind") == "Service" and r.get("namespace") == "operations" and r.get("name") == "zabbix-agent2":
+        match=r
+        break
+if not match:
+    raise SystemExit("FATAL: zabbix-agent2 Service is not tracked by operations-stack. Run 05.2 after merging the Argo-owned zabbix-agent2 Service manifest; do not let 05.5 depend on an ad-hoc Service.")
+status=match.get("status")
+health=(match.get("health") or {}).get("status", "")
+if status != "Synced":
+    msg=match.get("message", "")
+    raise SystemExit(f"FATAL: zabbix-agent2 Service is not Argo-owned/Synced: status={status} health={health} message={msg}")
+print(f"PASS: zabbix-agent2 Service is Argo-tracked status={status} health={health or 'n/a'}")
+PY_APP_CHECK
+}
+
 ZABBIX_PORT_FORWARD_PID=""
 cleanup(){
   [[ -n "${ZABBIX_PORT_FORWARD_PID:-}" ]] && kill "${ZABBIX_PORT_FORWARD_PID}" >/dev/null 2>&1 || true
@@ -200,6 +240,7 @@ need python3
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
 kubectl -n "$NAMESPACE" get deploy/zabbix-web deploy/zabbix-server >/dev/null
+ensure_operations_stack_source_ready
 kubectl -n "$NAMESPACE" get service zabbix-agent2 >/dev/null || die "Missing zabbix-agent2 Service. Run 05.2 after merging the updated manifest."
 start_zabbix_api_port_forward
 provision_zabbix_operations_model

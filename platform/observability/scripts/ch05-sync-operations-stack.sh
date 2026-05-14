@@ -31,23 +31,14 @@ fi
 if [[ -z "$TARGET_REVISION" ]]; then
   TARGET_REVISION="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.spec.source.targetRevision}')"
 fi
-log "Requesting explicit Argo CD sync for $APP_NAME revision=${TARGET_REVISION}"
-kubectl -n "$ARGOCD_NAMESPACE" annotate application.argoproj.io "$APP_NAME" argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 patch_file="$(mktemp)"
 trap 'rm -f "$patch_file"' EXIT
-python3 - "$TARGET_REVISION" > "$patch_file" <<'PY'
-import json, sys
-revision = sys.argv[1]
-print(json.dumps({
-    "operation": {
-        "sync": {
-            "revision": revision,
-            "prune": True,
-            "syncOptions": ["CreateNamespace=true", "PruneLast=true"]
-        }
-    }
-}))
-PY
+log "Updating $APP_NAME source targetRevision=${TARGET_REVISION}"
+python3 -c 'import json,sys; print(json.dumps({"spec":{"source":{"targetRevision":sys.argv[1]}}}))' "$TARGET_REVISION" > "$patch_file"
+kubectl -n "$ARGOCD_NAMESPACE" patch application.argoproj.io "$APP_NAME" --type merge --patch-file "$patch_file" >/dev/null
+log "Requesting explicit Argo CD sync for $APP_NAME revision=${TARGET_REVISION}"
+kubectl -n "$ARGOCD_NAMESPACE" annotate application.argoproj.io "$APP_NAME" argocd.argoproj.io/refresh=hard --overwrite >/dev/null
+python3 -c 'import json,sys; print(json.dumps({"operation":{"sync":{"revision":sys.argv[1],"prune":True,"syncOptions":["CreateNamespace=true","PruneLast=true"]}}}))' "$TARGET_REVISION" > "$patch_file"
 if ! kubectl -n "$ARGOCD_NAMESPACE" patch application.argoproj.io "$APP_NAME" --type merge --patch-file "$patch_file" >/dev/null; then
   log "Sync operation patch was rejected, probably because another operation is already running; continuing to observe status"
 fi
