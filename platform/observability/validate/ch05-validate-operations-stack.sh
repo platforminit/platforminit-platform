@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 log(){ echo "[$(basename "$0")][$(date -u +%FT%TZ)] $*"; }
+warn(){ echo "WARN: $*" >&2; }
 die(){ echo "FATAL: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
+
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 APP_NAME="${APP_NAME:-operations-stack}"
 BASE_DOMAIN="${BASE_DOMAIN:-}"
+VALIDATION_MODE="${VALIDATION_MODE:-runtime}"
 export KUBECONFIG
+
 [[ -n "${BASE_DOMAIN}" ]] || die "Missing BASE_DOMAIN. Set PLATFORM_BASE_DOMAIN; do not hardcode domains in CH05."
+case "$VALIDATION_MODE" in
+  runtime|runtime_with_sso) ;;
+  *) die "Invalid VALIDATION_MODE=${VALIDATION_MODE}. Use runtime or runtime_with_sso." ;;
+esac
+
 need kubectl
+need curl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
 
@@ -81,25 +91,77 @@ wait_daemonset_ready(){
   done
 }
 
-kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" >/dev/null || die "Missing Argo CD application $APP_NAME"
-kubectl -n "$NAMESPACE" get deploy zabbix-postgres zabbix-server zabbix-web openobserve >/dev/null
-kubectl -n "$NAMESPACE" get ds zabbix-agent2 vector >/dev/null
-wait_deployment_ready zabbix-postgres 120
-wait_deployment_ready zabbix-server 180
-wait_deployment_ready zabbix-web 180
-wait_deployment_ready openobserve 240
-wait_daemonset_ready zabbix-agent2 120
-wait_daemonset_ready vector 180
-kubectl -n "$NAMESPACE" get ingress zabbix openobserve >/dev/null
-for host in "zabbix.${BASE_DOMAIN}" "logs.${BASE_DOMAIN}"; do
-  kubectl -n "$NAMESPACE" get ingress -o json | grep -q "$host" || die "Missing ingress host: $host"
-done
-kubectl -n "$NAMESPACE" get secret zabbix-postgres openobserve-root openobserve-sso zabbix-saml-certs >/dev/null
-if kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null 2>&1; then
-  die "Stale forward-auth middleware exists; Operations WebUIs must use native app SSO"
+start_port_forward(){
+  local svc="$1" local_port="$2" remote_port="$3" log_file="/tmp/ch05-validate-${svc}.portforward.log" pid_var="$4"
+  kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 "svc/${svc}" "${local_port}:${remote_port}" >"$log_file" 2>&1 &
+  local pid="$!"
+  printf -v "$pid_var" '%s' "$pid"
+  for _ in $(seq 1 20); do
+    if curl -fsS --max-time 4 "http://127.0.0.1:${local_port}/" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  cat "$log_file" >&2 || true
+  return 1
+}
+
+validate_local_break_glass_web(){
+  log "Validating local break-glass WebUI reachability through internal services"
+  local zabbix_pf_pid="" openobserve_pf_pid=""
+  start_port_forward zabbix-web 18084 8080 zabbix_pf_pid || die "Zabbix local WebUI is not reachable through service/zabbix-web"
+  start_port_forward openobserve 15084 5080 openobserve_pf_pid || die "OpenObserve local WebUI is not reachable through service/openobserve"
+  curl -fsS --max-time 5 "http://127.0.0.1:18084/index.php" >/dev/null || die "Zabbix login page is not reachable through local service port-forward"
+  curl -fsS --max-time 5 "http://127.0.0.1:15084/" >/dev/null || die "OpenObserve login page is not reachable through local service port-forward"
+  kill "$zabbix_pf_pid" "$openobserve_pf_pid" >/dev/null 2>&1 || true
+  log "PASS: local break-glass WebUIs are reachable. Manual local credentials remain the runtime fallback."
+}
+
+validate_runtime(){
+  kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" >/dev/null || die "Missing Argo CD application $APP_NAME"
+  kubectl -n "$NAMESPACE" get deploy zabbix-postgres zabbix-server zabbix-web openobserve >/dev/null
+  kubectl -n "$NAMESPACE" get ds zabbix-agent2 vector >/dev/null
+  wait_deployment_ready zabbix-postgres 120
+  wait_deployment_ready zabbix-server 180
+  wait_deployment_ready zabbix-web 180
+  wait_deployment_ready openobserve 240
+  wait_daemonset_ready zabbix-agent2 120
+  wait_daemonset_ready vector 180
+  kubectl -n "$NAMESPACE" get ingress zabbix openobserve >/dev/null
+  for host in "zabbix.${BASE_DOMAIN}" "logs.${BASE_DOMAIN}"; do
+    kubectl -n "$NAMESPACE" get ingress -o json | grep -q "$host" || die "Missing ingress host: $host"
+  done
+  kubectl -n "$NAMESPACE" get secret zabbix-postgres openobserve-root >/dev/null
+  validate_local_break_glass_web
+  sync_status="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+  health_status="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+  [[ "$sync_status" == "Synced" ]] || die "Argo CD app is not Synced: ${sync_status:-unknown}"
+  [[ "$health_status" == "Healthy" ]] || die "Argo CD app is not Healthy: ${health_status:-unknown}"
+}
+
+validate_sso_prerequisites(){
+  log "Validating optional native SSO prerequisites"
+  kubectl -n "$NAMESPACE" get secret openobserve-sso zabbix-saml-certs >/dev/null
+  kubectl -n "$NAMESPACE" get deploy/openobserve -o jsonpath='{.spec.template.spec.containers[0].image}' | grep -q 'openobserve-enterprise' || die "OpenObserve is not using the Enterprise image"
+  kubectl -n "$NAMESPACE" get deploy/openobserve -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].secretRef.name}' | grep -q 'openobserve-sso' || die "OpenObserve SSO secret is not mounted"
+  kubectl -n "$NAMESPACE" get deploy/zabbix-web -o jsonpath='{.spec.template.spec.containers[0].env[*].name}' | grep -q 'ZBX_SSO_SETTINGS' || die "Zabbix SAML runtime env is missing"
+  kubectl -n "$NAMESPACE" get deploy/zabbix-web -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[*].name}' | grep -q 'zabbix-saml-certs' || die "Zabbix SAML certificate volume is not mounted"
+  if kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null 2>&1; then
+    die "Stale forward-auth middleware exists; Operations WebUIs must use native app SSO when SSO validation is required"
+  fi
+  log "PASS: optional native SSO prerequisites are configured. This does not prove browser login mapping."
+}
+
+validate_runtime
+if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
+  validate_sso_prerequisites
+else
+  if ! kubectl -n "$NAMESPACE" get secret openobserve-sso zabbix-saml-certs >/dev/null 2>&1; then
+    warn "Native SSO secrets are missing or incomplete; base runtime remains valid because VALIDATION_MODE=runtime."
+  fi
+  if kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null 2>&1; then
+    warn "Stale forward-auth middleware exists; ignored for runtime validation, but must be removed before requiring SSO."
+  fi
+  log "SSO browser login is intentionally not part of base runtime validation. Use VALIDATION_MODE=runtime_with_sso to require SSO prerequisites."
 fi
-sync_status="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
-health_status="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
-[[ "$sync_status" == "Synced" ]] || die "Argo CD app is not Synced: ${sync_status:-unknown}"
-[[ "$health_status" == "Healthy" ]] || die "Argo CD app is not Healthy: ${health_status:-unknown}"
-log "PASS: CH05 operations stack is Argo CD-owned and runtime resources are healthy"
+log "PASS: CH05 operations stack runtime is healthy with local break-glass WebUI access"

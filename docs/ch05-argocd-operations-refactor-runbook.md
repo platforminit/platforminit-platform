@@ -44,12 +44,19 @@ kubectl get ns operations
 00 - Build Platform Artifacts
 05 - Register Operations Stack
 05.1 - Reconcile Operations Prerequisites
-05.3 - Enable Operations Native SSO
 05.2 - Sync Operations Stack
-05.4 - Validate Operations Stack
+05.4 - Validate Operations Stack   # default validation_mode=runtime
 ```
 
-For an already deployed but broken stack, `05.3` may require Zabbix to be reachable through the in-cluster service. If Zabbix is not running yet, run `05.2` first, then `05.3`, then `05.2` again.
+Optional SSO integration sequence after runtime is healthy:
+
+```text
+05.3 - Enable Operations Native SSO
+05.2 - Sync Operations Stack
+05.4 - Validate Operations Stack   # optionally validation_mode=runtime_with_sso
+```
+
+`05.3` may require Zabbix to be reachable through the in-cluster service. If Zabbix is not running yet, run `05.2` first, then `05.3`, then `05.2` again.
 
 ## Ownership contract
 
@@ -84,3 +91,7 @@ The `operations-stack` Application is registered without automated sync. This is
 
 If Vector shows `secret "openobserve-root" not found`, run `05.1` and then rerun `05.2`. Do not enable automated sync before prerequisite reconciliation.
 
+
+## Runtime-first decision
+
+CH05 does not require native Authentik SSO to declare the operations stack healthy. Local Zabbix and OpenObserve logins are mandatory break-glass paths and are the baseline operator access model. SSO is validated as an optional integration layer after the runtime stack is healthy.

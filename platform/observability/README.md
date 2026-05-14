@@ -8,7 +8,8 @@ CH05 is the PlatformInit operations layer. It uses an operator-first model inste
 Zabbix                 -> what is broken?
 Vector                 -> collect platform, Kubernetes and host logs
 OpenObserve Enterprise -> why did it break? searchable RCA logs
-Authentik              -> native application SSO
+Local login            -> mandatory break-glass access
+Authentik              -> optional native application SSO
 Argo CD                -> owner of runtime Kubernetes resources
 ```
 
@@ -36,8 +37,8 @@ GitHub Actions owns only:
 
 | URL | Purpose | Auth model |
 |---|---|---|
-| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | native Authentik SAML |
-| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | OpenObserve Enterprise OIDC via Authentik |
+| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | local break-glass required; optional Authentik SAML |
+| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | local break-glass required; optional OpenObserve Enterprise OIDC via Authentik |
 
 Vector has no public WebUI.
 
@@ -48,8 +49,8 @@ Vector has no public WebUI.
 | 15 | `05 - Register Operations Stack` | create/update Argo CD AppProject + Application |
 | 16 | `05.1 - Reconcile Operations Prerequisites` | create/preserve DB/root/SSO prerequisite secrets |
 | 17 | `05.2 - Sync Operations Stack` | let Argo CD reconcile Zabbix, OpenObserve and Vector |
-| 18 | `05.3 - Enable Operations Native SSO` | reconcile Authentik SAML/OIDC bindings and app-level SSO settings; no rollout wait |
-| 19 | `05.4 - Validate Operations Stack` | validate Argo CD ownership, runtime health, ingress and SSO prerequisites |
+| 18 | `05.3 - Enable Operations Native SSO` | optional: reconcile Authentik SAML/OIDC bindings and app-level SSO settings; no rollout wait |
+| 19 | `05.4 - Validate Operations Stack` | validate Argo CD ownership, runtime health, ingress and local break-glass access; SSO only when `validation_mode=runtime_with_sso` |
 
 ## Removed default components
 
@@ -120,3 +121,22 @@ platform/observability/manifests/sso/operations-native-sso-ingress.yaml
 ```
 
 That file hardcoded concrete Zabbix and log hostnames; CH05 now generates hosts from Helm parameters instead.
+
+
+## Runtime vs SSO validation
+
+The operations stack is considered usable when the runtime layer is healthy and both WebUIs can be reached with local break-glass credentials. Native Authentik SSO is an optional integration layer and must not block base CH05 runtime validation.
+
+Default validation mode:
+
+```text
+validation_mode=runtime
+```
+
+Strict SSO release-gate mode:
+
+```text
+validation_mode=runtime_with_sso
+```
+
+Use strict SSO validation only after local Zabbix and OpenObserve logins have already been confirmed.
