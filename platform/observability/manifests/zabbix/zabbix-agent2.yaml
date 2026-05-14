@@ -39,3 +39,20 @@ spec:
             limits:
               cpu: 100m
               memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-agent2
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: zabbix-agent2
+    app.kubernetes.io/part-of: platforminit-operations
+spec:
+  selector:
+    app.kubernetes.io/name: zabbix-agent2
+  ports:
+    - name: zabbix-agent
+      port: 10050
+      targetPort: zabbix-agent
+
