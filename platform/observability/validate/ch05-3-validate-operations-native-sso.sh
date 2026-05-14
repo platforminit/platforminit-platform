@@ -11,10 +11,29 @@ export KUBECONFIG
 need kubectl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
+
+secret_value(){
+  local key="$1"
+  kubectl -n "$NAMESPACE" get secret openobserve-sso -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true
+}
+validate_openobserve_oidc_secret(){
+  local expected_base="https://auth.${BASE_DOMAIN}/application/o/platforminit-openobserve"
+  local base auth_suffix token_suffix keys_suffix
+  base="$(secret_value O2_DEX_BASE_URL)"
+  auth_suffix="$(secret_value O2_DEX_AUTH_EP_SUFFIX)"
+  token_suffix="$(secret_value O2_DEX_TOKEN_EP_SUFFIX)"
+  keys_suffix="$(secret_value O2_DEX_KEYS_EP_SUFFIX)"
+  [[ "$base" == "$expected_base" ]] || die "OpenObserve O2_DEX_BASE_URL is invalid: '${base:-missing}'. Expected '${expected_base}'. The parent /application/o path breaks OIDC discovery."
+  [[ "$auth_suffix" == "/../authorize/" ]] || die "OpenObserve O2_DEX_AUTH_EP_SUFFIX is invalid: '${auth_suffix:-missing}'"
+  [[ "$token_suffix" == "/../token/" ]] || die "OpenObserve O2_DEX_TOKEN_EP_SUFFIX is invalid: '${token_suffix:-missing}'"
+  [[ "$keys_suffix" == "/jwks/" ]] || die "OpenObserve O2_DEX_KEYS_EP_SUFFIX is invalid: '${keys_suffix:-missing}'"
+  log "PASS: OpenObserve OIDC discovery base is application-scoped: ${base}"
+}
 kubectl -n "$NAMESPACE" get ingress zabbix openobserve >/dev/null
 kubectl -n "$NAMESPACE" get secret openobserve-sso zabbix-saml-certs >/dev/null
 kubectl -n "$NAMESPACE" get deploy/openobserve -o jsonpath='{.spec.template.spec.containers[0].image}' | grep -q 'openobserve-enterprise' || die "OpenObserve is not using the Enterprise image"
 kubectl -n "$NAMESPACE" get deploy/openobserve -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].secretRef.name}' | grep -q 'openobserve-sso' || die "OpenObserve SSO secret is not mounted"
+validate_openobserve_oidc_secret
 kubectl -n "$NAMESPACE" get deploy/zabbix-web -o jsonpath='{.spec.template.spec.containers[0].env[*].name}' | grep -q 'ZBX_SSO_SETTINGS' || die "Zabbix SAML runtime env is missing"
 kubectl -n "$NAMESPACE" get deploy/zabbix-web -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[*].name}' | grep -q 'zabbix-saml-certs' || die "Zabbix SAML certificate volume is not mounted"
 if kubectl -n "$NAMESPACE" get middleware.traefik.io authentik-forward-auth >/dev/null 2>&1; then

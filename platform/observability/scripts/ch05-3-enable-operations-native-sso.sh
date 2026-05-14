@@ -393,7 +393,14 @@ cleanup_proxy_provider("PlatformInit OpenObserve")
 ensure_saml_provider(authorization_flow,invalidation_flow)
 ensure_oauth2_provider(authorization_flow,invalidation_flow)
 with open("/tmp/platforminit-openobserve-sso.env","w",encoding="utf-8") as fh:
-    env={"O2_DEX_ENABLED":"true","O2_DEX_CLIENT_ID":openobserve_client_id,"O2_DEX_CLIENT_SECRET":openobserve_client_secret,"O2_DEX_BASE_URL":f"{authentik_public_host}/application/o","O2_DEX_AUTH_EP_SUFFIX":"/authorize/","O2_DEX_TOKEN_EP_SUFFIX":"/token/","O2_DEX_KEYS_EP_SUFFIX":f"/{openobserve_slug}/jwks/","O2_DEX_REDIRECT_URL":f"{logs_host}/config/redirect","O2_CALLBACK_URL":f"{logs_host}/web/cb","O2_DEX_SCOPES":"openid profile email groups offline_access","O2_DEX_GROUP_ATTRIBUTE":"groups","O2_DEX_ROLE_ATTRIBUTE":"groups","O2_DEX_DEFAULT_ORG":"default"}
+    # OpenObserve builds the OIDC discovery URL from O2_DEX_BASE_URL.
+    # Authentik's OpenID Configuration endpoint is application-scoped:
+    #   /application/o/<application-slug>/.well-known/openid-configuration
+    # Auth/token remain global Authentik OAuth2 endpoints, while JWKS is
+    # application-scoped. Keep the relative suffixes explicit so the final
+    # endpoints match Authentik's OAuth2 endpoint contract.
+    openobserve_issuer_base=f"{authentik_public_host}/application/o/{openobserve_slug}"
+    env={"O2_DEX_ENABLED":"true","O2_DEX_CLIENT_ID":openobserve_client_id,"O2_DEX_CLIENT_SECRET":openobserve_client_secret,"O2_DEX_BASE_URL":openobserve_issuer_base,"O2_DEX_AUTH_EP_SUFFIX":"/../authorize/","O2_DEX_TOKEN_EP_SUFFIX":"/../token/","O2_DEX_KEYS_EP_SUFFIX":"/jwks/","O2_DEX_REDIRECT_URL":f"{logs_host}/config/redirect","O2_CALLBACK_URL":f"{logs_host}/web/cb","O2_DEX_SCOPES":"openid profile email groups offline_access","O2_DEX_GROUP_ATTRIBUTE":"groups","O2_DEX_ROLE_ATTRIBUTE":"groups","O2_DEX_DEFAULT_ORG":"default"}
     for k,v in env.items(): fh.write(f"{k}={v}\n")
 with open("/tmp/platforminit-zabbix-saml.json","w",encoding="utf-8") as fh:
     json.dump({"idp_entityid":f"{authentik_public_host}/application/saml/{zabbix_slug}/metadata/","sso_url":f"{authentik_public_host}/application/saml/{zabbix_slug}/sso/binding/redirect/","slo_url":f"{authentik_public_host}/application/saml/{zabbix_slug}/slo/binding/redirect/","sp_entityid":zabbix_host,"username_attribute":"username","bootstrap_user":admin_username},fh)
