@@ -28,12 +28,13 @@ spec:
               value: "true"
             - name: ZBX_ACTIVESERVERS
               value: zabbix-server.operations.svc.cluster.local:10051
+            # Do not set ZBX_SERVER_HOST here. With active checks enabled the official
+            # container entrypoint can derive ServerActive from both variables, which
+            # can create duplicate active-server entries and keep the DaemonSet Progressing.
             # Passive checks are intentionally disabled for the PlatformInit host model.
             # Keep the Service object for inventory/debug compatibility, but do not rely on zabbix_get.
             - name: ZBX_PASSIVE_ALLOW
               value: "false"
-            - name: ZBX_SERVER_HOST
-              value: zabbix-server.operations.svc.cluster.local
             - name: ZBX_HOSTNAME
               valueFrom:
                 fieldRef:
@@ -41,9 +42,9 @@ spec:
             - name: ZBX_REFRESHACTIVECHECKS
               value: "60"
           ports:
+            # Informational Service port only. Active-agent mode does not expose a hostPort.
             - name: zabbix-agent
               containerPort: 10050
-              hostPort: 10050
           volumeMounts:
             - name: host-root
               mountPath: /host-root
