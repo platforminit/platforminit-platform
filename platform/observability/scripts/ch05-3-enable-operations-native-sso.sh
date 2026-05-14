@@ -202,7 +202,7 @@ def canonicalize_certificate_pem(raw):
     return "\n".join(lines)+"\n"
 
 def certificate_pem_from_pair(pair):
-    for key in ("certificate_data","certificate","certificate_pem","cert","public_certificate","certificate_chain"):
+    for key in ("data","certificate_data","certificate","certificate_pem","cert","public_certificate","certificate_chain"):
         pem=canonicalize_certificate_pem(pair.get(key))
         if pem:
             return pem
@@ -216,7 +216,7 @@ def certificate_pem_from_pair(pair):
                     return pem
                 try:
                     obj=json.loads(raw)
-                    for key in ("certificate_data","certificate","certificate_pem","cert","public_certificate","certificate_chain"):
+                    for key in ("data","certificate_data","certificate","certificate_pem","cert","public_certificate","certificate_chain"):
                         pem=canonicalize_certificate_pem(obj.get(key))
                         if pem:
                             return pem
@@ -225,19 +225,55 @@ def certificate_pem_from_pair(pair):
             except Exception:
                 pass
     return None
+def generate_platforminit_saml_keypair():
+    """Create a dedicated Authentik signing keypair when the default one is unreadable.
+
+    Some Authentik versions expose certificate-keypair metadata in the list API but
+    not the PEM block directly. The supported fallback is the generate endpoint,
+    then reading the generated keypair through view_certificate.
+    """
+    payload={"common_name":"platforminit-zabbix-saml","subject_alt_name":"authentik.platforminit.local","validity_days":3650,"alg":"rsa"}
+    try:
+        created=request("POST","/api/v3/crypto/certificatekeypairs/generate/",payload)
+    except Exception as exc:
+        print(f"WARN: full Authentik certificate generation payload failed, retrying minimal payload: {exc}",file=sys.stderr)
+        created=request("POST","/api/v3/crypto/certificatekeypairs/generate/",{"common_name":"platforminit-zabbix-saml","validity_days":3650})
+    pk=created.get("pk") or created.get("uuid")
+    if not pk:
+        raise RuntimeError(f"Generated Authentik certificate/keypair response had no pk: {created}")
+    # Give the generated keypair a stable, human-readable name when supported.
+    try:
+        request("PATCH",f"/api/v3/crypto/certificatekeypairs/{pk}/",{"name":"PlatformInit Zabbix SAML Signing Certificate"})
+    except Exception as exc:
+        print(f"WARN: could not rename generated Authentik signing keypair: {exc}",file=sys.stderr)
+    refreshed=request("GET",f"/api/v3/crypto/certificatekeypairs/{pk}/")
+    pem=certificate_pem_from_pair(refreshed) or certificate_pem_from_pair(created)
+    if not pem:
+        raise RuntimeError("Generated Authentik certificate/keypair but could not read its public certificate")
+    print(f"Generated dedicated Authentik SAML signing keypair pk={pk}")
+    return pk,pem
+
 def signing_keypair():
     pairs=paginated_results("/api/v3/crypto/certificatekeypairs/?page_size=200")
     ordered=[]
-    for p in pairs:
-        if "authentik" in str(p.get("name") or "").lower(): ordered.append(p)
+    preferred_names=("platforminit zabbix saml", "authentik self-signed", "authentik")
+    for needle in preferred_names:
+        for p in pairs:
+            if p in ordered: continue
+            if needle in str(p.get("name") or "").lower(): ordered.append(p)
     ordered.extend([p for p in pairs if p not in ordered])
+    unreadable=[]
     for p in ordered:
         pk=p.get("pk") or p.get("uuid")
         if not pk: continue
         pem=certificate_pem_from_pair(p)
         if pem:
             return pk,pem
-    raise RuntimeError("No Authentik certificate/keypair with readable public certificate was found for Zabbix SAML")
+        unreadable.append(str(p.get("name") or pk))
+    print("WARN: no readable Authentik certificate PEM found in existing keypairs; attempting to generate a dedicated SAML signing keypair",file=sys.stderr)
+    if unreadable:
+        print("WARN: unreadable keypairs: "+", ".join(unreadable),file=sys.stderr)
+    return generate_platforminit_saml_keypair()
 def cleanup_proxy_provider(name):
     existing=first_by_name("/api/v3/providers/proxy/",name)
     if existing:

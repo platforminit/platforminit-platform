@@ -44,3 +44,13 @@ This avoids the failure pattern:
 ```text
 Invalid parameter "/": unexpected parameter "saml_idp_entityid"
 ```
+
+## Authentik signing certificate handling
+
+`05.3` uses a dedicated or existing Authentik certificate-keypair as the SAML signing key for Zabbix. The workflow first tries to read an existing readable public certificate through the Authentik crypto API. If no readable PEM is available, it generates a dedicated self-signed keypair named `PlatformInit Zabbix SAML Signing Certificate` and stores the resulting public certificate in `operations/zabbix-saml-certs` as `idp.crt`.
+
+This avoids Zabbix/SimpleSAML runtime failures such as:
+
+```text
+Unable to extract public key
+```
