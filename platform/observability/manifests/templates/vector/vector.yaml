@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vector
+  namespace: operations
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platforminit-vector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platforminit-vector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platforminit-vector
+subjects:
+  - kind: ServiceAccount
+    name: vector
+    namespace: operations
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: operations
+data:
+  vector.yaml: |
+    data_dir: /vector-data-dir
+
+    sources:
+      kubernetes_logs:
+        type: kubernetes_logs
+
+      host_auth_logs:
+        type: file
+        include:
+          - /host/var/log/auth.log
+          - /host/var/log/syslog
+          - /host/var/log/ufw.log
+        ignore_older_secs: 86400
+        read_from: end
+
+    transforms:
+      platforminit_enrich:
+        type: remap
+        inputs:
+          - kubernetes_logs
+          - host_auth_logs
+        source: |
+          .platform = "platforminit"
+          .environment = get_env_var("PLATFORMINIT_PROJECT") ?? "development"
+          .collector = "vector"
+
+    sinks:
+      openobserve:
+        type: http
+        inputs:
+          - platforminit_enrich
+        uri: http://openobserve.operations.svc.cluster.local:5080/api/default/platforminit/_json
+        method: post
+        auth:
+          strategy: basic
+          user: ${ZO_ROOT_USER_EMAIL}
+          password: ${ZO_ROOT_USER_PASSWORD}
+        encoding:
+          codec: json
+        compression: gzip
+        request:
+          retry_attempts: 5
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/part-of: platforminit-operations
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+    spec:
+      serviceAccountName: vector
+      containers:
+        - name: vector
+          image: timberio/vector:0.37.1-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/vector/vector.yaml
+          envFrom:
+            - secretRef:
+                name: openobserve-root
+          env:
+            - name: PLATFORMINIT_PROJECT
+              value: development
+            # Required by Vector's kubernetes_logs source so the agent can scope collection to this node.
+            # Without this, Vector can start-crash with a configuration error and Argo CD remains Progressing.
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: var-log
+              mountPath: /host/var/log
+              readOnly: true
+            - name: pod-logs
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: container-logs
+              mountPath: /var/log/containers
+              readOnly: true
+            - name: data
+              mountPath: /vector-data-dir
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: vector-config
+        - name: var-log
+          hostPath:
+            path: /var/log
+        - name: pod-logs
+          hostPath:
+            path: /var/log/pods
+        - name: container-logs
+          hostPath:
+            path: /var/log/containers
+        - name: data
+          emptyDir: {}

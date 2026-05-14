@@ -201,7 +201,8 @@ jobs:
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/observability-release.tar.gz"
           scp -i ~/.ssh/id_ed25519 /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
           {
-            printf 'BASE_DOMAIN=%q\n' "${BASE_DOMAIN:-sysadminhomelab.hu}"
+            [[ -n "${BASE_DOMAIN:-}" ]] || { echo "FATAL: PLATFORM_BASE_DOMAIN secret is required; CH05 does not hardcode domains." >&2; exit 1; }
+            printf 'BASE_DOMAIN=%q\n' "${BASE_DOMAIN}"
             printf 'PLATFORM_REPO_URL=%q\n' "${PLATFORM_REPO_URL}"
             printf 'TARGET_REVISION=%q\n' "${TARGET_REVISION}"
             printf 'ZABBIX_DB_PASSWORD=%q\n' "${ZABBIX_DB_PASSWORD:-}"

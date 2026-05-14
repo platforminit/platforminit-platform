@@ -7,7 +7,7 @@ need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 IDENTITY_NAMESPACE="${IDENTITY_NAMESPACE:-identity}"
-BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
+BASE_DOMAIN="${BASE_DOMAIN:-}"
 ISSUER_MODE="${ISSUER_MODE:-prod}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 AUTHENTIK_LOCAL_PORT="${AUTHENTIK_LOCAL_PORT:-19080}"
@@ -20,6 +20,7 @@ ZABBIX_ADMIN_PASSWORD="${ZABBIX_ADMIN_PASSWORD:-zabbix}"
 OPENOBSERVE_OIDC_CLIENT_ID="${OPENOBSERVE_OIDC_CLIENT_ID:-platforminit-openobserve}"
 OPENOBSERVE_OIDC_CLIENT_SECRET="${OPENOBSERVE_OIDC_CLIENT_SECRET:-}"
 export KUBECONFIG
+[[ -n "${BASE_DOMAIN}" ]] || die "Missing BASE_DOMAIN. Set PLATFORM_BASE_DOMAIN; do not hardcode domains in CH05."
 
 ensure_cluster(){ need kubectl; [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"; kubectl get nodes >/dev/null; }
 read_secret_key(){
@@ -302,7 +303,8 @@ configure_openobserve_sso_secret(){
 configure_zabbix_saml_secret(){
   log "Reconciling Zabbix SAML IdP certificate secret"
   [[ -f /tmp/platforminit-zabbix-idp.crt ]] || die "Missing generated Zabbix IdP certificate"
-  kubectl -n "$NAMESPACE" create secret generic zabbix-saml-certs --from-file=idp.crt=/tmp/platforminit-zabbix-idp.crt --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  cp /tmp/platforminit-zabbix-idp.crt /tmp/platforminit-zabbix-sp.crt
+  kubectl -n "$NAMESPACE" create secret generic zabbix-saml-certs     --from-file=idp.crt=/tmp/platforminit-zabbix-idp.crt     --from-file=sp.crt=/tmp/platforminit-zabbix-sp.crt     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   log "Zabbix SAML certificate secret reconciled; zabbix-web volume is Argo CD-owned"
 }
 configure_zabbix_saml_api(){
@@ -361,13 +363,84 @@ try:
 except Exception as exc:
     print(f"WARN: Zabbix SAML bootstrap user reconciliation skipped: {exc}")
 
-params={"saml_auth_enabled":1,"saml_idp_entityid":saml["idp_entityid"],"saml_sso_url":saml["sso_url"],"saml_slo_url":saml["slo_url"],"saml_username_attribute":saml["username_attribute"],"saml_sp_entityid":saml["sp_entityid"],"saml_nameid_format":"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified","saml_case_sensitive":0,"saml_jit_status":0}
-try:
-    rpc("authentication.update", params, token)
-except Exception as exc:
-    print(f"WARN: full Zabbix SAML update failed, retrying minimal update: {exc}")
-    minimal={k:v for k,v in params.items() if k != "saml_jit_status"}
-    rpc("authentication.update", minimal, token)
+def api_version():
+    try:
+        return rpc("apiinfo.version")
+    except Exception:
+        return "unknown"
+
+def ensure_saml_userdirectory():
+    """Zabbix >= 6.4 stores SAML IdP details in userdirectory, not authentication.update."""
+    payload={
+        "idp_type":2,
+        "name":"PlatformInit Authentik SAML",
+        "idp_entityid":saml["idp_entityid"],
+        "sso_url":saml["sso_url"],
+        "slo_url":saml["slo_url"],
+        "sp_entityid":saml["sp_entityid"],
+        "username_attribute":saml["username_attribute"],
+        "nameid_format":"urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
+        "sign_messages":0,
+        "sign_assertions":0,
+        "sign_authn_requests":0,
+        "sign_logout_requests":0,
+        "sign_logout_responses":0,
+        "encrypt_nameid":0,
+        "encrypt_assertions":0,
+        "scim_status":0,
+        "provision_status":0,
+        "group_name":"groups",
+        "user_username":"username",
+        "user_lastname":"",
+    }
+    try:
+        dirs=rpc("userdirectory.get", {"output":"extend"}, token) or []
+    except Exception as exc:
+        print(f"WARN: Zabbix userdirectory API unavailable; falling back to legacy authentication.update: {exc}")
+        return None
+    existing=None
+    for item in dirs:
+        if str(item.get("idp_type"))=="2" or item.get("name")==payload["name"]:
+            existing=item
+            break
+    if existing:
+        payload["userdirectoryid"]=existing["userdirectoryid"]
+        try:
+            rpc("userdirectory.update", payload, token)
+        except Exception as exc:
+            reduced={k:v for k,v in payload.items() if k not in {"group_name","user_username","user_lastname"}}
+            rpc("userdirectory.update", reduced, token)
+            print(f"WARN: Zabbix SAML user directory updated with reduced payload after full update failed: {exc}")
+        print(f"Updated Zabbix SAML user directory userdirectoryid={existing['userdirectoryid']}")
+        return existing["userdirectoryid"]
+    try:
+        result=rpc("userdirectory.create", payload, token)
+    except Exception as exc:
+        reduced={k:v for k,v in payload.items() if k not in {"name","group_name","user_username","user_lastname"}}
+        result=rpc("userdirectory.create", reduced, token)
+        print(f"WARN: Zabbix SAML user directory created with reduced payload after full create failed: {exc}")
+    userdirectoryid=(result.get("userdirectoryids") or [None])[0]
+    print(f"Created Zabbix SAML user directory userdirectoryid={userdirectoryid}")
+    return userdirectoryid
+
+version=api_version()
+print(f"Detected Zabbix API version: {version}")
+userdirectoryid=ensure_saml_userdirectory()
+# In Zabbix 6.4+/7.x, authentication.update only toggles SAML on/off and global SAML options.
+# IdP URLs/entity IDs live under userdirectory.*. Legacy saml_* IdP fields are only valid for older APIs.
+for payload in (
+    {"saml_auth_enabled":1,"saml_case_sensitive":0,"saml_jit_status":0},
+    {"saml_auth_enabled":1,"saml_case_sensitive":0},
+    {"saml_auth_enabled":1},
+):
+    try:
+        rpc("authentication.update", payload, token)
+        print(f"Enabled Zabbix SAML authentication with payload keys: {sorted(payload)}")
+        break
+    except Exception as exc:
+        last_exc=exc
+else:
+    raise RuntimeError(f"Could not enable Zabbix SAML authentication: {last_exc}")
 print("Zabbix SAML authentication configured")
 PY
 }

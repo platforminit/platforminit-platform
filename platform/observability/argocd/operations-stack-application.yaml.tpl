@@ -16,8 +16,13 @@ spec:
     repoURL: __REPO_URL__
     targetRevision: __TARGET_REVISION__
     path: platform/observability/manifests
-    directory:
-      recurse: true
+    helm:
+      releaseName: platforminit-operations
+      parameters:
+        - name: baseDomain
+          value: __BASE_DOMAIN__
+        - name: tlsIssuer
+          value: __TLS_ISSUER__
   destination:
     server: https://kubernetes.default.svc
     namespace: operations

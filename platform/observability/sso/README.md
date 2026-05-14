@@ -29,3 +29,18 @@ The previous proxy-provider model only verified the browser at Traefik. It did n
 ## Zabbix break-glass
 
 The local Zabbix admin account remains available as break-glass. `ZABBIX_ADMIN_USER` and `ZABBIX_ADMIN_PASSWORD` may be provided as GitHub secrets for SAML automation; otherwise the workflow tries `Admin` / `zabbix`. The Authentik `akadmin` user is reconciled as a Zabbix SAML bootstrap admin so the Authentik application tile can open a usable Zabbix session.
+
+## Zabbix 7.x API contract
+
+Zabbix 7.x no longer accepts legacy IdP detail fields such as `saml_idp_entityid`, `saml_sso_url`, `saml_slo_url`, and `saml_sp_entityid` in `authentication.update`. The CH05.3 workflow must:
+
+1. create or update the single SAML user directory through `userdirectory.create` / `userdirectory.update`;
+2. enable SAML globally through `authentication.update` with only supported global flags;
+3. keep the Authentik IdP certificate mounted into the Zabbix frontend container;
+4. keep `akadmin` present as a local Zabbix user matching the Authentik username.
+
+This avoids the failure pattern:
+
+```text
+Invalid parameter "/": unexpected parameter "saml_idp_entityid"
+```

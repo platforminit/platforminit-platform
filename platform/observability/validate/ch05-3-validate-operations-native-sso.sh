@@ -4,9 +4,10 @@ log(){ echo "[$(basename "$0")][$(date -u +%FT%TZ)] $*"; }
 die(){ echo "FATAL: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
-BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
+BASE_DOMAIN="${BASE_DOMAIN:-}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export KUBECONFIG
+[[ -n "${BASE_DOMAIN}" ]] || die "Missing BASE_DOMAIN. Set PLATFORM_BASE_DOMAIN; do not hardcode domains in CH05."
 need kubectl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
