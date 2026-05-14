@@ -24,5 +24,14 @@ log "Applying Operations AppProject"
 kubectl apply -f "$REPO_ROOT/argocd/operations-project.yaml"
 log "Registering Argo CD Application operations-stack targetRevision=${TARGET_REVISION}"
 kubectl apply -f "$WORKDIR/operations-stack-application.yaml"
-log "Operations stack registered under Argo CD ownership"
+# CH05 must not auto-sync before 05.1 prerequisite secrets exist.
+# Keep the Application registered and OutOfSync until 05.2 explicitly requests a sync.
+# Use JSON patch first because older generated Applications may already carry spec.syncPolicy.automated.
+kubectl -n "$ARGOCD_NAMESPACE" patch application.argoproj.io operations-stack \
+  --type json \
+  -p '[{"op":"remove","path":"/spec/syncPolicy/automated"}]' >/dev/null 2>&1 || true
+kubectl -n "$ARGOCD_NAMESPACE" patch application.argoproj.io operations-stack \
+  --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":null}}}' >/dev/null 2>&1 || true
+log "Operations stack registered under Argo CD ownership; automated sync disabled by design"
 kubectl -n "$ARGOCD_NAMESPACE" get app operations-stack -o wide || true
