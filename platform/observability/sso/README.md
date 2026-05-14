@@ -1,6 +1,6 @@
 # Operations Native SSO
 
-Public CH05 WebUIs must keep local break-glass login available. Authentik native SSO is an optional integration layer on top of the working local login model. The target is native application SSO, not only reverse-proxy access gating.
+All public CH05 WebUIs must use Authentik as the identity provider. The target is native application SSO, not only reverse-proxy access gating.
 
 ## Model
 
@@ -58,8 +58,3 @@ Unable to extract public key
 ## Runtime restart ordering
 
 `05.3` configures the Zabbix API before requesting any `zabbix-web` restart. Restarting first can invalidate the service port-forward target and produce `network namespace is closed` / `lost connection to pod`. Any restart requested by `05.3` is intentionally non-blocking; `05.2`/`05.4` own readiness validation.
-
-
-## Runtime boundary
-
-SSO is not a base CH05 runtime requirement. The operations stack is healthy when Zabbix, OpenObserve and Vector are running, the ingresses exist, and local break-glass access is reachable. Browser-level SSO failures are tracked as integration defects and should only fail validation when `validation_mode=runtime_with_sso` is explicitly selected.
