@@ -61,6 +61,21 @@ ZABBIX_PORT_FORWARD_PID=""
 cleanup(){ [[ -n "${ZABBIX_PORT_FORWARD_PID:-}" ]] && kill "${ZABBIX_PORT_FORWARD_PID}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+
+wait_for_agent_daemonset(){
+  log "Waiting for zabbix-agent2 DaemonSet rollout"
+  if kubectl -n "$NAMESPACE" rollout status daemonset/zabbix-agent2 --timeout=180s >/dev/null; then
+    log "zabbix-agent2 DaemonSet rollout completed"
+    return 0
+  fi
+  echo "WARN: zabbix-agent2 DaemonSet rollout did not complete within timeout; collecting diagnostics" >&2
+  kubectl -n "$NAMESPACE" get daemonset/zabbix-agent2 -o wide >&2 || true
+  kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=zabbix-agent2 -o wide >&2 || true
+  kubectl -n "$NAMESPACE" describe daemonset/zabbix-agent2 >&2 || true
+  kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/name=zabbix-agent2 --all-containers=true --tail=120 --prefix=true >&2 || true
+  die "zabbix-agent2 DaemonSet did not become ready. Check the diagnostics above before provisioning the Zabbix API model."
+}
+
 start_zabbix_api_port_forward(){
   log "Starting temporary Zabbix API port-forward on 127.0.0.1:${ZABBIX_LOCAL_PORT}"
   kubectl -n "${NAMESPACE}" rollout status deployment/zabbix-web --timeout=120s >/dev/null
@@ -80,7 +95,7 @@ start_zabbix_api_port_forward(){
 
 assert_agent_active_mode(){
   log "Checking zabbix-agent2 active-mode DaemonSet contract"
-  kubectl -n "$NAMESPACE" rollout status daemonset/zabbix-agent2 --timeout=180s >/dev/null
+  wait_for_agent_daemonset
   local ds_json
   ds_json="$(kubectl -n "$NAMESPACE" get daemonset/zabbix-agent2 -o json)"
   DS_JSON="$ds_json" python3 - <<'PY_DS_CHECK'
@@ -92,6 +107,8 @@ if not agent:
     raise SystemExit("FATAL: zabbix-agent2 container is missing from DaemonSet")
 env={e.get("name"): e.get("value", "<fieldRef>") for e in agent.get("env", [])}
 expected={"ZBX_ACTIVE_ALLOW":"true","ZBX_ACTIVESERVERS":"zabbix-server.operations.svc.cluster.local:10051","ZBX_PASSIVE_ALLOW":"false"}
+if "ZBX_SERVER_HOST" in env:
+    raise SystemExit("FATAL: ZBX_SERVER_HOST must not be set in active-agent-only mode; use ZBX_ACTIVESERVERS only")
 for key, value in expected.items():
     if env.get(key) != value:
         raise SystemExit(f"FATAL: {key} mismatch: expected={value!r} actual={env.get(key)!r}")

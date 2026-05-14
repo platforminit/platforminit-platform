@@ -41,6 +41,8 @@ ZBX_PASSIVE_ALLOW=false
 ZBX_HOSTNAME=<nodeName>
 ```
 
+Do not set `ZBX_SERVER_HOST` in this active-agent-only DaemonSet. The PlatformInit agent uses `ZBX_ACTIVESERVERS` as the single active-server source of truth and does not expose `hostPort: 10050`.
+
 Do not use `zabbix_get` as the CH05.5 release gate. Passive checks are intentionally disabled for this model.
 
 ## PlatformInit host groups
