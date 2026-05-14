@@ -17,11 +17,13 @@ public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
 ```text
 Redirect URL: https://logs.<PLATFORM_BASE_DOMAIN>/config/redirect
 Callback URL: https://logs.<PLATFORM_BASE_DOMAIN>/web/cb
-Issuer/Base URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve
+Issuer/Base URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
 Discovery URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/.well-known/openid-configuration
 Authorize suffix: /../authorize/
 Token suffix: /../token/
 JWKS suffix: /jwks/
 ```
+
+Authentik returns this application-scoped issuer with a trailing slash; OpenObserve compares the configured base URL with the discovered issuer strictly.
 
 Do not configure `O2_DEX_BASE_URL` as `https://auth.<PLATFORM_BASE_DOMAIN>/application/o`. OpenObserve builds the OIDC discovery URL from this base, and the parent path produces a broken discovery request to `/application/o/.well-known/openid-configuration`.

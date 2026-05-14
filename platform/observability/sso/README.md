@@ -63,8 +63,11 @@ Unable to extract public key
 
 OpenObserve must use the Authentik application-scoped OIDC issuer as `O2_DEX_BASE_URL`:
 
+Authentik returns this application-scoped issuer with a trailing slash; OpenObserve compares the configured base URL with the discovered issuer strictly.
+
+
 ```text
-https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve
+https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
 ```
 
 The parent endpoint is forbidden:

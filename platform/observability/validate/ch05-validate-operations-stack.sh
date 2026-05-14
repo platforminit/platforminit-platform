@@ -29,13 +29,13 @@ secret_value(){
   kubectl -n "$NAMESPACE" get secret "$secret" -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true
 }
 validate_openobserve_oidc_secret(){
-  local expected_base="https://auth.${BASE_DOMAIN}/application/o/platforminit-openobserve"
+  local expected_base="https://auth.${BASE_DOMAIN}/application/o/platforminit-openobserve/"
   local base auth_suffix token_suffix keys_suffix
   base="$(secret_value openobserve-sso O2_DEX_BASE_URL)"
   auth_suffix="$(secret_value openobserve-sso O2_DEX_AUTH_EP_SUFFIX)"
   token_suffix="$(secret_value openobserve-sso O2_DEX_TOKEN_EP_SUFFIX)"
   keys_suffix="$(secret_value openobserve-sso O2_DEX_KEYS_EP_SUFFIX)"
-  [[ "$base" == "$expected_base" ]] || die "OpenObserve O2_DEX_BASE_URL is invalid: '${base:-missing}'. Expected '${expected_base}'. The parent /application/o path breaks OIDC discovery."
+  [[ "$base" == "$expected_base" ]] || die "OpenObserve O2_DEX_BASE_URL is invalid: '${base:-missing}'. Expected '${expected_base}'. Authentik returns the application issuer with a trailing slash, and OpenObserve validates it strictly. The parent /application/o path still breaks OIDC discovery."
   [[ "$auth_suffix" == "/../authorize/" ]] || die "OpenObserve O2_DEX_AUTH_EP_SUFFIX is invalid: '${auth_suffix:-missing}'"
   [[ "$token_suffix" == "/../token/" ]] || die "OpenObserve O2_DEX_TOKEN_EP_SUFFIX is invalid: '${token_suffix:-missing}'"
   [[ "$keys_suffix" == "/jwks/" ]] || die "OpenObserve O2_DEX_KEYS_EP_SUFFIX is invalid: '${keys_suffix:-missing}'"
