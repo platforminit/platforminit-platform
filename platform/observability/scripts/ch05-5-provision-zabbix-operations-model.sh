@@ -40,26 +40,25 @@ ensure_operations_stack_source_ready(){
 import json, os
 app=json.loads(os.environ['APP_JSON'])
 resources=app.get("status", {}).get("resources", []) or []
-match=None
-for r in resources:
-    if r.get("kind") == "Service" and r.get("namespace") == "operations" and r.get("name") == "zabbix-agent2":
-        match=r
-        break
-if not match:
-    raise SystemExit("FATAL: zabbix-agent2 Service is not tracked by operations-stack. Run 05.2 after merging the Argo-owned zabbix-agent2 Service manifest; do not let 05.5 depend on an ad-hoc Service.")
-status=match.get("status")
-health=(match.get("health") or {}).get("status", "")
-if status != "Synced":
-    msg=match.get("message", "")
-    raise SystemExit(f"FATAL: zabbix-agent2 Service is not Argo-owned/Synced: status={status} health={health} message={msg}")
-print(f"PASS: zabbix-agent2 Service is Argo-tracked status={status} health={health or 'n/a'}")
+for kind, name in (("Service", "zabbix-agent2"), ("DaemonSet", "zabbix-agent2")):
+    match=None
+    for r in resources:
+        if r.get("kind") == kind and r.get("namespace") == "operations" and r.get("name") == name:
+            match=r
+            break
+    if not match:
+        raise SystemExit(f"FATAL: {kind}/{name} is not tracked by operations-stack. Run 05.2 after merging the Argo-owned zabbix-agent2 manifest; do not let 05.5 depend on an ad-hoc runtime patch.")
+    status=match.get("status")
+    health=(match.get("health") or {}).get("status", "")
+    if status != "Synced":
+        msg=match.get("message", "")
+        raise SystemExit(f"FATAL: {kind}/{name} is not Argo-owned/Synced: status={status} health={health} message={msg}")
+    print(f"PASS: {kind}/{name} is Argo-tracked status={status} health={health or 'n/a'}")
 PY_APP_CHECK
 }
 
 ZABBIX_PORT_FORWARD_PID=""
-cleanup(){
-  [[ -n "${ZABBIX_PORT_FORWARD_PID:-}" ]] && kill "${ZABBIX_PORT_FORWARD_PID}" >/dev/null 2>&1 || true
-}
+cleanup(){ [[ -n "${ZABBIX_PORT_FORWARD_PID:-}" ]] && kill "${ZABBIX_PORT_FORWARD_PID}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 start_zabbix_api_port_forward(){
@@ -79,8 +78,29 @@ start_zabbix_api_port_forward(){
   die "Zabbix frontend/API was not reachable through port-forward"
 }
 
+assert_agent_active_mode(){
+  log "Checking zabbix-agent2 active-mode DaemonSet contract"
+  kubectl -n "$NAMESPACE" rollout status daemonset/zabbix-agent2 --timeout=180s >/dev/null
+  local ds_json
+  ds_json="$(kubectl -n "$NAMESPACE" get daemonset/zabbix-agent2 -o json)"
+  DS_JSON="$ds_json" python3 - <<'PY_DS_CHECK'
+import json, os
+obj=json.loads(os.environ["DS_JSON"])
+containers=obj.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[])
+agent=next((c for c in containers if c.get("name") == "zabbix-agent2"), None)
+if not agent:
+    raise SystemExit("FATAL: zabbix-agent2 container is missing from DaemonSet")
+env={e.get("name"): e.get("value", "<fieldRef>") for e in agent.get("env", [])}
+expected={"ZBX_ACTIVE_ALLOW":"true","ZBX_ACTIVESERVERS":"zabbix-server.operations.svc.cluster.local:10051","ZBX_PASSIVE_ALLOW":"false"}
+for key, value in expected.items():
+    if env.get(key) != value:
+        raise SystemExit(f"FATAL: {key} mismatch: expected={value!r} actual={env.get(key)!r}")
+print("PASS: zabbix-agent2 DaemonSet is configured for active checks")
+PY_DS_CHECK
+}
+
 provision_zabbix_operations_model(){
-  log "Provisioning PlatformInit Zabbix operations model"
+  log "Provisioning PlatformInit active Zabbix operations model"
   python3 - <<'PY'
 import json, os, urllib.request
 api_url=os.environ["ZABBIX_API_URL"]
@@ -90,146 +110,141 @@ host_name=os.environ.get("PLATFORM_HOST_NAME","platforminit-dev-01")
 agent_endpoint=os.environ.get("ZABBIX_AGENT_ENDPOINT","zabbix-agent2.operations.svc.cluster.local")
 agent_port=str(os.environ.get("ZABBIX_AGENT_PORT","10050"))
 
+HOST_GROUPS = ["PlatformInit / Hosts","PlatformInit / Kubernetes","PlatformInit / Applications","PlatformInit / Security","PlatformInit / Storage","PlatformInit / Operations"]
+ITEMS = [
+    {"key":"agent.ping", "name":"Host availability", "type":7, "value_type":3, "delay":"30s", "tags":{"component":"Host","service":"Agent health"}},
+    {"key":"system.hostname", "name":"System hostname", "type":7, "value_type":1, "delay":"5m", "tags":{"component":"Host","service":"Inventory"}},
+    {"key":"system.uptime", "name":"System uptime", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Host","service":"Uptime"}},
+    {"key":"system.cpu.load[all,avg1]", "name":"CPU load average 1m", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Host","service":"CPU"}},
+    {"key":"vm.memory.size[pavailable]", "name":"Memory available percentage", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Host","service":"Memory"}},
+    {"key":"vfs.fs.size[/host-root,pused]", "name":"Root filesystem usage (/)" , "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Root filesystem","path":"/"}},
+    {"key":"vfs.fs.size[/srv/data/k3s,pused]", "name":"Kubernetes runtime storage usage (/srv/data/k3s)", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Kubernetes runtime storage","path":"/srv/data/k3s"}},
+    {"key":"vfs.fs.size[/srv/data/k3s/storage,pused]", "name":"Kubernetes PVC storage usage (/srv/data/k3s/storage)", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Kubernetes PVC storage","path":"/srv/data/k3s/storage"}},
+    {"key":"vfs.fs.size[/srv/observability/data,pused]", "name":"Observability storage usage (/srv/observability/data)", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Observability storage","path":"/srv/observability/data"}},
+    {"key":"vfs.fs.size[/srv/platforminit,pused]", "name":"Platform runtime artifacts usage (/srv/platforminit)", "type":7, "value_type":0, "delay":"5m", "tags":{"component":"Storage","service":"Platform runtime artifacts","path":"/srv/platforminit"}},
+    {"key":"net.tcp.service[ssh,127.0.0.1,22]", "name":"SSH availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Security","service":"SSH"}},
+    {"key":"net.tcp.service[tcp,127.0.0.1,6443]", "name":"Kubernetes API availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Kubernetes","service":"Kubernetes API"}},
+    {"key":"net.tcp.service[tcp,zabbix-server.operations.svc.cluster.local,10051]", "name":"Zabbix server trapper availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Monitoring","service":"Zabbix server"}},
+    {"key":"net.tcp.service[tcp,openobserve.operations.svc.cluster.local,5080]", "name":"OpenObserve service availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Logs","service":"OpenObserve"}},
+    {"key":"net.tcp.service[tcp,argocd-server.argocd.svc.cluster.local,80]", "name":"Argo CD WebUI service availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"GitOps","service":"Argo CD WebUI"}},
+    {"key":"net.tcp.service[tcp,authentik-server.identity.svc.cluster.local,80]", "name":"Authentik WebUI service availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Identity","service":"Authentik WebUI"}},
+]
+TRIGGERS = [
+    {"description":"Host availability data is stale", "expression":f"nodata(/{host_name}/agent.ping,5m)=1", "priority":4, "comments":"No active agent data has arrived recently. Check zabbix-agent2 DaemonSet logs and active server connectivity to zabbix-server:10051.", "tags":{"component":"Host","service":"Agent health","state":"CRITICAL"}},
+    {"description":"SSH availability failed", "expression":f"max(/{host_name}/net.tcp.service[ssh,127.0.0.1,22],3m)=0", "priority":4, "comments":"SSH on the PlatformInit host is not reachable from the host-network agent. Check sshd, UFW and host access baseline.", "tags":{"component":"Security","service":"SSH","state":"CRITICAL"}},
+    {"description":"Kubernetes API availability failed", "expression":f"max(/{host_name}/net.tcp.service[tcp,127.0.0.1,6443],3m)=0", "priority":4, "comments":"The local k3s API port is not reachable. Check k3s service status and /srv/data/k3s runtime data.", "tags":{"component":"Kubernetes","service":"Kubernetes API","state":"CRITICAL"}},
+    {"description":"Zabbix server trapper unavailable", "expression":f"max(/{host_name}/net.tcp.service[tcp,zabbix-server.operations.svc.cluster.local,10051],3m)=0", "priority":4, "comments":"The agent cannot reach the Zabbix server active-check/trapper endpoint inside the operations namespace.", "tags":{"component":"Monitoring","service":"Zabbix server","state":"CRITICAL"}},
+    {"description":"OpenObserve service unavailable", "expression":f"max(/{host_name}/net.tcp.service[tcp,openobserve.operations.svc.cluster.local,5080],3m)=0", "priority":3, "comments":"OpenObserve service is not reachable from the operations agent. Check OpenObserve deployment, service and storage.", "tags":{"component":"Logs","service":"OpenObserve","state":"CRITICAL"}},
+    {"description":"Argo CD WebUI service unavailable", "expression":f"max(/{host_name}/net.tcp.service[tcp,argocd-server.argocd.svc.cluster.local,80],3m)=0", "priority":3, "comments":"Argo CD WebUI service is not reachable from the operations agent. Check argocd-server rollout and service.", "tags":{"component":"GitOps","service":"Argo CD WebUI","state":"CRITICAL"}},
+    {"description":"Authentik WebUI service unavailable", "expression":f"max(/{host_name}/net.tcp.service[tcp,authentik-server.identity.svc.cluster.local,80],3m)=0", "priority":3, "comments":"Authentik WebUI service is not reachable from the operations agent. Check identity namespace runtime and service.", "tags":{"component":"Identity","service":"Authentik WebUI","state":"CRITICAL"}},
+    {"description":"Root filesystem usage high", "expression":f"min(/{host_name}/vfs.fs.size[/host-root,pused],5m)>85", "priority":2, "comments":"Root filesystem usage is above 85%. Check package/cache growth and host baseline artifacts.", "tags":{"component":"Storage","service":"Root filesystem","path":"/","state":"WARNING"}},
+    {"description":"Root filesystem usage critical", "expression":f"min(/{host_name}/vfs.fs.size[/host-root,pused],5m)>95", "priority":4, "comments":"Root filesystem usage is above 95%. Free space before kubelet/container runtime instability occurs.", "tags":{"component":"Storage","service":"Root filesystem","path":"/","state":"CRITICAL"}},
+    {"description":"Kubernetes runtime storage usage high", "expression":f"min(/{host_name}/vfs.fs.size[/srv/data/k3s,pused],5m)>80", "priority":2, "comments":"/srv/data/k3s is above 80%. Check k3s runtime data, image/cache growth and local-path storage consumers.", "tags":{"component":"Storage","service":"Kubernetes runtime storage","path":"/srv/data/k3s","state":"WARNING"}},
+    {"description":"Kubernetes runtime storage usage critical", "expression":f"min(/{host_name}/vfs.fs.size[/srv/data/k3s,pused],5m)>90", "priority":4, "comments":"/srv/data/k3s is above 90%. Kubernetes runtime may become unstable if the volume fills up.", "tags":{"component":"Storage","service":"Kubernetes runtime storage","path":"/srv/data/k3s","state":"CRITICAL"}},
+    {"description":"Kubernetes PVC storage usage high", "expression":f"min(/{host_name}/vfs.fs.size[/srv/data/k3s/storage,pused],5m)>80", "priority":2, "comments":"/srv/data/k3s/storage is above 80%. Check local-path PVC consumers.", "tags":{"component":"Storage","service":"Kubernetes PVC storage","path":"/srv/data/k3s/storage","state":"WARNING"}},
+    {"description":"Kubernetes PVC storage usage critical", "expression":f"min(/{host_name}/vfs.fs.size[/srv/data/k3s/storage,pused],5m)>90", "priority":4, "comments":"/srv/data/k3s/storage is above 90%. PVC-backed workloads may fail writes.", "tags":{"component":"Storage","service":"Kubernetes PVC storage","path":"/srv/data/k3s/storage","state":"CRITICAL"}},
+    {"description":"Observability storage usage high", "expression":f"min(/{host_name}/vfs.fs.size[/srv/observability/data,pused],5m)>80", "priority":2, "comments":"/srv/observability/data is above 80%. Check Zabbix PostgreSQL, OpenObserve and Vector storage growth.", "tags":{"component":"Storage","service":"Observability storage","path":"/srv/observability/data","state":"WARNING"}},
+    {"description":"Observability storage usage critical", "expression":f"min(/{host_name}/vfs.fs.size[/srv/observability/data,pused],5m)>90", "priority":4, "comments":"/srv/observability/data is above 90%. Zabbix/OpenObserve writes may fail soon.", "tags":{"component":"Storage","service":"Observability storage","path":"/srv/observability/data","state":"CRITICAL"}},
+    {"description":"Memory available low", "expression":f"max(/{host_name}/vm.memory.size[pavailable],5m)<10", "priority":2, "comments":"Available memory is below 10%. Check k3s workloads and operations stack resource pressure.", "tags":{"component":"Host","service":"Memory","state":"WARNING"}},
+    {"description":"CPU load high", "expression":f"min(/{host_name}/system.cpu.load[all,avg1],5m)>6", "priority":2, "comments":"CPU load is high for the single-node PlatformInit host. Check noisy workloads and operations stack pods.", "tags":{"component":"Host","service":"CPU","state":"WARNING"}},
+]
+
 def rpc(method, params=None, auth=None):
     payload={"jsonrpc":"2.0","method":method,"params":params or {},"id":1}
-    if auth:
-        payload["auth"]=auth
+    if auth: payload["auth"]=auth
     req=urllib.request.Request(api_url,data=json.dumps(payload).encode(),method="POST",headers={"Content-Type":"application/json-rpc"})
-    with urllib.request.urlopen(req,timeout=45) as resp:
-        result=json.loads(resp.read().decode())
-    if "error" in result:
-        raise RuntimeError(f"Zabbix API {method} failed: {result['error']}")
+    with urllib.request.urlopen(req,timeout=45) as resp: result=json.loads(resp.read().decode())
+    if "error" in result: raise RuntimeError(f"Zabbix API {method} failed: {result['error']}")
     return result.get("result")
-
 def login():
-    try:
-        return rpc("user.login", {"username":admin_user,"password":admin_password})
-    except Exception:
-        return rpc("user.login", {"user":admin_user,"password":admin_password})
-
+    try: return rpc("user.login", {"username":admin_user,"password":admin_password})
+    except Exception: return rpc("user.login", {"user":admin_user,"password":admin_password})
+def tags(payload): return [{"tag": k, "value": v} for k, v in payload.items()]
 def ensure_hostgroup(name, token):
     found=rpc("hostgroup.get", {"output":["groupid","name"],"filter":{"name":[name]}}, token) or []
-    if found:
-        return found[0]["groupid"]
-    result=rpc("hostgroup.create", {"name":name}, token)
-    return result["groupids"][0]
-
-def find_template(names, token):
-    for name in names:
-        for field in ("host","name"):
-            found=rpc("template.get", {"output":["templateid","host","name"],"filter":{field:[name]}}, token) or []
-            if found:
-                return found[0]
-    return None
-
-def find_host(token):
-    candidates=[host_name,"Zabbix server","Zabbix server docker"]
-    for candidate in candidates:
-        for field in ("host","name"):
-            found=rpc("host.get", {"output":["hostid","host","name","status"],"selectInterfaces":"extend","selectParentTemplates":["templateid","host","name"],"filter":{field:[candidate]}}, token) or []
-            if found:
-                return found[0]
-    return None
-
+    if found: return found[0]["groupid"]
+    return rpc("hostgroup.create", {"name":name}, token)["groupids"][0]
+def get_host(token):
+    found=rpc("host.get", {"output":["hostid","host","name","status"],"selectInterfaces":"extend","selectParentTemplates":["templateid","host","name"],"filter":{"host":[host_name]}}, token) or []
+    return found[0] if found else None
 def ensure_agent_interface(host, token):
-    interfaces=host.get("interfaces") or []
-    agent=None
-    for iface in interfaces:
-        if str(iface.get("type")) == "1":
-            agent=iface
-            break
+    agent=next((i for i in (host.get("interfaces") or []) if str(i.get("type")) == "1"), None)
+    payload={"main":1,"type":1,"useip":0,"ip":"","dns":agent_endpoint,"port":agent_port}
     if agent:
-        rpc("hostinterface.update", {
-            "interfaceid": agent["interfaceid"],
-            "main": 1,
-            "type": 1,
-            "useip": 0,
-            "ip": "",
-            "dns": agent_endpoint,
-            "port": agent_port,
-        }, token)
+        payload["interfaceid"]=agent["interfaceid"]
+        rpc("hostinterface.update", payload, token)
         return agent["interfaceid"]
-    result=rpc("hostinterface.create", {
-        "hostid": host["hostid"],
-        "main": 1,
-        "type": 1,
-        "useip": 0,
-        "ip": "",
-        "dns": agent_endpoint,
-        "port": agent_port,
-    }, token)
-    return result["interfaceids"][0]
-
+    payload["hostid"]=host["hostid"]
+    return rpc("hostinterface.create", payload, token)["interfaceids"][0]
+def clear_parent_templates(host, token):
+    templates=host.get("parentTemplates") or []
+    if not templates:
+        print("PASS: host has no linked default templates to clear")
+        return
+    rpc("host.update", {"hostid": host["hostid"], "templates_clear": [{"templateid": t["templateid"]} for t in templates]}, token)
+    print("Cleared linked templates from PlatformInit host to avoid default Zabbix noise: " + ", ".join(t.get("host") or t.get("name") or t["templateid"] for t in templates))
 def ensure_host(token):
-    groups=[
-        {"groupid": ensure_hostgroup("PlatformInit / Hosts", token)},
-        {"groupid": ensure_hostgroup("PlatformInit / Operations", token)},
-    ]
-    template=find_template(["Linux by Zabbix agent","Template OS Linux by Zabbix agent","Linux by Zabbix agent active"], token)
-    templates=[{"templateid":template["templateid"]}] if template else []
-    host=find_host(token)
-    tags=[
-        {"tag":"platforminit","value":"true"},
-        {"tag":"component","value":"host"},
-        {"tag":"service","value":"platforminit-dev"},
-        {"tag":"scope","value":"availability"},
-    ]
+    group_refs=[{"groupid": ensure_hostgroup(name, token)} for name in HOST_GROUPS]
+    host_tags=tags({"platforminit":"true","component":"host","service":"platforminit-dev","scope":"operations","check_model":"active-agent"})
     inventory={"type":"PlatformInit single-node host","name":host_name}
+    host=get_host(token)
     if not host:
-        payload={
-            "host": host_name,
-            "name": host_name,
-            "groups": groups,
-            "interfaces": [{"type":1,"main":1,"useip":0,"ip":"","dns":agent_endpoint,"port":agent_port}],
-            "tags": tags,
-            "inventory_mode": 1,
-            "inventory": inventory,
-        }
-        if templates:
-            payload["templates"]=templates
-        result=rpc("host.create", payload, token)
-        hostid=result["hostids"][0]
-        print(f"Created PlatformInit host {host_name} hostid={hostid} agent={agent_endpoint}:{agent_port}")
-        return rpc("host.get", {"output":["hostid","host","name"],"selectInterfaces":"extend","filter":{"host":[host_name]}}, token)[0]
-    hostid=host["hostid"]
-    update={
-        "hostid": hostid,
-        "host": host_name,
-        "name": host_name,
-        "status": 0,
-        "groups": groups,
-        "tags": tags,
-        "inventory_mode": 1,
-        "inventory": inventory,
-    }
-    if templates:
-        update["templates"] = templates
-    rpc("host.update", update, token)
-    refreshed=rpc("host.get", {"output":["hostid","host","name"],"selectInterfaces":"extend","filter":{"host":[host_name]}}, token)
-    if not refreshed:
-        refreshed=rpc("host.get", {"output":["hostid","host","name"],"selectInterfaces":"extend","hostids":[hostid]}, token)
-    host=refreshed[0]
+        payload={"host":host_name,"name":host_name,"groups":group_refs,"interfaces":[{"type":1,"main":1,"useip":0,"ip":"","dns":agent_endpoint,"port":agent_port}],"tags":host_tags,"inventory_mode":1,"inventory":inventory}
+        hostid=rpc("host.create", payload, token)["hostids"][0]
+        print(f"Created PlatformInit host {host_name} hostid={hostid} active_model=true")
+        return get_host(token)
+    rpc("host.update", {"hostid":host["hostid"],"host":host_name,"name":host_name,"status":0,"groups":group_refs,"tags":host_tags,"inventory_mode":1,"inventory":inventory}, token)
+    host=get_host(token)
     ensure_agent_interface(host, token)
-    print(f"Updated PlatformInit host {host_name} hostid={hostid} agent={agent_endpoint}:{agent_port}")
-    return host
-
+    clear_parent_templates(host, token)
+    print(f"Updated PlatformInit host {host_name} hostid={host['hostid']} active_model=true")
+    return get_host(token)
+def get_item(hostid, key, token):
+    found=rpc("item.get", {"output":["itemid","key_","name","type","value_type"],"hostids":[hostid],"filter":{"key_":[key]}}, token) or []
+    return found[0] if found else None
+def ensure_item(hostid, spec, token):
+    existing=get_item(hostid, spec["key"], token)
+    payload={"name":spec["name"],"key_":spec["key"],"type":spec["type"],"value_type":spec["value_type"],"delay":spec["delay"],"status":0,"history":"14d","trends":"90d" if spec["value_type"] in (0,3) else "0","tags":tags(spec.get("tags",{}))}
+    if existing:
+        update={k:v for k,v in payload.items() if k not in ("key_","type","value_type")}
+        update["itemid"]=existing["itemid"]
+        try:
+            rpc("item.update", update, token)
+            print(f"Updated active item: {spec['name']} [{spec['key']}]")
+        except Exception as exc:
+            print(f"WARN: item update skipped for {spec['key']}: {exc}")
+        return existing["itemid"]
+    payload["hostid"]=hostid
+    itemid=rpc("item.create", payload, token)["itemids"][0]
+    print(f"Created active item: {spec['name']} [{spec['key']}] itemid={itemid}")
+    return itemid
+def ensure_trigger(hostid, spec, token):
+    found=rpc("trigger.get", {"output":["triggerid","description"],"hostids":[hostid],"filter":{"description":[spec["description"]]}}, token) or []
+    payload={"description":spec["description"],"expression":spec["expression"],"priority":spec["priority"],"status":0,"comments":spec.get("comments",""),"tags":tags(spec.get("tags",{}))}
+    if found:
+        payload["triggerid"]=found[0]["triggerid"]
+        rpc("trigger.update", payload, token)
+        print(f"Updated trigger: {spec['description']}")
+        return found[0]["triggerid"]
+    triggerid=rpc("trigger.create", payload, token)["triggerids"][0]
+    print(f"Created trigger: {spec['description']} triggerid={triggerid}")
+    return triggerid
 def ensure_problem_dashboard(token):
     name="PlatformInit - Operations Overview"
     try:
         existing=rpc("dashboard.get", {"output":["dashboardid","name"],"filter":{"name":[name]}}, token) or []
-        if existing:
-            print(f"Dashboard already exists: {name}")
-        else:
-            print("Dashboard provisioning intentionally deferred until the host/agent baseline is stable")
+        print(f"Dashboard already exists: {name}" if existing else "Dashboard provisioning intentionally deferred until active host data is stable")
     except Exception as exc:
         print(f"WARN: dashboard check skipped: {exc}")
 
 token=login()
-version=rpc("apiinfo.version")
-print(f"Detected Zabbix API version: {version}")
-ensure_host(token)
+print(f"Detected Zabbix API version: {rpc('apiinfo.version')}")
+host=ensure_host(token)
+hostid=host["hostid"]
+for item in ITEMS: ensure_item(hostid, item, token)
+for trigger in TRIGGERS: ensure_trigger(hostid, trigger, token)
 ensure_problem_dashboard(token)
-print("PlatformInit Zabbix operations model provisioned")
+print("PlatformInit active Zabbix operations model provisioned")
 PY
 }
 
@@ -239,9 +254,10 @@ need curl
 need python3
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
-kubectl -n "$NAMESPACE" get deploy/zabbix-web deploy/zabbix-server >/dev/null
+kubectl -n "$NAMESPACE" get deploy/zabbix-web deploy/zabbix-server daemonset/zabbix-agent2 >/dev/null
 ensure_operations_stack_source_ready
 kubectl -n "$NAMESPACE" get service zabbix-agent2 >/dev/null || die "Missing zabbix-agent2 Service. Run 05.2 after merging the updated manifest."
+assert_agent_active_mode
 start_zabbix_api_port_forward
 provision_zabbix_operations_model
 log "Zabbix Operations Model provisioning finished"

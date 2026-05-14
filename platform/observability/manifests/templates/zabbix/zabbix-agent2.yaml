@@ -22,16 +22,41 @@ spec:
           image: zabbix/zabbix-agent2:alpine-7.0-latest
           imagePullPolicy: IfNotPresent
           env:
+            # Active checks are the PlatformInit default. The agent initiates traffic to the server,
+            # avoiding Kubernetes passive-check source-IP and Service endpoint ambiguity.
+            - name: ZBX_ACTIVE_ALLOW
+              value: "true"
+            - name: ZBX_ACTIVESERVERS
+              value: zabbix-server.operations.svc.cluster.local:10051
+            # Passive checks are intentionally disabled for the PlatformInit host model.
+            # Keep the Service object for inventory/debug compatibility, but do not rely on zabbix_get.
+            - name: ZBX_PASSIVE_ALLOW
+              value: "false"
             - name: ZBX_SERVER_HOST
               value: zabbix-server.operations.svc.cluster.local
             - name: ZBX_HOSTNAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: ZBX_REFRESHACTIVECHECKS
+              value: "60"
           ports:
             - name: zabbix-agent
               containerPort: 10050
               hostPort: 10050
+          volumeMounts:
+            - name: host-root
+              mountPath: /host-root
+              readOnly: true
+            - name: k3s-data
+              mountPath: /srv/data/k3s
+              readOnly: true
+            - name: observability-data
+              mountPath: /srv/observability/data
+              readOnly: true
+            - name: platform-runtime
+              mountPath: /srv/platforminit
+              readOnly: true
           resources:
             requests:
               cpu: 25m
@@ -39,6 +64,23 @@ spec:
             limits:
               cpu: 100m
               memory: 128Mi
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: k3s-data
+          hostPath:
+            path: /srv/data/k3s
+            type: DirectoryOrCreate
+        - name: observability-data
+          hostPath:
+            path: /srv/observability/data
+            type: DirectoryOrCreate
+        - name: platform-runtime
+          hostPath:
+            path: /srv/platforminit
+            type: DirectoryOrCreate
 
 ---
 apiVersion: v1
