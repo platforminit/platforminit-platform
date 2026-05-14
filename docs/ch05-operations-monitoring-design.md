@@ -125,3 +125,8 @@ Runtime readiness expectations:
 - Zabbix Agent2 and Vector daemonsets have all desired pods updated and ready.
 - Vector requires `VECTOR_SELF_NODE_NAME` from `spec.nodeName` for Kubernetes log collection.
 
+
+
+## Operations SSO certificate contract
+
+Zabbix SAML uses an Authentik certificate-keypair as the IdP signing certificate. CH05.3 must not assume that the Authentik API list response contains an inline PEM block. It must read the PEM through the certificate view/download path when possible and generate a dedicated PlatformInit SAML keypair when no readable certificate exists. The resulting public PEM is mounted into `zabbix-web` through `operations/zabbix-saml-certs` as `idp.crt`.
