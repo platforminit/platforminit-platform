@@ -10,15 +10,20 @@ ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 OPERATIONS_NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 PLATFORM_REPO_URL="${PLATFORM_REPO_URL:-https://github.com/platforminit/platforminit-platform.git}"
 TARGET_REVISION="${TARGET_REVISION:-dev}"
+BASE_DOMAIN="${BASE_DOMAIN:-}"
+TLS_ISSUER="${TLS_ISSUER:-letsencrypt-prod}"
 export KUBECONFIG
 need kubectl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null
 kubectl get ns "$ARGOCD_NAMESPACE" >/dev/null 2>&1 || die "Missing Argo CD namespace: $ARGOCD_NAMESPACE. Run CH04 first."
+[[ -n "$BASE_DOMAIN" ]] || die "Missing BASE_DOMAIN. Set the PLATFORM_BASE_DOMAIN secret or workflow input; do not hardcode domains in CH05."
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 sed -e "s#__REPO_URL__#${PLATFORM_REPO_URL}#g" \
     -e "s#__TARGET_REVISION__#${TARGET_REVISION}#g" \
+    -e "s#__BASE_DOMAIN__#${BASE_DOMAIN}#g" \
+    -e "s#__TLS_ISSUER__#${TLS_ISSUER}#g" \
     "$REPO_ROOT/argocd/operations-stack-application.yaml.tpl" > "$WORKDIR/operations-stack-application.yaml"
 log "Applying Operations AppProject"
 kubectl apply -f "$REPO_ROOT/argocd/operations-project.yaml"

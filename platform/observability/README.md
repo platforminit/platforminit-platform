@@ -100,3 +100,15 @@ The `operations-stack` Application is registered without automated sync. This is
 
 If Vector shows `secret "openobserve-root" not found`, run `05.1` and then rerun `05.2`. Do not enable automated sync before prerequisite reconciliation.
 
+
+
+## Domain handling contract
+
+CH05 runtime manifests must not hardcode the active development domain or any customer domain. Public hosts are injected into the Argo CD Application as Helm parameters from `BASE_DOMAIN` / `PLATFORM_BASE_DOMAIN`.
+
+Expected generated hosts:
+
+- `zabbix.<BASE_DOMAIN>`
+- `logs.<BASE_DOMAIN>`
+
+If `PLATFORM_BASE_DOMAIN` is missing, CH05 workflows fail closed instead of falling back to a hardcoded domain.

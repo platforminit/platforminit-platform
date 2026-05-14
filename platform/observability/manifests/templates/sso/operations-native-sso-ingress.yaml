@@ -1,0 +1,61 @@
+{{- $baseDomain := required "baseDomain is required" .Values.baseDomain -}}
+{{- $tlsIssuer := default "letsencrypt-prod" .Values.tlsIssuer -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zabbix
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: zabbix
+    app.kubernetes.io/part-of: platforminit-operations
+  annotations:
+    cert-manager.io/cluster-issuer: {{ $tlsIssuer | quote }}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ printf "zabbix.%s" $baseDomain | quote }}
+      secretName: zabbix-tls
+  rules:
+    - host: {{ printf "zabbix.%s" $baseDomain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: zabbix-web
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openobserve
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: openobserve
+    app.kubernetes.io/part-of: platforminit-operations
+  annotations:
+    cert-manager.io/cluster-issuer: {{ $tlsIssuer | quote }}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ printf "logs.%s" $baseDomain | quote }}
+      secretName: openobserve-tls
+  rules:
+    - host: {{ printf "logs.%s" $baseDomain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: openobserve
+                port:
+                  number: 5080

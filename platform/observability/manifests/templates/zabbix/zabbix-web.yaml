@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zabbix-web
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: zabbix-web
+    app.kubernetes.io/part-of: platforminit-operations
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zabbix-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zabbix-web
+    spec:
+      containers:
+        - name: zabbix-web
+          image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZBX_SERVER_HOST
+              value: zabbix-server
+            - name: DB_SERVER_HOST
+              value: zabbix-postgres
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-postgres
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-postgres
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zabbix-postgres
+                  key: POSTGRES_PASSWORD
+            - name: PHP_TZ
+              value: Europe/Budapest
+            - name: ZBX_SSO_IDP_CERT
+              value: /usr/share/zabbix/conf/certs/idp.crt
+            - name: ZBX_SSO_SETTINGS
+              value: {{ dict "baseurl" (printf "https://zabbix.%s" (required "baseDomain is required" .Values.baseDomain)) "strict" false "use_proxy_headers" true | toJson | quote }}
+          volumeMounts:
+            - name: zabbix-saml-certs
+              mountPath: /usr/share/zabbix/conf/certs
+              readOnly: true
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+      volumes:
+        - name: zabbix-saml-certs
+          secret:
+            secretName: zabbix-saml-certs
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-web
+  namespace: operations
+spec:
+  selector:
+    app.kubernetes.io/name: zabbix-web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

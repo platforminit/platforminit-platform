@@ -5,7 +5,7 @@ die(){ echo "FATAL: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "Missing binary: $1"; }
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
+BASE_DOMAIN="${BASE_DOMAIN:-}"
 ZABBIX_DB_NAME="${ZABBIX_DB_NAME:-zabbix}"
 ZABBIX_DB_USER="${ZABBIX_DB_USER:-zabbix}"
 ZABBIX_DB_PASSWORD="${ZABBIX_DB_PASSWORD:-}"
@@ -14,6 +14,7 @@ OPENOBSERVE_ROOT_USER_PASSWORD="${OPENOBSERVE_ROOT_USER_PASSWORD:-}"
 OPENOBSERVE_OIDC_CLIENT_ID="${OPENOBSERVE_OIDC_CLIENT_ID:-platforminit-openobserve}"
 OPENOBSERVE_OIDC_CLIENT_SECRET="${OPENOBSERVE_OIDC_CLIENT_SECRET:-}"
 export KUBECONFIG
+[[ -n "${BASE_DOMAIN}" ]] || die "Missing BASE_DOMAIN. Set PLATFORM_BASE_DOMAIN; do not hardcode domains in CH05."
 need kubectl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null

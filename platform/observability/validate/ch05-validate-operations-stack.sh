@@ -7,8 +7,9 @@ KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 APP_NAME="${APP_NAME:-operations-stack}"
-BASE_DOMAIN="${BASE_DOMAIN:-sysadminhomelab.hu}"
+BASE_DOMAIN="${BASE_DOMAIN:-}"
 export KUBECONFIG
+[[ -n "${BASE_DOMAIN}" ]] || die "Missing BASE_DOMAIN. Set PLATFORM_BASE_DOMAIN; do not hardcode domains in CH05."
 need kubectl
 [ -f "$KUBECONFIG" ] || die "Missing kubeconfig: $KUBECONFIG"
 kubectl get nodes >/dev/null

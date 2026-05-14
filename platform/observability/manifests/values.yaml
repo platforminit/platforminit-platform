@@ -1,0 +1,4 @@
+# Environment-specific values are injected by the CH05 Argo CD Application.
+# Do not hardcode customer/dev domains in templates.
+baseDomain: ""
+tlsIssuer: letsencrypt-prod

@@ -78,6 +78,10 @@ username attribute: username
 
 `05.3` reconciles the Authentik SAML provider/application, writes the Authentik IdP certificate to the `zabbix-saml-certs` secret, configures Zabbix through its API, and bootstraps the Authentik `akadmin` user as a Zabbix SAML admin. The local Zabbix admin remains the break-glass account.
 
+For Zabbix 7.x, SAML IdP details are managed through the `userdirectory.*` API. `authentication.update` is used only to enable SAML and global SAML flags. Do not push legacy `saml_idp_entityid`, `saml_sso_url`, `saml_slo_url`, or `saml_sp_entityid` fields to `authentication.update`; those fields are legacy Zabbix 6.0-style parameters and fail on the current Zabbix 7 container.
+
+The Zabbix Web container must have the Authentik IdP certificate mounted as `idp.crt` under `/usr/share/zabbix/conf/certs`, and `ZBX_SSO_SETTINGS` must include the public base URL and proxy-header support so ACS URL generation matches the public ingress host.
+
 ## A1 access elevation contract
 
 ```text
