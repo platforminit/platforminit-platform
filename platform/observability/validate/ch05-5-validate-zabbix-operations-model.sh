@@ -105,6 +105,20 @@ print(f"PASS: {len(required_active_items)} PlatformInit active items exist")
 dashboards=rpc("dashboard.get", {"output":["dashboardid","name"],"filter":{"name":["PlatformInit - Operations Overview"]},"selectPages":"extend"}, token) or []
 if not dashboards: raise SystemExit("FATAL: PlatformInit - Operations Overview dashboard is missing")
 print("PASS: PlatformInit - Operations Overview dashboard exists")
+pages=dashboards[0].get("pages") or []
+widgets=[]
+for page in pages:
+    widgets.extend(page.get("widgets") or [])
+if widgets:
+    item_widgets=[w for w in widgets if w.get("type") == "item"]
+    problem_widgets=[w for w in widgets if w.get("type") == "problems"]
+    if len(item_widgets) < 6:
+        raise SystemExit(f"FATAL: dashboard does not expose enough status tiles; item widgets={len(item_widgets)}")
+    if len(problem_widgets) < 3:
+        raise SystemExit(f"FATAL: dashboard does not expose enough problem widgets; problems widgets={len(problem_widgets)}")
+    print(f"PASS: dashboard has {len(item_widgets)} status tiles and {len(problem_widgets)} problem widgets")
+else:
+    print("WARN: dashboard API did not return page widgets; existence validated, visual widget check skipped")
 deadline=time.time()+240
 while True:
     items=get_items(token, hostid); by_key={i["key_"]:i for i in items}; missing_data=[]; now=int(time.time())

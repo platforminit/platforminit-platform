@@ -133,12 +133,12 @@ ITEMS = [
     {"key":"system.hostname", "name":"System hostname", "type":7, "value_type":1, "delay":"5m", "tags":{"component":"Host","service":"Inventory"}},
     {"key":"system.uptime", "name":"System uptime", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Host","service":"Uptime"}},
     {"key":"system.cpu.load[all,avg1]", "name":"CPU load average 1m", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Host","service":"CPU"}},
-    {"key":"vm.memory.size[pavailable]", "name":"Memory available percentage", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Host","service":"Memory"}},
-    {"key":"vfs.fs.size[/host-root,pused]", "name":"Root filesystem usage (/)" , "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Root filesystem","path":"/"}},
-    {"key":"vfs.fs.size[/srv/data/k3s,pused]", "name":"Kubernetes runtime storage usage (/srv/data/k3s)", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Kubernetes runtime storage","path":"/srv/data/k3s"}},
-    {"key":"vfs.fs.size[/srv/data/k3s/storage,pused]", "name":"Kubernetes PVC storage usage (/srv/data/k3s/storage)", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Kubernetes PVC storage","path":"/srv/data/k3s/storage"}},
-    {"key":"vfs.fs.size[/srv/observability/data,pused]", "name":"Observability storage usage (/srv/observability/data)", "type":7, "value_type":0, "delay":"1m", "tags":{"component":"Storage","service":"Observability storage","path":"/srv/observability/data"}},
-    {"key":"vfs.fs.size[/srv/platforminit,pused]", "name":"Platform runtime artifacts usage (/srv/platforminit)", "type":7, "value_type":0, "delay":"5m", "tags":{"component":"Storage","service":"Platform runtime artifacts","path":"/srv/platforminit"}},
+    {"key":"vm.memory.size[pavailable]", "name":"Memory available percentage", "type":7, "value_type":0, "delay":"1m", "units":"%", "tags":{"component":"Host","service":"Memory"}},
+    {"key":"vfs.fs.size[/host-root,pused]", "name":"Root filesystem usage (/)" , "type":7, "value_type":0, "delay":"1m", "units":"%", "tags":{"component":"Storage","service":"Root filesystem","path":"/"}},
+    {"key":"vfs.fs.size[/srv/data/k3s,pused]", "name":"Kubernetes runtime storage usage (/srv/data/k3s)", "type":7, "value_type":0, "delay":"1m", "units":"%", "tags":{"component":"Storage","service":"Kubernetes runtime storage","path":"/srv/data/k3s"}},
+    {"key":"vfs.fs.size[/srv/data/k3s/storage,pused]", "name":"Kubernetes PVC storage usage (/srv/data/k3s/storage)", "type":7, "value_type":0, "delay":"1m", "units":"%", "tags":{"component":"Storage","service":"Kubernetes PVC storage","path":"/srv/data/k3s/storage"}},
+    {"key":"vfs.fs.size[/srv/observability/data,pused]", "name":"Observability storage usage (/srv/observability/data)", "type":7, "value_type":0, "delay":"1m", "units":"%", "tags":{"component":"Storage","service":"Observability storage","path":"/srv/observability/data"}},
+    {"key":"vfs.fs.size[/srv/platforminit,pused]", "name":"Platform runtime artifacts usage (/srv/platforminit)", "type":7, "value_type":0, "delay":"5m", "units":"%", "tags":{"component":"Storage","service":"Platform runtime artifacts","path":"/srv/platforminit"}},
     {"key":"net.tcp.service[ssh,127.0.0.1,22]", "name":"SSH availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Security","service":"SSH"}},
     {"key":"net.tcp.service[tcp,127.0.0.1,6443]", "name":"Kubernetes API availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Kubernetes","service":"Kubernetes API"}},
     {"key":"net.tcp.service[tcp,zabbix-server.operations.svc.cluster.local,10051]", "name":"Zabbix server trapper availability", "type":7, "value_type":3, "delay":"1m", "tags":{"component":"Monitoring","service":"Zabbix server"}},
@@ -165,6 +165,9 @@ TRIGGERS = [
     {"description":"Memory available low", "expression":f"max(/{host_name}/vm.memory.size[pavailable],5m)<10", "priority":2, "comments":"Available memory is below 10%. Check k3s workloads and operations stack resource pressure.", "tags":{"component":"Host","service":"Memory","state":"WARNING"}},
     {"description":"CPU load high", "expression":f"min(/{host_name}/system.cpu.load[all,avg1],5m)>6", "priority":2, "comments":"CPU load is high for the single-node PlatformInit host. Check noisy workloads and operations stack pods.", "tags":{"component":"Host","service":"CPU","state":"WARNING"}},
 ]
+
+SERVICE_STATE_KEYS = {"agent.ping"} | {item["key"] for item in ITEMS if item["key"].startswith("net.tcp.service[")}
+SERVICE_VALUE_MAP_NAME = "PlatformInit service state"
 
 def rpc(method, params=None, auth=None):
     payload={"jsonrpc":"2.0","method":method,"params":params or {},"id":1}
@@ -216,12 +219,32 @@ def ensure_host(token):
     clear_parent_templates(host, token)
     print(f"Updated PlatformInit host {host_name} hostid={host['hostid']} active_model=true")
     return get_host(token)
+def ensure_service_value_map(hostid, token):
+    mappings=[
+        {"type":0,"value":"0","newvalue":"CRITICAL"},
+        {"type":0,"value":"1","newvalue":"OK"},
+        {"type":5,"newvalue":"UNKNOWN"},
+    ]
+    found=rpc("valuemap.get", {"output":["valuemapid","name"],"hostids":[hostid],"filter":{"name":[SERVICE_VALUE_MAP_NAME]}}, token) or []
+    if found:
+        valuemapid=found[0]["valuemapid"]
+        rpc("valuemap.update", {"valuemapid":valuemapid,"mappings":mappings}, token)
+        print(f"Updated value map: {SERVICE_VALUE_MAP_NAME}")
+        return valuemapid
+    valuemapid=rpc("valuemap.create", {"hostid":hostid,"name":SERVICE_VALUE_MAP_NAME,"mappings":mappings}, token)["valuemapids"][0]
+    print(f"Created value map: {SERVICE_VALUE_MAP_NAME} valuemapid={valuemapid}")
+    return valuemapid
+
 def get_item(hostid, key, token):
     found=rpc("item.get", {"output":["itemid","key_","name","type","value_type"],"hostids":[hostid],"filter":{"key_":[key]}}, token) or []
     return found[0] if found else None
-def ensure_item(hostid, spec, token):
+def ensure_item(hostid, spec, token, service_valuemapid=None):
     existing=get_item(hostid, spec["key"], token)
     payload={"name":spec["name"],"key_":spec["key"],"type":spec["type"],"value_type":spec["value_type"],"delay":spec["delay"],"status":0,"history":"14d","trends":"90d" if spec["value_type"] in (0,3) else "0","tags":tags(spec.get("tags",{}))}
+    if spec.get("units"):
+        payload["units"] = spec["units"]
+    if service_valuemapid and spec["key"] in SERVICE_STATE_KEYS:
+        payload["valuemapid"] = service_valuemapid
     if existing:
         update={k:v for k,v in payload.items() if k not in ("key_","type","value_type")}
         update["itemid"]=existing["itemid"]
@@ -269,19 +292,59 @@ def problems_widget(name, x, y, width, height, hostid, severities=None, tag_filt
         ])
     return {"type":"problems","name":name,"x":x,"y":y,"width":width,"height":height,"fields":fields}
 
-def ensure_problem_dashboard(token, hostid):
+def item_value_widget(name, x, y, width, height, itemid):
+    # Item value widgets keep the landing page non-empty during healthy periods.
+    # Problem widgets intentionally show no rows when nothing is broken.
+    return {
+        "type":"item",
+        "name":name,
+        "x":x,
+        "y":y,
+        "width":width,
+        "height":height,
+        "fields":[
+            widget_field(0,"rf_rate",60),
+            widget_field(4,"itemid",itemid),
+            widget_field(0,"show",1),
+            widget_field(0,"show",2),
+            widget_field(0,"show",3),
+        ],
+    }
+
+def ensure_problem_dashboard(token, hostid, itemids):
     """Create a curated operator landing page instead of relying on the noisy default dashboard."""
     name="PlatformInit - Operations Overview"
-    pages=[{
-        "name":"Operations",
-        "widgets":[
-            problems_widget("Current critical problems",0,0,36,8,hostid,[4,5]),
-            problems_widget("Current warnings",36,0,36,8,hostid,[2,3]),
-            problems_widget("Storage status",0,8,36,8,hostid,[2,3,4,5],("component","Storage")),
-            problems_widget("Platform service status",36,8,36,8,hostid,[2,3,4,5]),
-            problems_widget("Recent problems / changes",0,16,72,8,hostid,[0,1,2,3,4,5]),
-        ],
-    }]
+    status_tiles=[
+        ("Host", "agent.ping"),
+        ("SSH", "net.tcp.service[ssh,127.0.0.1,22]"),
+        ("Kubernetes API", "net.tcp.service[tcp,127.0.0.1,6443]"),
+        ("Zabbix server", "net.tcp.service[tcp,zabbix-server.operations.svc.cluster.local,10051]"),
+        ("OpenObserve", "net.tcp.service[tcp,openobserve.operations.svc.cluster.local,5080]"),
+        ("Argo CD", "net.tcp.service[tcp,argocd-server.argocd.svc.cluster.local,80]"),
+        ("Authentik", "net.tcp.service[tcp,authentik-server.identity.svc.cluster.local,80]"),
+        ("Memory available", "vm.memory.size[pavailable]"),
+        ("Root FS", "vfs.fs.size[/host-root,pused]"),
+        ("k3s runtime", "vfs.fs.size[/srv/data/k3s,pused]"),
+        ("k3s PVC", "vfs.fs.size[/srv/data/k3s/storage,pused]"),
+        ("Observability data", "vfs.fs.size[/srv/observability/data,pused]"),
+    ]
+    widgets=[]
+    tile_width=12
+    tile_height=4
+    for idx, (title, key) in enumerate(status_tiles):
+        itemid=itemids.get(key)
+        if not itemid:
+            print(f"WARN: dashboard tile skipped, missing itemid for {key}")
+            continue
+        widgets.append(item_value_widget(title, (idx % 6) * tile_width, (idx // 6) * tile_height, tile_width, tile_height, itemid))
+    widgets.extend([
+        problems_widget("Current critical problems",0,8,36,8,hostid,[4,5]),
+        problems_widget("Current warnings",36,8,36,8,hostid,[2,3]),
+        problems_widget("Storage problems",0,16,36,8,hostid,[2,3,4,5],("component","Storage")),
+        problems_widget("Platform service problems",36,16,36,8,hostid,[2,3,4,5]),
+        problems_widget("Recent problems / changes",0,24,72,8,hostid,[0,1,2,3,4,5]),
+    ])
+    pages=[{"name":"Operations","widgets":widgets}]
     existing=rpc("dashboard.get", {"output":["dashboardid","name"],"filter":{"name":[name]}}, token) or []
     payload={"name":name,"private":0,"pages":pages}
     if existing:
@@ -296,9 +359,12 @@ token=login()
 print(f"Detected Zabbix API version: {rpc('apiinfo.version')}")
 host=ensure_host(token)
 hostid=host["hostid"]
-for item in ITEMS: ensure_item(hostid, item, token)
+service_valuemapid=ensure_service_value_map(hostid, token)
+itemids={}
+for item in ITEMS:
+    itemids[item["key"]]=ensure_item(hostid, item, token, service_valuemapid)
 for trigger in TRIGGERS: ensure_trigger(hostid, trigger, token)
-ensure_problem_dashboard(token, hostid)
+ensure_problem_dashboard(token, hostid, itemids)
 print("PlatformInit active Zabbix operations model provisioned")
 PY
 }
