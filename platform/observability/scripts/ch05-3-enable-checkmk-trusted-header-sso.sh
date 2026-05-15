@@ -126,9 +126,13 @@ def ensure_user_in_group(username, group_pk):
         print(f"Added {username} to PlatformInit Operations")
 
 def provider_payload(mode):
+    # Authentik proxy providers require both authorization and invalidation flows.
+    # Keep this explicit because newer Authentik versions reject create/update
+    # requests without invalidation_flow with HTTP 400.
     payload={
         "name":"PlatformInit Checkmk",
         "authorization_flow":flow('default-provider-authorization-implicit-consent'),
+        "invalidation_flow":flow('default-provider-invalidation-flow'),
         "external_host":checkmk_url,
         "internal_host":"http://checkmk.operations.svc.cluster.local",
         "mode":mode,

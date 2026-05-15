@@ -22,4 +22,6 @@ STATE: OK/WARNING/CRITICAL
 
 The first Checkmk patch creates the runtime, storage, ingress, Authentik forwardAuth middleware and trusted-header shim.
 
+The Authentik proxy provider reconciliation must set `invalidation_flow=default-provider-invalidation-flow`; otherwise Authentik rejects `/api/v3/providers/proxy/` create/update requests with HTTP 400.
+
 Host/service discovery and custom Checkmk rules are the next bounded task.
