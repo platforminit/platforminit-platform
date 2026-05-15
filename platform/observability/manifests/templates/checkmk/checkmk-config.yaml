@@ -28,7 +28,11 @@ data:
 
         # Authentik forwardAuth returns X-authentik-* headers. Checkmk Raw/Community
         # consumes X-Remote-User when incoming HTTP header authentication is enabled.
-        proxy_set_header X-Remote-User $http_x_authentik_username;
+        # For the first PlatformInit Community/Raw integration, all Authentik-approved
+        # operators land on the deterministic local break-glass administrator. This avoids
+        # Checkmk HTTP 500 / unknown-user failures before per-user provisioning exists.
+        proxy_set_header X-Remote-User cmkadmin;
+        proxy_set_header X-Remote-Original-User $http_x_authentik_username;
         proxy_set_header X-Remote-Name $http_x_authentik_name;
         proxy_set_header X-Remote-Email $http_x_authentik_email;
         proxy_set_header X-Remote-Groups $http_x_authentik_groups;
