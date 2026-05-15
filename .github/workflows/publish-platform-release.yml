@@ -14,7 +14,7 @@ on:
           - ch03
           - ch04
           - ch05
-          - ch06
+          - ch04-5
           - platform
       release_version:
         description: Semantic version without prefix, for example 0.1.0 or 0.1.0-rc1
@@ -80,9 +80,9 @@ jobs:
               title="CH05 Observability v${version}"
               components=("observability")
               ;;
-            ch06)
-              tag="ch06-v${version}"
-              title="CH06 Identity & SSO Foundation v${version}"
+            ch04-5)
+              tag="ch04-5-v${version}"
+              title="CH04.5 Identity Foundation v${version}"
               components=("identity")
               ;;
             platform)

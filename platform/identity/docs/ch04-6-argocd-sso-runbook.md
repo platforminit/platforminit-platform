@@ -18,7 +18,7 @@ Credential ownership model:
 | Argo CD OAuth client secret | CH04.6 automation | `argocd/argocd-authentik-oidc` and `argocd/argocd-secret` Kubernetes secrets |
 | Dex client secret reference | CH04.6 automation | `argocd/argocd-secret` key `dex.authentik.clientSecret` |
 | Argo CD session signing key | CH04 / CH04.6 automation | `argocd/argocd-secret` key `server.secretkey` |
-| Authentik API token | CH06 baseline | `identity/authentik-bootstrap` Kubernetes secret |
+| Authentik API token | CH04.5 identity foundation | `identity/authentik-bootstrap` Kubernetes secret |
 
 The workflow input `argocd_provider_slug` controls the Authentik application slug. The default is `argocd`.
 

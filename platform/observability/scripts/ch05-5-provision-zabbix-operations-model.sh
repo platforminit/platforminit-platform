@@ -246,13 +246,51 @@ def ensure_trigger(hostid, spec, token):
     triggerid=rpc("trigger.create", payload, token)["triggerids"][0]
     print(f"Created trigger: {spec['description']} triggerid={triggerid}")
     return triggerid
-def ensure_problem_dashboard(token):
+def widget_field(field_type, name, value):
+    return {"type": field_type, "name": name, "value": value}
+
+def problems_widget(name, x, y, width, height, hostid, severities=None, tag_filter=None):
+    fields=[
+        widget_field(0,"rf_rate",60),
+        widget_field(0,"show",3),
+        widget_field(3,"hostids.0",hostid),
+        widget_field(0,"show_tags",3),
+        widget_field(0,"tag_name_format",1),
+        widget_field(1,"tag_priority","component,service,path,state"),
+    ]
+    for idx, severity in enumerate(severities or []):
+        fields.append(widget_field(0,f"severities.{idx}",severity))
+    if tag_filter:
+        fields.extend([
+            widget_field(0,"evaltype",0),
+            widget_field(1,"tags.0.tag",tag_filter[0]),
+            widget_field(0,"tags.0.operator",1),
+            widget_field(1,"tags.0.value",tag_filter[1]),
+        ])
+    return {"type":"problems","name":name,"x":x,"y":y,"width":width,"height":height,"fields":fields}
+
+def ensure_problem_dashboard(token, hostid):
+    """Create a curated operator landing page instead of relying on the noisy default dashboard."""
     name="PlatformInit - Operations Overview"
-    try:
-        existing=rpc("dashboard.get", {"output":["dashboardid","name"],"filter":{"name":[name]}}, token) or []
-        print(f"Dashboard already exists: {name}" if existing else "Dashboard provisioning intentionally deferred until active host data is stable")
-    except Exception as exc:
-        print(f"WARN: dashboard check skipped: {exc}")
+    pages=[{
+        "name":"Operations",
+        "widgets":[
+            problems_widget("Current critical problems",0,0,36,8,hostid,[4,5]),
+            problems_widget("Current warnings",36,0,36,8,hostid,[2,3]),
+            problems_widget("Storage status",0,8,36,8,hostid,[2,3,4,5],("component","Storage")),
+            problems_widget("Platform service status",36,8,36,8,hostid,[2,3,4,5]),
+            problems_widget("Recent problems / changes",0,16,72,8,hostid,[0,1,2,3,4,5]),
+        ],
+    }]
+    existing=rpc("dashboard.get", {"output":["dashboardid","name"],"filter":{"name":[name]}}, token) or []
+    payload={"name":name,"private":0,"pages":pages}
+    if existing:
+        payload["dashboardid"]=existing[0]["dashboardid"]
+        rpc("dashboard.update", payload, token)
+        print(f"Updated dashboard: {name}")
+    else:
+        dashboardid=rpc("dashboard.create", payload, token)["dashboardids"][0]
+        print(f"Created dashboard: {name} dashboardid={dashboardid}")
 
 token=login()
 print(f"Detected Zabbix API version: {rpc('apiinfo.version')}")
@@ -260,7 +298,7 @@ host=ensure_host(token)
 hostid=host["hostid"]
 for item in ITEMS: ensure_item(hostid, item, token)
 for trigger in TRIGGERS: ensure_trigger(hostid, trigger, token)
-ensure_problem_dashboard(token)
+ensure_problem_dashboard(token, hostid)
 print("PlatformInit active Zabbix operations model provisioned")
 PY
 }

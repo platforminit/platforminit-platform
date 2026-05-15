@@ -59,33 +59,25 @@ Unable to extract public key
 
 `05.3` configures the Zabbix API before requesting any `zabbix-web` restart. Restarting first can invalidate the service port-forward target and produce `network namespace is closed` / `lost connection to pod`. Any restart requested by `05.3` is intentionally non-blocking; `05.2`/`05.4` own readiness validation.
 
-## OpenObserve OIDC discovery guardrail
+## OpenObserve OIDC endpoint guardrail
 
-OpenObserve must use the Authentik application-scoped OIDC issuer as `O2_DEX_BASE_URL`:
-
-Authentik returns this application-scoped issuer with a trailing slash; OpenObserve compares the configured base URL with the discovered issuer strictly.
-
+OpenObserve must use the Authentik public host as `O2_DEX_BASE_URL` and explicit Authentik endpoint suffixes:
 
 ```text
-https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
+O2_DEX_BASE_URL=https://auth.<PLATFORM_BASE_DOMAIN>
+O2_DEX_AUTH_EP_SUFFIX=/application/o/authorize/
+O2_DEX_TOKEN_EP_SUFFIX=/application/o/token/
+O2_DEX_KEYS_EP_SUFFIX=/application/o/platforminit-openobserve/jwks/
 ```
 
-The parent endpoint is forbidden:
+Forbidden patterns:
 
 ```text
-https://auth.<PLATFORM_BASE_DOMAIN>/application/o
+O2_DEX_BASE_URL=https://auth.<PLATFORM_BASE_DOMAIN>/application/o
+O2_DEX_BASE_URL=https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
+O2_DEX_AUTH_EP_SUFFIX uses parent-directory endpoint rewrite
 ```
 
-That parent path makes OpenObserve request this invalid discovery document:
+Those patterns are fragile behind Traefik/AuthentiK routing and can show an Authentik Not Found page during browser login.
 
-```text
-/application/o/.well-known/openid-configuration
-```
-
-The expected discovery document is application-scoped:
-
-```text
-/application/o/platforminit-openobserve/.well-known/openid-configuration
-```
-
-`05.3` and `05.4` validation must fail if the `operations/openobserve-sso` secret contains the parent `/application/o` path.
+`05.3` and `05.4` validation must fail if the `operations/openobserve-sso` secret contains parent-directory suffixes or uses `/application/o` as the base URL.

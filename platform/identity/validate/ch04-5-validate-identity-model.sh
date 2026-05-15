@@ -42,7 +42,7 @@ resolve_authentik_api_token() {
   if [[ -z "${AUTHENTIK_BOOTSTRAP_TOKEN}" ]]; then
     AUTHENTIK_BOOTSTRAP_TOKEN="$(read_secret_key "${IDENTITY_NAMESPACE}" authentik-bootstrap AUTHENTIK_BOOTSTRAP_TOKEN)"
   fi
-  [[ -n "${AUTHENTIK_BOOTSTRAP_TOKEN}" ]] || die "Missing AUTHENTIK_BOOTSTRAP_TOKEN; run CH06 identity first"
+  [[ -n "${AUTHENTIK_BOOTSTRAP_TOKEN}" ]] || die "Missing AUTHENTIK_BOOTSTRAP_TOKEN; run 04.5 - Deploy Identity Foundation first"
   export AUTHENTIK_BOOTSTRAP_TOKEN
 }
 

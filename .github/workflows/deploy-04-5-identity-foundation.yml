@@ -183,7 +183,7 @@ jobs:
           validate_log="${tmp_dir}/ch04-5-validate-${SHORT_SHA}.log"
           report_file="${report_dir}/ch04-5-validate-${SHORT_SHA}.log"
 
-          cleanup_old_ch06_logs() {
+          cleanup_old_identity_logs() {
             find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
             find "$release_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -mtime +14 -exec rm -rf {} + 2>/dev/null || true
           }
@@ -213,7 +213,7 @@ jobs:
 
           launch() {
             mkdir -p "$tmp_dir" "$release_root"
-            cleanup_old_ch06_logs
+            cleanup_old_identity_logs
             rm -f "$run_log" "$run_pid" "$run_status" "$run_done" "$validate_log"
             : > "$run_log"
             load_secrets_file
@@ -263,7 +263,7 @@ jobs:
               AUTHENTIK_BOOTSTRAP_PASSWORD="${AUTHENTIK_BOOTSTRAP_PASSWORD:-}" \
               AUTHENTIK_BOOTSTRAP_EMAIL="${AUTHENTIK_BOOTSTRAP_EMAIL:-}" \
               AUTHENTIK_BOOTSTRAP_TOKEN="${AUTHENTIK_BOOTSTRAP_TOKEN:-}" \
-              "$release_dir/scripts/ch06-orchestrator.sh"
+              "$release_dir/scripts/ch04-5-deploy-authentik-core.sh"
 
             env \
               KUBECONFIG="$KUBECONFIG" \
@@ -273,7 +273,7 @@ jobs:
               AUTHENTIK_BOOTSTRAP_TOKEN="${AUTHENTIK_BOOTSTRAP_TOKEN:-}" \
               "$release_dir/scripts/ch04-5-bootstrap-identity-model.sh"
 
-            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" "$release_dir/validate/ch06-validate-identity.sh" | tee "$validate_log"
+            env KUBECONFIG="$KUBECONFIG" BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" "$release_dir/validate/ch04-5-validate-authentik-core.sh" | tee "$validate_log"
             env \
               KUBECONFIG="$KUBECONFIG" \
               BASE_DOMAIN="$PLATFORM_BASE_DOMAIN" \

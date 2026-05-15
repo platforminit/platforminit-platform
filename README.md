@@ -15,7 +15,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04.5 | identity foundation: Authentik, identity namespace, groups, technical users and validation |
 | CH04.6 | Argo CD SSO integration with Authentik |
 | CH05 | operations monitoring: Zabbix, Vector, OpenObserve Enterprise and native Authentik SSO |
-| CH06 | deprecated identity compatibility workflow; do not use for normal lifecycle execution |
+| CH06 | reserved for future Security & Compliance v2 roadmap; not active in current lifecycle |
 
 ## User-facing workflow order
 
@@ -41,6 +41,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 17 | `05.2 - Sync Operations Stack` | `observability-release-*` |
 | 18 | `05.3 - Enable Operations Native SSO` | `observability-release-*` |
 | 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
+| 20 | `05.5 - Provision Zabbix Operations Model` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 

@@ -101,6 +101,10 @@ if missing: raise SystemExit(f"FATAL: missing active items: {sorted(missing)}")
 wrong_type=[key for key in required_active_items if str(by_key[key].get("type")) != "7"]
 if wrong_type: raise SystemExit(f"FATAL: items are not active-agent type=7: {wrong_type}")
 print(f"PASS: {len(required_active_items)} PlatformInit active items exist")
+
+dashboards=rpc("dashboard.get", {"output":["dashboardid","name"],"filter":{"name":["PlatformInit - Operations Overview"]},"selectPages":"extend"}, token) or []
+if not dashboards: raise SystemExit("FATAL: PlatformInit - Operations Overview dashboard is missing")
+print("PASS: PlatformInit - Operations Overview dashboard exists")
 deadline=time.time()+240
 while True:
     items=get_items(token, hostid); by_key={i["key_"]:i for i in items}; missing_data=[]; now=int(time.time())
