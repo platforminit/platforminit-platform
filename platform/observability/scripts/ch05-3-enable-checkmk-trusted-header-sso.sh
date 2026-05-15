@@ -331,6 +331,47 @@ ensure_outpost_provider(provider, slug)
 print('Checkmk Authentik forward-auth contract reconciled')
 PY_AUTHENTIK
 
+log "Reconciling live Checkmk auth-shim ConfigMap for deterministic trusted-header user mapping"
+SHIM_CONF_FILE="$(mktemp)"
+cat > "$SHIM_CONF_FILE" <<'NGINX_AUTH_SHIM'
+server {
+  listen 8080;
+  server_tokens off;
+
+  location /healthz {
+    access_log off;
+    return 200 "ok
+";
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:5000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+
+    # Authentik forwardAuth returns X-authentik-* headers. Checkmk Raw/Community
+    # consumes X-Remote-User when incoming HTTP header authentication is enabled.
+    # For the first PlatformInit Community/Raw integration, all Authentik-approved
+    # operators land on the deterministic local break-glass administrator. This avoids
+    # Checkmk HTTP 500 / unknown-user failures before per-user provisioning exists.
+    proxy_set_header X-Remote-User cmkadmin;
+    proxy_set_header X-Remote-Original-User $http_x_authentik_username;
+    proxy_set_header X-Remote-Name $http_x_authentik_name;
+    proxy_set_header X-Remote-Email $http_x_authentik_email;
+    proxy_set_header X-Remote-Groups $http_x_authentik_groups;
+  }
+}
+NGINX_AUTH_SHIM
+kubectl -n "$NAMESPACE" create configmap checkmk-nginx-auth-shim   --from-file=default.conf="$SHIM_CONF_FILE"   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+rm -f "$SHIM_CONF_FILE"
+kubectl -n "$NAMESPACE" label configmap checkmk-nginx-auth-shim   app.kubernetes.io/name=checkmk   app.kubernetes.io/part-of=platforminit-operations   --overwrite >/dev/null
+kubectl -n "$NAMESPACE" rollout restart deployment/checkmk >/dev/null
+kubectl -n "$NAMESPACE" rollout status deployment/checkmk --timeout=180s >/dev/null || die "Checkmk deployment did not become ready after auth-shim ConfigMap reconciliation"
+
 log "Enabling Checkmk trusted-header authentication for ${CHECKMK_REMOTE_USER_HEADER}"
 CHECKMK_POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$CHECKMK_POD" ]] || die "Could not resolve Checkmk pod"

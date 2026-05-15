@@ -82,3 +82,8 @@ Checkmk site from a heredoc executed with `kubectl exec -i`. The `-i` flag is
 required because otherwise `bash -s` receives no stdin, exits successfully, and
 no configuration file is written. The validator checks the resulting
 `platforminit_header_auth.mk` content inside the running Checkmk pod.
+
+### CH05.3 live auth-shim reconciliation
+
+`05.3 - Enable Checkmk Trusted-Header SSO` is intentionally self-contained for the trusted-header bridge. It reapplies the live `checkmk-nginx-auth-shim` ConfigMap and restarts the Checkmk deployment before validating the `X-Remote-User: cmkadmin` mapping. This avoids a stale runtime ConfigMap from a previous `05.2` sync causing the SSO validator to fail after the repository manifest has already changed.
+
