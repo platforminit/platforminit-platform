@@ -3,9 +3,25 @@
 baseDomain: ""
 tlsIssuer: letsencrypt-prod
 
-# CH05 storage contract.
-# Observability-owned persistent data must live outside the generic k3s/local-path PVC tree.
-# This keeps k3s runtime data (/srv/data/k3s) separate from operations stack data.
-observabilityStorageRoot: /srv/observability/data
-zabbixPostgresStorageSize: 5Gi
-openobserveStorageSize: 10Gi
+checkmk:
+  site: cmk
+  image:
+    repository: checkmk/check-mk-community
+    tag: "2.5.0-latest"
+    pullPolicy: IfNotPresent
+  timezone: Europe/Budapest
+  storageSize: 10Gi
+  storageRoot: /srv/observability/data/checkmk
+  remoteUserHeader: X-Remote-User
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+
+authentik:
+  namespace: identity
+  embeddedOutpostService: ak-outpost-authentik-embedded-outpost
+  embeddedOutpostPort: 9000

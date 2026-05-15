@@ -1,4 +1,4 @@
-name: 05.5 - Provision Zabbix Operations Model
+name: 05.5 - Provision Checkmk Operations Model
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       artifact_id:
-        description: Observability artifact ID
+        description: Operations artifact ID
         required: true
         type: string
       project:
@@ -123,8 +123,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ steps.server.outputs.public_ip }}" >> ~/.ssh/known_hosts 2>/dev/null
-          chmod 600 ~/.ssh/known_hosts
+          host="${{ steps.server.outputs.public_ip }}"
+          for attempt in 1 2 3 4 5; do
+            if ssh-keyscan -T 10 -H "$host" >> ~/.ssh/known_hosts 2>/tmp/platforminit-ssh-keyscan.err; then
+              chmod 600 ~/.ssh/known_hosts
+              exit 0
+            fi
+            echo "WARN: ssh-keyscan failed for $host on attempt ${attempt}/5" >&2
+            cat /tmp/platforminit-ssh-keyscan.err >&2 || true
+            sleep $(( attempt * 2 ))
+          done
+          echo "FATAL: could not collect SSH host key for $host" >&2
+          exit 1
 
       - name: Render remote CH05 privileged entrypoint
         shell: bash
@@ -184,15 +194,10 @@ jobs:
           SHORTSHA: ${{ steps.artifact.outputs.short_sha }}
           ARCHIVE: ${{ steps.artifact.outputs.archive_path }}
           BASE_DOMAIN: ${{ secrets.PLATFORM_BASE_DOMAIN }}
-          HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
           PLATFORM_REPO_URL: ${{ inputs.platform_repo_url || 'https://github.com/platforminit/platforminit-platform.git' }}
           TARGET_REVISION: ${{ inputs.target_revision || steps.artifact.outputs.short_sha }}
-          ZABBIX_DB_PASSWORD: ${{ secrets.ZABBIX_DB_PASSWORD }}
-          OPENOBSERVE_ROOT_USER_EMAIL: ${{ secrets.OPENOBSERVE_ROOT_USER_EMAIL }}
-          OPENOBSERVE_ROOT_USER_PASSWORD: ${{ secrets.OPENOBSERVE_ROOT_USER_PASSWORD }}
-          OPENOBSERVE_OIDC_CLIENT_SECRET: ${{ secrets.OPENOBSERVE_OIDC_CLIENT_SECRET }}
-          ZABBIX_ADMIN_USER: ${{ secrets.ZABBIX_ADMIN_USER }}
-          ZABBIX_ADMIN_PASSWORD: ${{ secrets.ZABBIX_ADMIN_PASSWORD }}
+          CHECKMK_ADMIN_PASSWORD: ${{ secrets.CHECKMK_ADMIN_PASSWORD }}
+          CHECKMK_SITE: cmk
 
         shell: bash
         run: |
@@ -225,7 +230,7 @@ jobs:
               "$@" && return 0
               rc=$?
               if [[ "${rc}" != "255" ]]; then
-                echo "FATAL: remote command failed with non-transient rc=${rc}; not retrying: $*" >&2
+                echo "FATAL: command failed with non-transport rc=${rc}; not retrying: $*" >&2
                 return "${rc}"
               fi
               echo "WARN: SSH transport failed with rc=${rc} on attempt ${attempt}/${max_attempts}. Retrying after ${delay}s..." >&2
@@ -243,21 +248,16 @@ jobs:
           {
             [[ -n "${BASE_DOMAIN:-}" ]] || { echo "FATAL: PLATFORM_BASE_DOMAIN secret is required; CH05 does not hardcode domains." >&2; exit 1; }
             printf 'BASE_DOMAIN=%q\n' "${BASE_DOMAIN}"
-            printf 'PLATFORM_HOST_NAME=%q\n' "${HOST_NAME:-platforminit-dev-01}"
             printf 'PLATFORM_REPO_URL=%q\n' "${PLATFORM_REPO_URL}"
             printf 'TARGET_REVISION=%q\n' "${TARGET_REVISION}"
-            printf 'ZABBIX_DB_PASSWORD=%q\n' "${ZABBIX_DB_PASSWORD:-}"
-            printf 'OPENOBSERVE_ROOT_USER_EMAIL=%q\n' "${OPENOBSERVE_ROOT_USER_EMAIL:-}"
-            printf 'OPENOBSERVE_ROOT_USER_PASSWORD=%q\n' "${OPENOBSERVE_ROOT_USER_PASSWORD:-}"
-            printf 'OPENOBSERVE_OIDC_CLIENT_SECRET=%q\n' "${OPENOBSERVE_OIDC_CLIENT_SECRET:-}"
-            printf 'ZABBIX_ADMIN_USER=%q\n' "${ZABBIX_ADMIN_USER:-Admin}"
-            printf 'ZABBIX_ADMIN_PASSWORD=%q\n' "${ZABBIX_ADMIN_PASSWORD:-zabbix}"
+            printf 'CHECKMK_ADMIN_PASSWORD=%q\n' "${CHECKMK_ADMIN_PASSWORD:-}"
+            printf 'CHECKMK_SITE=%q\n' "${CHECKMK_SITE:-cmk}"
           } > ./ch05.env
           retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh
-            sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' 'ch05-5-provision-zabbix-operations-model.sh' 'ch05-5-validate-zabbix-operations-model.sh' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' 'ch05-5-provision-checkmk-operations-model.sh' 'ch05-5-validate-checkmk-operations-model.sh' '${HOST_LOGIN_USER}'
           "
 
       - name: Fetch CH05 reports

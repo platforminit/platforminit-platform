@@ -14,7 +14,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | CH04 | platform services: ingress, TLS and Argo CD |
 | CH04.5 | identity foundation: Authentik, identity namespace, groups, technical users and validation |
 | CH04.6 | Argo CD SSO integration with Authentik |
-| CH05 | operations monitoring: Zabbix, Vector, OpenObserve Enterprise and native Authentik SSO |
+| CH05 | operations monitoring: Checkmk Community with Authentik trusted-header SSO |
 | CH06 | reserved for future Security & Compliance v2 roadmap; not active in current lifecycle |
 
 ## User-facing workflow order
@@ -39,9 +39,9 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 15 | `05 - Register Operations Stack` | `observability-release-*` |
 | 16 | `05.1 - Reconcile Operations Prerequisites` | `observability-release-*` |
 | 17 | `05.2 - Sync Operations Stack` | `observability-release-*` |
-| 18 | `05.3 - Enable Operations Native SSO` | `observability-release-*` |
+| 18 | `05.3 - Enable Checkmk Trusted-Header SSO` | `observability-release-*` |
 | 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
-| 20 | `05.5 - Provision Zabbix Operations Model` | `observability-release-*` |
+| 20 | `05.5 - Provision Checkmk Operations Model` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -54,30 +54,29 @@ Each deploy workflow accepts the producing build workflow run ID and the specifi
 | Development host | `platforminit-dev-01` |
 | Base domain | `sysadminhomelab.hu` |
 | Kubernetes | single-node k3s |
-| Public operational UI | Zabbix + OpenObserve |
+| Public operational UI | Checkmk Community |
 | Public identity UI | Authentik |
 
 Deprecated development host aliases must not be used; the only valid development host contract is `platforminit-dev-01`.
 
 ## CH05 operations monitoring
 
-CH05 is an operator-first replacement for the previous Grafana/VictoriaMetrics/Loki/Alloy default stack.
+CH05 is now a minimal Checkmk Community based operations layer. The previous Grafana/VictoriaMetrics/Loki/Alloy proof and the later Zabbix/OpenObserve/Vector proof are retired from the active lifecycle.
 
 ```text
-Zabbix      -> what is broken?
-Vector      -> collect logs
-OpenObserve Enterprise -> why did it break?
-Authentik            -> native app SSO for public operations WebUIs
+Checkmk Community -> host/service/state operator console
+Authentik         -> SSO gate through Traefik forwardAuth
+Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
+Argo CD           -> owns runtime deployment
 ```
 
-Public operations WebUIs:
+Public operations WebUI:
 
 | URL | Purpose | Login |
 |---|---|---|
-| `https://zabbix.<PLATFORM_BASE_DOMAIN>` | operational alert/state console | Authentik SAML |
-| `https://logs.<PLATFORM_BASE_DOMAIN>` | log search and RCA | Authentik OIDC via OpenObserve Enterprise SSO |
+| `https://checkmk.<PLATFORM_BASE_DOMAIN>/cmk/` | operational host/service/state console | Authentik forwardAuth + Checkmk trusted header |
 
-After CH04, CH05 runtime resources are Argo CD-owned. GitHub Actions only register the Argo CD Application, reconcile prerequisite secrets/identity bindings, request sync/refresh, and validate. The public ingresses are part of the GitOps-owned operations stack and use production certificates for browser-trusted WebUIs.
+After CH04, CH05 runtime resources are Argo CD-owned. GitHub Actions only register the Argo CD Application, reconcile prerequisite secrets/identity bindings, request sync/refresh, and validate. The public ingress is part of the GitOps-owned operations stack and uses production certificates for browser-trusted WebUIs.
 
 Removed as default components:
 
@@ -88,7 +87,10 @@ Removed as default components:
 - Alertmanager
 - Loki
 - Alloy
-- provisioned Grafana dashboards
+- Zabbix
+- OpenObserve
+- Vector
+- provisioned Grafana/Zabbix dashboards
 
 
 ## CH05 GitOps ownership rule
@@ -120,7 +122,7 @@ Identity is deployed early in the lifecycle.
 |---|---|---|
 | `04.5 - Deploy Identity Foundation` | Authentik core | required before app SSO |
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
-| `05.3 - Enable Operations Native SSO` | Zabbix SAML + OpenObserve Enterprise OIDC → Authentik | identity binding only; no app rollout |
+| `05.3 - Enable Checkmk Trusted-Header SSO` | Checkmk trusted-header SSO via Authentik forwardAuth | identity binding only; no app rollout |
 
 
 CH05 workflow privilege contract:
@@ -153,7 +155,7 @@ Recommended branch for this refactor:
 
 ```bash
 git checkout dev
-git checkout -b refactor/ch05-argocd-owned-operations-stack
+git checkout -b feat/ch05-checkmk-community-operations-layer
 ```
 
 ## Documentation index
@@ -166,13 +168,10 @@ git checkout -b refactor/ch05-argocd-owned-operations-stack
 | Day-2 operations | `docs/day2-ops.md` |
 | Release model | `docs/release-model.md` |
 | CH05 operations monitoring design | `docs/ch05-operations-monitoring-design.md` |
+| CH05 Checkmk migration runbook | `docs/ch05-checkmk-migration-runbook.md` |
 | CH05 Argo CD refactor runbook | `docs/ch05-argocd-operations-refactor-runbook.md` |
-| CH05 migration from previous stack | `docs/ch05-migration-from-grafana-stack.md` |
-| Zabbix monitoring | `platform/observability/zabbix/README.md` |
-| Vector logging | `platform/observability/vector/README.md` |
-| OpenObserve RCA logs | `platform/observability/openobserve/README.md` |
-| Operations SSO | `platform/observability/sso/README.md` |
-| Operations rule system | `platform/observability/rules/platforminit-operations-rules.md` |
+| Checkmk monitoring | `platform/observability/checkmk/README.md` |
+| External host monitoring backlog | `platform/observability/external-hosts/README.md` |
 
 ## Principles
 
@@ -199,5 +198,5 @@ CH05 observability data is intentionally kept separate from the generic k3s loca
 /srv/observability/data    -> CH05 observability persistent data
 ```
 
-Zabbix PostgreSQL and OpenObserve use static Retain hostPath PVs under `/srv/observability/data`. Vector stores its local buffer/checkpoint data under `/srv/observability/data/vector`. See `docs/ch05-observability-storage-contract.md`.
+Checkmk uses a static Retain hostPath PV under `/srv/observability/data/checkmk`. See `docs/ch05-observability-storage-contract.md`.
 

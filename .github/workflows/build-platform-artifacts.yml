@@ -51,26 +51,42 @@ jobs:
           set -euo pipefail
           python3 tools/platforminit_ops/check_host_name_contract.py .
 
-      - name: Validate CH05 domain parameterization
+      - name: Validate CH05 Checkmk contract
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Checking CH05 for hardcoded PlatformInit development domains and stale SSO manifests..."
+          echo "Checking CH05 Checkmk contract for hardcoded domains and retired stack files..."
 
           forbidden_files=(
-            "platform/observability/manifests/sso/operations-native-sso-ingress.yaml"
+            "platform/observability/manifests/sso"
+            "platform/observability/manifests/zabbix"
+            "platform/observability/manifests/openobserve"
+            "platform/observability/manifests/vector"
+            "platform/observability/manifests/templates/sso"
+            "platform/observability/manifests/templates/zabbix"
+            "platform/observability/manifests/templates/openobserve"
+            "platform/observability/manifests/templates/vector"
+            "platform/observability/sso"
+            "platform/observability/zabbix"
+            "platform/observability/openobserve"
+            "platform/observability/vector"
+            "platform/observability/scripts/ch05-3-enable-operations-native-sso.sh"
+            "platform/observability/scripts/ch05-3-onboard-external-host.sh"
+            "platform/observability/scripts/ch05-5-provision-zabbix-operations-model.sh"
+            "platform/observability/validate/ch05-3-validate-operations-native-sso.sh"
+            "platform/observability/validate/ch05-5-validate-zabbix-operations-model.sh"
           )
 
           for file in "${forbidden_files[@]}"; do
             if [[ -e "$file" ]]; then
               echo "Forbidden stale CH05 manifest detected: $file" >&2
-              echo "This file belongs to the retired forward-auth/static-host model and must be removed." >&2
+              echo "This file belongs to the retired Zabbix/OpenObserve/Vector CH05 proof and must be removed." >&2
               exit 1
             fi
           done
 
-          matches="$(grep -RInE 'sysadminhomelab\.hu|zabbix\.sysadminhomelab\.hu|logs\.sysadminhomelab\.hu' \
+          matches="$(grep -RInE 'sysadminhomelab\.hu|zabbix\.sysadminhomelab\.hu|logs\.sysadminhomelab\.hu|checkmk\.sysadminhomelab\.hu' \
             platform/observability .github/workflows/deploy-05*.yml 2>/dev/null || true)"
 
           if [[ -n "$matches" ]]; then
@@ -80,7 +96,7 @@ jobs:
             exit 1
           fi
 
-          echo "PASS: CH05 domain parameterization contract is clean."
+          echo "PASS: CH05 Checkmk contract is clean."
 
       - name: Package ${{ matrix.component_name }}
         id: pkg

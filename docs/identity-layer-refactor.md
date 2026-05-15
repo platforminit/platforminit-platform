@@ -8,7 +8,7 @@ Identity is an early platform lifecycle layer.
 |---|---|
 | `04.5 - Deploy Identity Foundation` | Deploy Authentik and bootstrap PlatformInit identity groups |
 | `04.6 - Enable Argo CD SSO` | Configure Argo CD OIDC login through Authentik |
-| `05.3 - Enable Operations Native SSO` | Configure native app SSO for CH05 Zabbix/OpenObserve through Authentik; no proxy-only forward-auth |
+| `05.3 - Enable Checkmk Trusted-Header SSO` | Configure native app SSO for CH05 Zabbix/OpenObserve through Authentik; no proxy-only forward-auth |
 
 ## Deprecated model
 

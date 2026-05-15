@@ -16,17 +16,15 @@ need python3
 kubectl get nodes >/dev/null
 kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" >/dev/null || die "Missing Argo CD app: $APP_NAME. Run 05 - Register Operations Stack first."
 
-log "Checking CH05 prerequisite secrets before Argo CD sync"
+log "Checking CH05 Checkmk prerequisite secrets before Argo CD sync"
 missing=0
-for secret in zabbix-postgres openobserve-root openobserve-sso zabbix-saml-certs; do
+for secret in checkmk-admin checkmk-sso; do
   if ! kubectl -n "$OPERATIONS_NAMESPACE" get secret "$secret" >/dev/null 2>&1; then
     echo "MISSING: ${OPERATIONS_NAMESPACE}/${secret}" >&2
     missing=1
   fi
 done
-if [[ "$missing" -ne 0 ]]; then
-  die "Operations prerequisite secrets are missing. Run 05.1 - Reconcile Operations Prerequisites before 05.2."
-fi
+[[ "$missing" -eq 0 ]] || die "Checkmk prerequisite secrets are missing. Run 05.1 - Reconcile Operations Prerequisites before 05.2."
 
 if [[ -z "$TARGET_REVISION" ]]; then
   TARGET_REVISION="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.spec.source.targetRevision}')"
@@ -52,16 +50,15 @@ while true; do
   message="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.operationState.message}' 2>/dev/null || true)"
   log "Argo CD status: sync=${sync_status:-unknown} health=${health_status:-unknown} phase=${phase:-none} message=${message:-none}"
   if [[ "$sync_status" == "Synced" && "$health_status" == "Healthy" ]]; then
-    log "Operations stack is synced and healthy"
+    log "Checkmk operations stack is synced and healthy"
     break
   fi
   now="$(date +%s)"
   if (( now - last_diag > 60 )); then
     last_diag="$now"
-    kubectl -n "$OPERATIONS_NAMESPACE" get pods || true
+    kubectl -n "$OPERATIONS_NAMESPACE" get pods,svc,ingressroute,pvc 2>/dev/null || true
     kubectl -n "$OPERATIONS_NAMESPACE" get events --sort-by=.lastTimestamp | tail -30 || true
-    # Print failing workload logs early so CH05 does not become another blind timeout.
-    kubectl -n "$OPERATIONS_NAMESPACE" get pods --no-headers 2>/dev/null | awk '$2 != "1/1" || $3 != "Running" {print $1}' | while read -r pod; do
+    kubectl -n "$OPERATIONS_NAMESPACE" get pods --no-headers 2>/dev/null | awk '$2 !~ /^2\/2$/ || $3 != "Running" {print $1}' | while read -r pod; do
       [ -n "$pod" ] || continue
       echo "--- diagnostics for pod/${pod} ---"
       kubectl -n "$OPERATIONS_NAMESPACE" describe pod "$pod" | tail -120 || true
@@ -70,10 +67,10 @@ while true; do
   fi
   if (( now - start > TIMEOUT_SECONDS )); then
     kubectl -n "$ARGOCD_NAMESPACE" describe application.argoproj.io "$APP_NAME" || true
-    kubectl -n "$OPERATIONS_NAMESPACE" get pods,ingress,svc,pvc || true
+    kubectl -n "$OPERATIONS_NAMESPACE" get pods,svc,ingressroute,pvc || true
     kubectl -n "$OPERATIONS_NAMESPACE" get events --sort-by=.lastTimestamp | tail -80 || true
-    die "Timed out waiting for Argo CD operations stack to become Synced/Healthy"
+    die "Timed out waiting for Argo CD Checkmk operations stack to become Synced/Healthy"
   fi
   sleep 15
 done
-kubectl -n "$OPERATIONS_NAMESPACE" get pods,svc,ingress,pvc
+kubectl -n "$OPERATIONS_NAMESPACE" get pods,svc,ingressroute,pvc
