@@ -23,6 +23,16 @@ case "$addr" in
   *) die "Checkmk middleware does not point to Authentik Traefik forwardAuth endpoint: $addr" ;;
 esac
 kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml | grep -q 'checkmk-authentik-forward-auth' || die "Checkmk IngressRoute is not protected by Authentik middleware"
-kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o yaml | grep -q 'X-authentik-username' || die "Checkmk auth shim does not map Authentik identity headers"
-kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o yaml | grep -q 'X-Remote-User' || die "Checkmk auth shim does not emit X-Remote-User"
+kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth -o yaml | grep -qi 'X-authentik-username' || die "Checkmk forwardAuth middleware does not forward X-authentik-username"
+
+shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
+[[ -n "$shim_conf" ]] || die "Checkmk auth shim ConfigMap does not contain default.conf"
+
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+\$http_x_authentik_username;' \
+  || die "Checkmk auth shim does not map Authentik username to X-Remote-User"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Email[[:space:]]+\$http_x_authentik_email;' \
+  || die "Checkmk auth shim does not map Authentik email header"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Groups[[:space:]]+\$http_x_authentik_groups;' \
+  || die "Checkmk auth shim does not map Authentik groups header"
+
 echo "PASS: Checkmk trusted-header SSO Kubernetes contract exists"
