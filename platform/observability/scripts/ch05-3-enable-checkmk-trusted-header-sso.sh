@@ -209,53 +209,119 @@ def find_proxy_outpost():
 def verify_outpost_assignment(outpost_pk, provider_pk, slug):
     detail=request('GET',f"/api/v3/outposts/instances/{outpost_pk}/")
     providers=ref_list(detail.get('providers'))
+    providers_obj=ref_list(detail.get('providers_obj'))
     applications=ref_list(detail.get('applications'))
-    used = provider_pk in providers or slug in applications
-    return used, providers, applications
+    provider_s=str(provider_pk)
+    used = provider_s in providers or provider_s in providers_obj or slug in applications
+    if not used:
+        # Some authentik versions expose provider assignment reliably via the list
+        # filter before the embedded outpost detail payload refreshes. Treat this
+        # as authoritative only when it returns the same outpost UUID.
+        try:
+            for item in paginated(f"/api/v3/outposts/instances/?providers_by_pk={provider_pk}"):
+                if str(item.get('pk')) == str(outpost_pk):
+                    used = True
+                    break
+        except Exception:
+            pass
+    return used, providers, providers_obj, applications, detail
 
-def patch_outpost_field(outpost_pk, field, refs, wanted):
-    if wanted in refs:
-        return True
-    payload={field: refs + [wanted]}
-    request('PATCH',f"/api/v3/outposts/instances/{outpost_pk}/",payload)
-    return True
+def outpost_provider_refs(detail):
+    refs=[]
+    for raw in (detail.get('providers') or [], detail.get('providers_obj') or []):
+        for item in raw:
+            rid=ref_id(item)
+            if rid and rid not in refs:
+                refs.append(rid)
+    return refs
+
+def outpost_service_connection_ref(detail):
+    raw=detail.get('service_connection')
+    rid=ref_id(raw)
+    if rid:
+        return rid
+    raw=detail.get('service_connection_obj')
+    return ref_id(raw)
+
+def outpost_put_payload(detail, provider_pk):
+    # Full PUT is more reliable than partial PATCH for the embedded outpost on
+    # some authentik versions. The OpenAPI schema requires name, type,
+    # providers, service_connection and config for OutpostRequest.
+    refs=outpost_provider_refs(detail)
+    provider_s=str(provider_pk)
+    if provider_s not in refs:
+        refs.append(provider_s)
+    providers=[]
+    for ref in refs:
+        try:
+            providers.append(int(ref))
+        except Exception:
+            # Provider IDs are integer in the current API schema. Keep a clear
+            # failure instead of sending malformed mixed IDs.
+            raise RuntimeError(f"Unexpected non-integer outpost provider reference: {ref!r}")
+    payload={
+        'name': detail.get('name') or 'authentik Embedded Outpost',
+        'type': detail.get('type') or 'proxy',
+        'providers': providers,
+        'service_connection': outpost_service_connection_ref(detail),
+        'config': detail.get('config') or {},
+    }
+    if detail.get('managed') is not None:
+        payload['managed']=detail.get('managed')
+    return payload
+
+def patch_outpost_field(outpost_pk, provider_pk):
+    # Try the minimal documented PATCH first. Then fall back to a full PUT with
+    # the complete OutpostRequest shape because the embedded outpost can ignore
+    # or not immediately reflect partial provider updates in some releases.
+    detail=request('GET',f"/api/v3/outposts/instances/{outpost_pk}/")
+    refs=outpost_provider_refs(detail)
+    provider_s=str(provider_pk)
+    if provider_s not in refs:
+        request('PATCH',f"/api/v3/outposts/instances/{outpost_pk}/",{'providers':[int(x) for x in refs] + [int(provider_pk)]})
+    used, providers, providers_obj, applications, _ = verify_outpost_assignment(outpost_pk, provider_pk, 'platforminit-checkmk')
+    if used:
+        return 'patch', providers, providers_obj, applications
+
+    detail=request('GET',f"/api/v3/outposts/instances/{outpost_pk}/")
+    request('PUT',f"/api/v3/outposts/instances/{outpost_pk}/",outpost_put_payload(detail, provider_pk))
+    used, providers, providers_obj, applications, _ = verify_outpost_assignment(outpost_pk, provider_pk, 'platforminit-checkmk')
+    if used:
+        return 'put', providers, providers_obj, applications
+    return None, providers, providers_obj, applications
 
 def ensure_outpost_provider(provider_pk, slug):
     # Authentik admin UI warning "Provider is not used by any Outpost" is cleared
-    # only when the proxy provider itself is assigned to a proxy outpost. Older
-    # repo logic patched the application slug only, which can print success while
-    # still leaving the provider detached from the embedded outpost.
+    # only when the proxy provider itself is assigned to a proxy outpost. The API
+    # schema exposes this as the outpost `providers` integer list, not an
+    # application slug list.
     outpost=find_proxy_outpost()
     if not outpost:
         raise RuntimeError('No Authentik outpost found; create/enable the embedded proxy outpost before Checkmk forwardAuth can work')
     outpost_pk=outpost['pk']
-    used, providers, applications = verify_outpost_assignment(outpost_pk, provider_pk, slug)
+    used, providers, providers_obj, applications, _ = verify_outpost_assignment(outpost_pk, provider_pk, slug)
     if used:
-        print(f"Provider/application already attached to Authentik outpost {outpost.get('name', outpost_pk)}")
+        print(f"Provider already attached to Authentik outpost {outpost.get('name', outpost_pk)}")
         return
 
     errors=[]
-    for field, refs, wanted in (
-        ('providers', providers, provider_pk),
-        ('applications', applications, slug),
-    ):
-        try:
-            patch_outpost_field(outpost_pk, field, refs, wanted)
-            used, providers, applications = verify_outpost_assignment(outpost_pk, provider_pk, slug)
-            if used:
-                print(f"Attached PlatformInit Checkmk provider to Authentik outpost {outpost.get('name', outpost_pk)} via {field}")
-                return
-        except Exception as exc:
-            errors.append(f"{field}: {exc}")
+    try:
+        method, providers, providers_obj, applications = patch_outpost_field(outpost_pk, provider_pk)
+        if method:
+            print(f"Attached PlatformInit Checkmk provider to Authentik outpost {outpost.get('name', outpost_pk)} via {method.upper()}")
+            return
+    except Exception as exc:
+        errors.append(str(exc))
 
-    used, providers, applications = verify_outpost_assignment(outpost_pk, provider_pk, slug)
+    used, providers, providers_obj, applications, detail = verify_outpost_assignment(outpost_pk, provider_pk, slug)
     if not used:
         raise RuntimeError(
-            'Could not attach PlatformInit Checkmk provider/application to Authentik outpost. '
+            'Could not attach PlatformInit Checkmk provider to Authentik outpost. '
             f'outpost={outpost.get("name", outpost_pk)} provider_pk={provider_pk} slug={slug} '
-            f'providers={providers} applications={applications} errors={errors}'
+            f'providers={providers} providers_obj={providers_obj} applications={applications} '
+            f'outpost_type={detail.get("type")} service_connection={outpost_service_connection_ref(detail)} '
+            f'errors={errors}'
         )
-
 request('GET','/api/v3/core/users/me/')
 ops_group=ensure_group('PlatformInit Operations')
 ensure_user_in_group(admin_username, ops_group)
