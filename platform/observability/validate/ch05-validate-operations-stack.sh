@@ -32,7 +32,11 @@ log "Validating Argo CD operations-stack health"
 kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" >/dev/null || die "Missing Argo CD app ${APP_NAME}"
 sync_status="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
 health_status="$(kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
-[[ "$sync_status" == "Synced" ]] || die "operations-stack is not Synced: ${sync_status:-unknown}"
+if [[ "$sync_status" != "Synced" ]]; then
+  kubectl -n "$ARGOCD_NAMESPACE" get application.argoproj.io "$APP_NAME"     -o jsonpath='{range .status.resources[*]}{.kind}{"/"}{.name}{" sync="}{.status}{" health="}{.health.status}{"
+"}{end}' 2>/dev/null || true
+  die "operations-stack is not Synced: ${sync_status:-unknown}. Run 05.2 - Sync Operations Stack after CH05 manifest/config changes before validating."
+fi
 [[ "$health_status" == "Healthy" ]] || die "operations-stack is not Healthy: ${health_status:-unknown}"
 
 log "Validating Checkmk runtime resources"

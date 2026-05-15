@@ -83,7 +83,22 @@ required because otherwise `bash -s` receives no stdin, exits successfully, and
 no configuration file is written. The validator checks the resulting
 `platforminit_header_auth.mk` content inside the running Checkmk pod.
 
-### CH05.3 live auth-shim reconciliation
+## CH05.3 Argo CD ownership guardrail
 
-`05.3 - Enable Checkmk Trusted-Header SSO` is intentionally self-contained for the trusted-header bridge. It reapplies the live `checkmk-nginx-auth-shim` ConfigMap and restarts the Checkmk deployment before validating the `X-Remote-User: cmkadmin` mapping. This avoids a stale runtime ConfigMap from a previous `05.2` sync causing the SSO validator to fail after the repository manifest has already changed.
+The Checkmk auth-shim `ConfigMap` is Argo CD-owned through the CH05 operations-stack
+manifest. CH05.3 must not patch or rollout-restart this `ConfigMap` directly because
+that creates Argo CD drift and makes `05.4 - Validate Operations Stack` fail with
+`operations-stack is not Synced`.
 
+If the trusted-header mapping changes in Git, run the lifecycle in this order:
+
+```text
+00 - Build Platform Artifacts
+05.2 - Sync Operations Stack
+05.3 - Enable Checkmk Trusted-Header SSO
+05.4 - Validate Operations Stack
+```
+
+CH05.3 is allowed to reconcile Authentik API objects, create/update the `checkmk-sso`
+Secret, and persist Checkmk site-local header authentication inside the Checkmk site.
+Runtime Kubernetes manifests remain owned by Argo CD.
