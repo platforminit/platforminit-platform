@@ -68,9 +68,32 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk >/dev/null || die "Missing Checkmk IngressRoute"
   kubectl -n "$NAMESPACE" get certificate checkmk-tls >/dev/null || die "Missing Checkmk TLS Certificate"
   addr="$(kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth -o jsonpath='{.spec.forwardAuth.address}')"
-  [[ "$addr" == *outpost.goauthentik.io/auth/traefik* ]] || die "Unexpected forwardAuth endpoint: $addr"
+  [[ "$addr" == *authentik-forward-auth.operations.svc.cluster.local*/outpost.goauthentik.io/auth/traefik* ]] || die "Unexpected forwardAuth endpoint: $addr"
   kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml | grep -q 'checkmk-authentik-forward-auth' || die "Checkmk IngressRoute is not protected by Authentik middleware"
-  log "PASS: Checkmk trusted-header SSO Kubernetes contract is present"
+
+  shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
+  echo "$shim_conf" | grep -Eq 'proxy_pass_request_headers[[:space:]]+off;' || die "Checkmk auth-shim is still forwarding all browser/Authentik headers"
+  echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+"";' || die "Checkmk auth-shim does not clear stale browser cookies"
+  echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Forwarded-Proto[[:space:]]+https;' || die "Checkmk auth-shim does not preserve the public HTTPS scheme"
+  echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;' || die "Checkmk auth-shim does not map approved sessions to cmkadmin"
+
+  log "Validating Checkmk auth-shim runtime path through service port 80"
+  kill "$PF" >/dev/null 2>&1 || true
+  kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_LOCAL_PORT}:80" >/tmp/ch05-checkmk-auth-shim-port-forward.log 2>&1 &
+  PF="$!"
+  for _ in $(seq 1 45); do
+    shim_code="$(curl -sS       -H "Host: checkmk.${BASE_DOMAIN}"       -H "X-authentik-username: platforminit-test"       -H "X-authentik-email: platforminit-test@${BASE_DOMAIN}"       -H "Cookie: auth_cmk=stale-test-cookie"       -o /tmp/ch05-checkmk-auth-shim.html       -w '%{http_code}'       "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" || true)"
+    [[ "$shim_code" =~ ^(200|302|401|403)$ ]] && break
+    sleep 2
+  done
+  shim_code="$(curl -sS     -H "Host: checkmk.${BASE_DOMAIN}"     -H "X-authentik-username: platforminit-test"     -H "X-authentik-email: platforminit-test@${BASE_DOMAIN}"     -H "Cookie: auth_cmk=stale-test-cookie"     -o /tmp/ch05-checkmk-auth-shim.html     -w '%{http_code}'     "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" || true)"
+  if [[ ! "$shim_code" =~ ^(200|302|401|403)$ ]]; then
+    cat /tmp/ch05-checkmk-auth-shim-port-forward.log >&2 || true
+    kubectl -n "$NAMESPACE" logs "$POD" -c auth-shim --tail=160 >&2 || true
+    kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc 'tail -n 200 /omd/sites/cmk/var/log/web.log /omd/sites/cmk/var/log/apache/error_log 2>/dev/null || true' >&2 || true
+    die "Checkmk auth-shim runtime path failed; HTTP=${shim_code}"
+  fi
+  log "PASS: Checkmk trusted-header SSO Kubernetes contract and auth-shim path are present"
 fi
 
 log "PASS: CH05 Checkmk operations stack validation succeeded mode=${VALIDATION_MODE}"

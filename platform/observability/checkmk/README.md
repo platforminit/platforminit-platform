@@ -49,6 +49,24 @@ auth_by_http_header = 'X-Remote-User'
 
 Future hardening can replace the deterministic `cmkadmin` mapping with explicit Checkmk local user provisioning and group/role mapping.
 
+
+## ForwardAuth service contract
+
+The CH04.5 Authentik deployment currently serves the embedded outpost paths from
+`authentik-server.identity.svc.cluster.local`. There is no separate
+`ak-outpost-authentik-embedded-outpost` Service in the identity namespace. CH05
+therefore creates an operations-local ExternalName Service named
+`authentik-forward-auth` that points to:
+
+```text
+authentik-server.identity.svc.cluster.local:80
+```
+
+Traefik forwardAuth and the `/outpost.goauthentik.io/` IngressRoute path must use
+that reachable service. Pointing CH05 at a non-existent outpost Service causes
+Traefik to return HTTP 500 before the request reaches the Checkmk backend; this
+shows up in Traefik access logs with the Checkmk router selected but service `-`.
+
 ## Authentik outpost assignment
 
 The Checkmk proxy provider must be assigned to an Authentik proxy outpost. If the
@@ -102,3 +120,19 @@ If the trusted-header mapping changes in Git, run the lifecycle in this order:
 CH05.3 is allowed to reconcile Authentik API objects, create/update the `checkmk-sso`
 Secret, and persist Checkmk site-local header authentication inside the Checkmk site.
 Runtime Kubernetes manifests remain owned by Argo CD.
+
+## Trusted-header bridge hardening note
+
+The Checkmk Community trusted-header SSO proof intentionally keeps the
+`checkmk-nginx-auth-shim` request to the Checkmk upstream minimal:
+
+- `proxy_pass_request_headers off` prevents arbitrary browser/Authentik headers
+  and stale Checkmk cookies from being forwarded into the site Apache process.
+- `Cookie ""` avoids stale `auth_cmk` cookies from older native-login attempts.
+- `Authorization ""` avoids leaking unrelated browser credentials to Checkmk.
+- `X-Forwarded-Proto https` reflects the public TLS entrypoint used by Traefik.
+- `X-Remote-User cmkadmin` maps approved Authentik sessions to the deterministic
+  local Checkmk administrator until per-user Checkmk provisioning is introduced.
+
+Because this ConfigMap is part of the Argo CD-owned runtime manifest, any change
+requires `05.2 - Sync Operations Stack` before `05.3` and `05.4` validation.
