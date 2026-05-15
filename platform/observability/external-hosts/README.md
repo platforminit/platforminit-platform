@@ -1,13 +1,20 @@
-# External Host Onboarding
+# CH05 External Host Monitoring
 
-This directory reserves the CH05.3 contract for future hosts such as the planned n8n host.
+External host onboarding is intentionally deferred until the Checkmk Community core layer is validated.
 
-The target onboarding model is:
+Initial scope:
 
 ```text
-Zabbix agent -> operational state
-Vector agent -> logs
-OpenObserve -> RCA search
+platforminit-dev-01
+Checkmk Community UI
+Authentik trusted-header SSO wrapper
+single persistent data path: /srv/observability/data/checkmk
 ```
 
-No standing sudo should be required for runtime agents.
+Next scope:
+
+```text
+install/register Checkmk agent on platforminit-dev-01
+add host/service discovery
+add HTTP/TCP checks for Kubernetes, Argo CD, Authentik and Checkmk itself
+```

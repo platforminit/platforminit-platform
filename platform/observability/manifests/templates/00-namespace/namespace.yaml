@@ -3,5 +3,6 @@ kind: Namespace
 metadata:
   name: operations
   labels:
+    app.kubernetes.io/name: operations
     app.kubernetes.io/part-of: platforminit
     platforminit.io/chapter: ch05

@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkmk-nginx-auth-shim
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: checkmk
+    app.kubernetes.io/part-of: platforminit-operations
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      server_tokens off;
+
+      location /healthz {
+        access_log off;
+        return 200 "ok\n";
+      }
+
+      location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+
+        # Authentik forwardAuth returns X-authentik-* headers. Checkmk Raw/Community
+        # consumes X-Remote-User when incoming HTTP header authentication is enabled.
+        proxy_set_header X-Remote-User $http_x_authentik_username;
+        proxy_set_header X-Remote-Name $http_x_authentik_name;
+        proxy_set_header X-Remote-Email $http_x_authentik_email;
+        proxy_set_header X-Remote-Groups $http_x_authentik_groups;
+      }
+    }

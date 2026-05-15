@@ -9,7 +9,7 @@ metadata:
     platforminit.io/chapter: ch05
     platforminit.io/gitops-mode: owner
   annotations:
-    platforminit.io/description: "Argo CD-owned PlatformInit operations stack: Zabbix, OpenObserve and Vector."
+    platforminit.io/description: "Argo CD-owned PlatformInit operations stack: Checkmk Community with Authentik trusted-header SSO."
 spec:
   project: operations
   source:
