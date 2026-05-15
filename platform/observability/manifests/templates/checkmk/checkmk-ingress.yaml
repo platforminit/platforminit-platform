@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: authentik-embedded-outpost
+  name: authentik-forward-auth
   namespace: operations
   labels:
     app.kubernetes.io/name: checkmk
@@ -24,7 +24,7 @@ metadata:
     app.kubernetes.io/part-of: platforminit-operations
 spec:
   forwardAuth:
-    address: "http://authentik-embedded-outpost.operations.svc.cluster.local:{{ .Values.authentik.embeddedOutpostPort }}/outpost.goauthentik.io/auth/traefik"
+    address: "http://authentik-forward-auth.operations.svc.cluster.local:{{ .Values.authentik.embeddedOutpostPort }}/outpost.goauthentik.io/auth/traefik"
     trustForwardHeader: true
     authResponseHeaders:
       - X-authentik-username
@@ -73,7 +73,7 @@ spec:
       priority: 20
       services:
         - kind: Service
-          name: authentik-embedded-outpost
+          name: authentik-forward-auth
           port: {{ .Values.authentik.embeddedOutpostPort }}
     - kind: Rule
       match: "Host(`checkmk.{{ .Values.baseDomain }}`)"

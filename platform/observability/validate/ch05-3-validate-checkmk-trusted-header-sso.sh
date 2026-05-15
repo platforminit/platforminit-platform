@@ -11,16 +11,16 @@ kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth
 kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk >/dev/null || die "Missing Checkmk IngressRoute"
 kubectl -n "$NAMESPACE" get secret checkmk-sso >/dev/null || die "Missing checkmk-sso secret"
 
-kubectl -n "$NAMESPACE" get service authentik-embedded-outpost >/dev/null || die "Missing operations-local ExternalName service for Authentik embedded outpost"
-external_name="$(kubectl -n "$NAMESPACE" get service authentik-embedded-outpost -o jsonpath='{.spec.externalName}')"
+kubectl -n "$NAMESPACE" get service authentik-forward-auth >/dev/null || die "Missing operations-local ExternalName service for Authentik forwardAuth"
+external_name="$(kubectl -n "$NAMESPACE" get service authentik-forward-auth -o jsonpath='{.spec.externalName}')"
 case "$external_name" in
-  *ak-outpost-authentik-embedded-outpost*.*.svc.cluster.local) ;;
-  *) die "Unexpected Authentik outpost ExternalName: $external_name" ;;
+  authentik-server.*.svc.cluster.local) ;;
+  *) die "Unexpected Authentik forwardAuth ExternalName: $external_name" ;;
 esac
 addr="$(kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth -o jsonpath='{.spec.forwardAuth.address}')"
 case "$addr" in
-  *outpost.goauthentik.io/auth/traefik*) ;;
-  *) die "Checkmk middleware does not point to Authentik Traefik forwardAuth endpoint: $addr" ;;
+  *authentik-forward-auth.operations.svc.cluster.local*/outpost.goauthentik.io/auth/traefik*) ;;
+  *) die "Checkmk middleware does not point to the operations-local Authentik forwardAuth endpoint: $addr" ;;
 esac
 kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml | grep -q 'checkmk-authentik-forward-auth' || die "Checkmk IngressRoute is not protected by Authentik middleware"
 kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth -o yaml | grep -qi 'X-authentik-username' || die "Checkmk forwardAuth middleware does not forward X-authentik-username"
@@ -33,6 +33,14 @@ if ! printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote
   printf '%s\n' "$shim_conf" >&2
   die "Checkmk auth shim does not map approved Authentik sessions to deterministic Checkmk user cmkadmin"
 fi
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_pass_request_headers[[:space:]]+off;' \
+  || die "Checkmk auth shim still forwards all browser/Authentik headers"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+"";' \
+  || die "Checkmk auth shim does not clear stale browser cookies"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Authorization[[:space:]]+"";' \
+  || die "Checkmk auth shim does not clear browser Authorization headers"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Forwarded-Proto[[:space:]]+https;' \
+  || die "Checkmk auth shim does not force HTTPS scheme for the upstream Checkmk GUI"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Original-User[[:space:]]+\$http_x_authentik_username;' \
   || die "Checkmk auth shim does not preserve original Authentik username"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Email[[:space:]]+\$http_x_authentik_email;' \

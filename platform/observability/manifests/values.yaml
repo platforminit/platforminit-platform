@@ -23,5 +23,8 @@ checkmk:
 
 authentik:
   namespace: identity
-  embeddedOutpostService: ak-outpost-authentik-embedded-outpost
-  embeddedOutpostPort: 9000
+  # The embedded outpost is served by authentik-server in this CH04.5 deployment.
+  # Do not point CH05 at ak-outpost-authentik-embedded-outpost unless a separate
+  # outpost Service actually exists in the identity namespace.
+  embeddedOutpostService: authentik-server
+  embeddedOutpostPort: 80

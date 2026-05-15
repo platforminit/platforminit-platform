@@ -358,7 +358,7 @@ omd restart "$SITE" >/tmp/platforminit-checkmk-header-auth-restart.log 2>&1 || {
 }
 CHECKMK_HEADER_AUTH
 
-log "Starting temporary Checkmk port-forward on 127.0.0.1:${CHECKMK_LOCAL_PORT}"
+log "Starting temporary Checkmk direct port-forward on 127.0.0.1:${CHECKMK_LOCAL_PORT}"
 kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_LOCAL_PORT}:5000" >/tmp/ch05-checkmk-port-forward.log 2>&1 &
 CHECKMK_PORT_FORWARD_PID="$!"
 for _ in $(seq 1 45); do
@@ -367,10 +367,28 @@ for _ in $(seq 1 45); do
   sleep 2
 done
 code="$(curl -fsS -H "${CHECKMK_REMOTE_USER_HEADER}: cmkadmin" -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
-[[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer through port-forward with trusted header; HTTP=${code}"; }
+[[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer through direct port-forward with trusted header; HTTP=${code}"; }
+kill "$CHECKMK_PORT_FORWARD_PID" >/dev/null 2>&1 || true
+CHECKMK_PORT_FORWARD_PID=""
 
 auth_conf="$(kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/${CHECKMK_SITE}/etc/check_mk/multisite.d/wato 2>/dev/null || true")"
 echo "$auth_conf" | grep -q "auth_by_http_header" || die "Checkmk trusted-header auth configuration was not persisted"
+
+log "Validating Checkmk auth-shim path through service port 80"
+kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_LOCAL_PORT}:80" >/tmp/ch05-checkmk-auth-shim-port-forward.log 2>&1 &
+CHECKMK_PORT_FORWARD_PID="$!"
+for _ in $(seq 1 45); do
+  shim_code="$(curl -fsS     -H "Host: checkmk.${BASE_DOMAIN}"     -H "X-authentik-username: platforminit-test"     -H "X-authentik-email: platforminit-test@${BASE_DOMAIN}"     -H "Cookie: auth_cmk=stale-test-cookie"     -o /tmp/ch05-checkmk-auth-shim.html     -w '%{http_code}'     "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
+  [[ "$shim_code" =~ ^(200|302|401|403)$ ]] && break
+  sleep 2
+done
+shim_code="$(curl -fsS   -H "Host: checkmk.${BASE_DOMAIN}"   -H "X-authentik-username: platforminit-test"   -H "X-authentik-email: platforminit-test@${BASE_DOMAIN}"   -H "Cookie: auth_cmk=stale-test-cookie"   -o /tmp/ch05-checkmk-auth-shim.html   -w '%{http_code}'   "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
+if [[ ! "$shim_code" =~ ^(200|302|401|403)$ ]]; then
+  cat /tmp/ch05-checkmk-auth-shim-port-forward.log >&2 || true
+  kubectl -n "$NAMESPACE" logs "$CHECKMK_POD" -c auth-shim --tail=120 >&2 || true
+  kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -lc 'tail -n 160 /omd/sites/cmk/var/log/web.log /omd/sites/cmk/var/log/apache/error_log 2>/dev/null || true' >&2 || true
+  die "Checkmk auth-shim path did not answer; HTTP=${shim_code}"
+fi
 
 kubectl -n "$NAMESPACE" create secret generic checkmk-sso \
   --from-literal=CHECKMK_SITE="$CHECKMK_SITE" \
