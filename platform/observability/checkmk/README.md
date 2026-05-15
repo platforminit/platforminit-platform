@@ -136,3 +136,18 @@ The Checkmk Community trusted-header SSO proof intentionally keeps the
 
 Because this ConfigMap is part of the Argo CD-owned runtime manifest, any change
 requires `05.2 - Sync Operations Stack` before `05.3` and `05.4` validation.
+
+## CH05.2 sync-only contract
+
+`05.2 - Sync Operations Stack` is intentionally limited to Argo CD synchronization and health convergence. It must not run the full `ch05-validate-operations-stack.sh` release gate, because public SSO and runtime validation are owned by `05.4 - Validate Operations Stack`.
+
+This separation keeps the lifecycle clear:
+
+```text
+05.2 = sync desired manifests and wait until operations-stack is Synced/Healthy
+05.3 = reconcile Checkmk trusted-header SSO API/runtime configuration
+05.4 = validate runtime or runtime_with_sso
+```
+
+If `05.2` fails, troubleshoot Argo CD sync/health only. Do not treat a browser/public SSO problem as a `05.2` concern.
+
