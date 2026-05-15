@@ -114,4 +114,30 @@ DETAIL: /srv/observability/data is above 80%
 
 ## Dashboard status
 
-`PlatformInit - Operations Overview` is intentionally not created as a full dashboard until the active host data baseline is stable. The first release gate is reliable active data for host, service and storage checks.
+`PlatformInit - Operations Overview` is created by `05.5` as the operator landing page.
+
+Important UX rule:
+
+```text
+Problems widgets are empty when the platform is healthy.
+That is expected and must not be interpreted as missing monitoring data.
+```
+
+To avoid an apparently empty dashboard during healthy periods, the dashboard starts with Item value status tiles for:
+
+```text
+Host
+SSH
+Kubernetes API
+Zabbix server
+OpenObserve
+Argo CD
+Authentik
+Memory available
+Root filesystem
+k3s runtime storage
+k3s PVC storage
+Observability data storage
+```
+
+The lower widgets remain problem-focused: current criticals, current warnings, storage problems, platform service problems and recent problems/changes.
