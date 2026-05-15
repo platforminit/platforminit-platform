@@ -211,11 +211,11 @@ log "Starting temporary Checkmk port-forward on 127.0.0.1:${CHECKMK_LOCAL_PORT}"
 kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_LOCAL_PORT}:5000" >/tmp/ch05-checkmk-port-forward.log 2>&1 &
 CHECKMK_PORT_FORWARD_PID="$!"
 for _ in $(seq 1 45); do
-  code="$(curl -sS -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" || true)"
+  code="$(curl -fsS -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
   [[ "$code" =~ ^(200|302|401|403)$ ]] && break
   sleep 2
 done
-code="$(curl -sS -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" || true)"
+code="$(curl -fsS -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
 [[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer through port-forward; HTTP=${code}"; }
 
 kubectl -n "$NAMESPACE" create secret generic checkmk-sso \
