@@ -28,8 +28,11 @@ kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth
 shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
 [[ -n "$shim_conf" ]] || die "Checkmk auth shim ConfigMap does not contain default.conf"
 
-printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;' \
-  || die "Checkmk auth shim does not map approved Authentik sessions to deterministic Checkmk user cmkadmin"
+if ! printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;'; then
+  printf '%s\n' "=== checkmk-nginx-auth-shim default.conf ===" >&2
+  printf '%s\n' "$shim_conf" >&2
+  die "Checkmk auth shim does not map approved Authentik sessions to deterministic Checkmk user cmkadmin"
+fi
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Original-User[[:space:]]+\$http_x_authentik_username;' \
   || die "Checkmk auth shim does not preserve original Authentik username"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Email[[:space:]]+\$http_x_authentik_email;' \
