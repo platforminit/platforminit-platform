@@ -175,48 +175,133 @@ def ensure_application(provider_pk):
         print('Created Authentik application platforminit-checkmk')
     return slug
 
-def ensure_outpost_application(slug):
+def ref_id(value):
+    if isinstance(value,str):
+        return value
+    if isinstance(value,dict):
+        for key in ('pk','id','uuid','slug','name'):
+            if value.get(key):
+                return str(value[key])
+    return None
+
+def ref_list(raw):
+    refs=[]
+    for item in raw or []:
+        rid=ref_id(item)
+        if rid and rid not in refs:
+            refs.append(rid)
+    return refs
+
+def find_proxy_outpost():
     outposts=paginated('/api/v3/outposts/instances/?page_size=100')
-    embedded=None
+    candidates=[]
     for o in outposts:
         name=str(o.get('name','')).lower()
+        typ=str(o.get('type','')).lower()
         if 'embedded' in name:
-            embedded=o; break
-    if not embedded:
-        print('WARN: no embedded outpost found through API; attach PlatformInit Checkmk to an Authentik proxy outpost if forward auth says no app for hostname.', file=sys.stderr)
+            return o
+        if typ == 'proxy' or 'proxy' in name:
+            candidates.append(o)
+    if candidates:
+        return candidates[0]
+    return outposts[0] if outposts else None
+
+def verify_outpost_assignment(outpost_pk, provider_pk, slug):
+    detail=request('GET',f"/api/v3/outposts/instances/{outpost_pk}/")
+    providers=ref_list(detail.get('providers'))
+    applications=ref_list(detail.get('applications'))
+    used = provider_pk in providers or slug in applications
+    return used, providers, applications
+
+def patch_outpost_field(outpost_pk, field, refs, wanted):
+    if wanted in refs:
+        return True
+    payload={field: refs + [wanted]}
+    request('PATCH',f"/api/v3/outposts/instances/{outpost_pk}/",payload)
+    return True
+
+def ensure_outpost_provider(provider_pk, slug):
+    # Authentik admin UI warning "Provider is not used by any Outpost" is cleared
+    # only when the proxy provider itself is assigned to a proxy outpost. Older
+    # repo logic patched the application slug only, which can print success while
+    # still leaving the provider detached from the embedded outpost.
+    outpost=find_proxy_outpost()
+    if not outpost:
+        raise RuntimeError('No Authentik outpost found; create/enable the embedded proxy outpost before Checkmk forwardAuth can work')
+    outpost_pk=outpost['pk']
+    used, providers, applications = verify_outpost_assignment(outpost_pk, provider_pk, slug)
+    if used:
+        print(f"Provider/application already attached to Authentik outpost {outpost.get('name', outpost_pk)}")
         return
-    detail=request('GET',f"/api/v3/outposts/instances/{embedded['pk']}/")
-    apps=detail.get('applications') or []
-    refs=[]
-    for a in apps:
-        if isinstance(a,str): refs.append(a)
-        elif isinstance(a,dict): refs.append(a.get('slug') or a.get('pk') or a.get('name'))
-    if slug not in refs:
+
+    errors=[]
+    for field, refs, wanted in (
+        ('providers', providers, provider_pk),
+        ('applications', applications, slug),
+    ):
         try:
-            request('PATCH',f"/api/v3/outposts/instances/{embedded['pk']}/",{"applications":refs+[slug]})
-            print(f"Attached {slug} to embedded Authentik outpost")
+            patch_outpost_field(outpost_pk, field, refs, wanted)
+            used, providers, applications = verify_outpost_assignment(outpost_pk, provider_pk, slug)
+            if used:
+                print(f"Attached PlatformInit Checkmk provider to Authentik outpost {outpost.get('name', outpost_pk)} via {field}")
+                return
         except Exception as exc:
-            print(f"WARN: could not attach {slug} to embedded outpost via API: {exc}. Attach it manually if forward auth returns 'no app for hostname'.", file=sys.stderr)
+            errors.append(f"{field}: {exc}")
+
+    used, providers, applications = verify_outpost_assignment(outpost_pk, provider_pk, slug)
+    if not used:
+        raise RuntimeError(
+            'Could not attach PlatformInit Checkmk provider/application to Authentik outpost. '
+            f'outpost={outpost.get("name", outpost_pk)} provider_pk={provider_pk} slug={slug} '
+            f'providers={providers} applications={applications} errors={errors}'
+        )
 
 request('GET','/api/v3/core/users/me/')
 ops_group=ensure_group('PlatformInit Operations')
 ensure_user_in_group(admin_username, ops_group)
 provider=ensure_proxy_provider()
 slug=ensure_application(provider)
-ensure_outpost_application(slug)
+ensure_outpost_provider(provider, slug)
 print('Checkmk Authentik forward-auth contract reconciled')
 PY_AUTHENTIK
+
+log "Enabling Checkmk trusted-header authentication for ${CHECKMK_REMOTE_USER_HEADER}"
+CHECKMK_POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$CHECKMK_POD" ]] || die "Could not resolve Checkmk pod"
+
+kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -s -- "$CHECKMK_REMOTE_USER_HEADER" <<'CHECKMK_HEADER_AUTH'
+set -euo pipefail
+HEADER="$1"
+SITE="cmk"
+CONF_DIR="/omd/sites/${SITE}/etc/check_mk/multisite.d/wato"
+CONF_FILE="${CONF_DIR}/platforminit_header_auth.mk"
+mkdir -p "$CONF_DIR"
+cat > "$CONF_FILE" <<EOF
+# Managed by PlatformInit CH05.3.
+# Checkmk Raw/Community trusted-header SSO bridge behind Authentik + Traefik.
+auth_by_http_header = '${HEADER}'
+EOF
+chown "${SITE}:${SITE}" "$CONF_FILE" 2>/dev/null || true
+chmod 0644 "$CONF_FILE"
+omd restart "$SITE" >/tmp/platforminit-checkmk-header-auth-restart.log 2>&1 || {
+  cat /tmp/platforminit-checkmk-header-auth-restart.log >&2 || true
+  exit 1
+}
+CHECKMK_HEADER_AUTH
 
 log "Starting temporary Checkmk port-forward on 127.0.0.1:${CHECKMK_LOCAL_PORT}"
 kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_LOCAL_PORT}:5000" >/tmp/ch05-checkmk-port-forward.log 2>&1 &
 CHECKMK_PORT_FORWARD_PID="$!"
 for _ in $(seq 1 45); do
-  code="$(curl -fsS -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
+  code="$(curl -fsS -H "${CHECKMK_REMOTE_USER_HEADER}: cmkadmin" -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
   [[ "$code" =~ ^(200|302|401|403)$ ]] && break
   sleep 2
 done
-code="$(curl -fsS -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
-[[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer through port-forward; HTTP=${code}"; }
+code="$(curl -fsS -H "${CHECKMK_REMOTE_USER_HEADER}: cmkadmin" -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
+[[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer through port-forward with trusted header; HTTP=${code}"; }
+
+auth_conf="$(kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/${CHECKMK_SITE}/etc/check_mk/multisite.d/wato 2>/dev/null || true")"
+echo "$auth_conf" | grep -q "auth_by_http_header" || die "Checkmk trusted-header auth configuration was not persisted"
 
 kubectl -n "$NAMESPACE" create secret generic checkmk-sso \
   --from-literal=CHECKMK_SITE="$CHECKMK_SITE" \

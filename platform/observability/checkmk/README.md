@@ -25,3 +25,41 @@ The first Checkmk patch creates the runtime, storage, ingress, Authentik forward
 The Authentik proxy provider reconciliation must set `invalidation_flow=default-provider-invalidation-flow`; otherwise Authentik rejects `/api/v3/providers/proxy/` create/update requests with HTTP 400.
 
 Host/service discovery and custom Checkmk rules are the next bounded task.
+
+## Trusted-header SSO contract
+
+Checkmk Raw/Community is protected by Authentik at the Traefik layer. The nginx auth-shim forwards only Authentik-approved requests to Checkmk.
+
+Initial CH05 behaviour is intentionally deterministic:
+
+```text
+Authentik-approved operator
+  -> nginx auth-shim
+  -> X-Remote-User: cmkadmin
+  -> Checkmk local admin user
+```
+
+The original Authentik username is preserved as `X-Remote-Original-User` for diagnostics, but it is not yet used as the Checkmk login principal. This avoids HTTP 500 / unknown-user failures before per-user Checkmk account provisioning exists.
+
+CH05.3 also writes the Checkmk site-level config:
+
+```python
+auth_by_http_header = 'X-Remote-User'
+```
+
+Future hardening can replace the deterministic `cmkadmin` mapping with explicit Checkmk local user provisioning and group/role mapping.
+
+## Authentik outpost assignment
+
+The Checkmk proxy provider must be assigned to an Authentik proxy outpost. If the
+Authentik admin UI shows:
+
+```text
+Warning: Provider is not used by any Outpost.
+```
+
+then the provider exists, but the outpost does not serve it yet. CH05.3 therefore
+reconciles the outpost assignment through the provider-level `providers` field
+first and only falls back to the legacy/application-style assignment if required.
+This is intentionally fail-fast because Traefik forwardAuth cannot authenticate
+`checkmk.<base-domain>` until the outpost owns the provider.

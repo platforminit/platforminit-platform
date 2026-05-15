@@ -28,11 +28,18 @@ kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth
 shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
 [[ -n "$shim_conf" ]] || die "Checkmk auth shim ConfigMap does not contain default.conf"
 
-printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+\$http_x_authentik_username;' \
-  || die "Checkmk auth shim does not map Authentik username to X-Remote-User"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;' \
+  || die "Checkmk auth shim does not map approved Authentik sessions to deterministic Checkmk user cmkadmin"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Original-User[[:space:]]+\$http_x_authentik_username;' \
+  || die "Checkmk auth shim does not preserve original Authentik username"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Email[[:space:]]+\$http_x_authentik_email;' \
   || die "Checkmk auth shim does not map Authentik email header"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Groups[[:space:]]+\$http_x_authentik_groups;' \
   || die "Checkmk auth shim does not map Authentik groups header"
+
+checkmk_pod="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$checkmk_pod" ]] || die "Could not resolve Checkmk pod"
+checkmk_auth_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/cmk/etc/check_mk/multisite.d/wato 2>/dev/null || true")"
+echo "$checkmk_auth_conf" | grep -q "X-Remote-User" || die "Checkmk site is not configured for X-Remote-User trusted-header authentication"
 
 echo "PASS: Checkmk trusted-header SSO Kubernetes contract exists"
