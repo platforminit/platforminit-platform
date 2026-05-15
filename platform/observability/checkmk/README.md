@@ -63,3 +63,14 @@ reconciles the outpost assignment through the provider-level `providers` field
 first and only falls back to the legacy/application-style assignment if required.
 This is intentionally fail-fast because Traefik forwardAuth cannot authenticate
 `checkmk.<base-domain>` until the outpost owns the provider.
+
+### Authentik embedded outpost API note
+
+CH05.3 uses the outpost `providers` integer list as the source of truth for
+forward-auth ownership. Some Authentik versions do not reliably persist or
+immediately reflect a partial `PATCH` to the embedded outpost. The reconciler
+therefore tries a minimal `PATCH` first, then falls back to a full `PUT` using the
+complete OutpostRequest shape (`name`, `type`, `providers`, `service_connection`,
+`config`). It also verifies the assignment through the `providers_by_pk` list
+filter so the UI warning `Provider is not used by any Outpost` is treated as a
+hard failure until the proxy provider is really attached.
