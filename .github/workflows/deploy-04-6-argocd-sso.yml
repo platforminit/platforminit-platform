@@ -67,7 +67,7 @@ jobs:
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       duration_minutes: '20'
-      mode: identity-sso
+      mode: identity
 
   deploy:
     needs: grant
@@ -131,7 +131,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/ch04-6-remote.sh <<'EOS'
+          cat > /tmp/ch06-remote.sh <<'EOS'
           #!/usr/bin/env bash
           set -euo pipefail
 
@@ -150,7 +150,7 @@ jobs:
           AUTHENTIK_ARGOCD_ADMIN_USERNAME="$6"
           OWNER_USER="$7"
 
-          [[ "${EUID}" -eq 0 ]] || { echo "ch04-6-remote.sh must run as root" >&2; exit 1; }
+          [[ "${EUID}" -eq 0 ]] || { echo "ch06-remote.sh compatibility entrypoint must run as root" >&2; exit 1; }
 
           if [[ -f /etc/platforminit/host-context.env ]]; then
             # shellcheck disable=SC1091
@@ -236,7 +236,7 @@ jobs:
             *) usage ;;
           esac
           EOS
-          chmod +x /tmp/ch04-6-remote.sh
+          chmod +x /tmp/ch06-remote.sh
 
       - name: Upload and launch Argo CD SSO enablement
         env:
@@ -254,11 +254,11 @@ jobs:
 
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-argocd-sso/${SHORTSHA} /tmp/platforminit-run"
           scp -i ~/.ssh/id_ed25519 "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-argocd-sso/${SHORTSHA}/identity-release.tar.gz"
-          scp -i ~/.ssh/id_ed25519 /tmp/ch04-6-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch04-6-remote.sh"
+          scp -i ~/.ssh/id_ed25519 /tmp/ch06-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch06-remote.sh"
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/id_ed25519 "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
-            chmod +x /tmp/platforminit-run/ch04-6-remote.sh
-            sudo -n /tmp/platforminit-run/ch04-6-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${ARGOCD_OIDC_PROVIDER_SLUG}' '${ARGOCD_ADMIN_GROUP}' '${AUTHENTIK_ARGOCD_ADMIN_USERNAME}' '${HOST_LOGIN_USER}'
+            chmod +x /tmp/platforminit-run/ch06-remote.sh
+            sudo -n /tmp/platforminit-run/ch06-remote.sh launch '${SHORTSHA}' '${PLATFORM_BASE_DOMAIN}' '${ARGOCD_OIDC_PROVIDER_SLUG}' '${ARGOCD_ADMIN_GROUP}' '${AUTHENTIK_ARGOCD_ADMIN_USERNAME}' '${HOST_LOGIN_USER}'
           "
           echo "Remote Argo CD SSO enablement launched."
 

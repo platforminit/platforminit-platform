@@ -55,12 +55,25 @@ scope_sudoers_content() {
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch05-remote.sh *
 ' "$USER_NAME"
       ;;
+    identity)
+      # Compatibility scope for existing CH04.6 Argo CD SSO workflows.
+      # Older hosts know this scope as the former CH06 identity entrypoint; keep
+      # both command paths valid during the CH04.6 rename window.
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch06-remote.sh *
+' "$USER_NAME"
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch04-6-remote.sh *
+' "$USER_NAME"
+      ;;
     identity-foundation)
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch04-5-remote.sh *
 ' "$USER_NAME"
       ;;
     identity-sso)
+      # New semantic alias for CH04.6. Keep ch06-remote.sh until all live hosts
+      # have refreshed grant tooling from the host baseline.
       printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch04-6-remote.sh *
+' "$USER_NAME"
+      printf '%s ALL=(root) NOPASSWD: /tmp/platforminit-run/ch06-remote.sh *
 ' "$USER_NAME"
       ;;
     interactive-elevation)
