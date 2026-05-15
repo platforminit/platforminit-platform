@@ -61,7 +61,10 @@ image: public.ecr.aws/zinclabs/openobserve-enterprise:v0.80.3
 public URL: https://logs.<PLATFORM_BASE_DOMAIN>
 redirect URL: https://logs.<PLATFORM_BASE_DOMAIN>/config/redirect
 callback URL: https://logs.<PLATFORM_BASE_DOMAIN>/web/cb
-issuer/base URL: https://auth.<PLATFORM_BASE_DOMAIN>/application/o/platforminit-openobserve/
+base URL: https://auth.<PLATFORM_BASE_DOMAIN>
+authorize suffix: /application/o/authorize/
+token suffix: /application/o/token/
+jwks suffix: /application/o/platforminit-openobserve/jwks/
 ```
 
 The runtime deployment is GitOps-owned. SSO secret reconciliation must not restart or wait on the OpenObserve deployment.

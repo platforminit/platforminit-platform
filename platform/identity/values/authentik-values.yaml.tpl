@@ -1,4 +1,4 @@
-# CH06 Authentik baseline values.
+# CH04.5 Authentik core values.
 # Secrets are read from Kubernetes Secrets mounted into server/worker pods.
 # This file intentionally contains no real secret values.
 

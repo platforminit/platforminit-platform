@@ -1,6 +1,6 @@
 # CH04.5 - Identity Foundation
 
-CH04.5 introduces the PlatformInit identity foundation based on Authentik. The legacy CH06 workflow is retained only for compatibility.
+CH04.5 introduces the PlatformInit identity foundation based on Authentik. The identity runtime is owned by CH04.5. Old CH06 compatibility files have been removed from the normal lifecycle.
 
 ## Scope
 
