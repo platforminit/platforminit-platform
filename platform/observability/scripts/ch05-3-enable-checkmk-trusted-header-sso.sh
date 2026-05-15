@@ -335,7 +335,7 @@ log "Enabling Checkmk trusted-header authentication for ${CHECKMK_REMOTE_USER_HE
 CHECKMK_POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$CHECKMK_POD" ]] || die "Could not resolve Checkmk pod"
 
-kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -s -- "$CHECKMK_REMOTE_USER_HEADER" <<'CHECKMK_HEADER_AUTH'
+kubectl -n "$NAMESPACE" exec -i "$CHECKMK_POD" -c checkmk -- bash -s -- "$CHECKMK_REMOTE_USER_HEADER" <<'CHECKMK_HEADER_AUTH'
 set -euo pipefail
 HEADER="$1"
 SITE="cmk"

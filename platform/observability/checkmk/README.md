@@ -74,3 +74,11 @@ complete OutpostRequest shape (`name`, `type`, `providers`, `service_connection`
 `config`). It also verifies the assignment through the `providers_by_pk` list
 filter so the UI warning `Provider is not used by any Outpost` is treated as a
 hard failure until the proxy provider is really attached.
+
+### CH05.3 trusted-header config persistence note
+
+The CH05.3 workflow writes `auth_by_http_header = 'X-Remote-User'` into the
+Checkmk site from a heredoc executed with `kubectl exec -i`. The `-i` flag is
+required because otherwise `bash -s` receives no stdin, exits successfully, and
+no configuration file is written. The validator checks the resulting
+`platforminit_header_auth.mk` content inside the running Checkmk pod.
