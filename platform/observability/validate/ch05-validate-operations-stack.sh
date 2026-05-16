@@ -76,6 +76,8 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+"";' || die "Checkmk auth-shim does not clear stale browser cookies"
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Forwarded-Proto[[:space:]]+https;' || die "Checkmk auth-shim does not preserve the public HTTPS scheme"
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;' || die "Checkmk auth-shim does not map approved sessions to cmkadmin"
+  echo "$shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' || die "Checkmk auth-shim does not intercept native logout"
+  echo "$shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' || die "Checkmk logout does not redirect to Authentik sign_out"
 
   log "Validating Checkmk auth-shim runtime path through service port 80"
   kill "$PF" >/dev/null 2>&1 || true

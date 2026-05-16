@@ -48,6 +48,11 @@ printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Emai
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-Groups[[:space:]]+\$http_x_authentik_groups;' \
   || die "Checkmk auth shim does not map Authentik groups header"
 
+printf '%s\n' "$shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' \
+  || die "Checkmk auth shim does not intercept the native Checkmk logout endpoint"
+printf '%s\n' "$shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' \
+  || die "Checkmk logout is not redirected to the Authentik proxy sign_out endpoint"
+
 checkmk_pod="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$checkmk_pod" ]] || die "Could not resolve Checkmk pod"
 checkmk_auth_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/cmk/etc/check_mk/multisite.d/wato 2>/dev/null || true")"

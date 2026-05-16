@@ -17,6 +17,18 @@ data:
         return 200 "ok\n";
       }
 
+      # Checkmk's native logout endpoint only terminates the local Checkmk
+      # session. In a trusted-header SSO setup the browser must be handed back to
+      # the Authentik proxy provider logout endpoint instead, otherwise users can
+      # land on a raw Checkmk 401 page after clicking Log out.
+      location = /cmk/check_mk/logout.py {
+        return 302 /outpost.goauthentik.io/sign_out;
+      }
+
+      location = /cmk/logout.py {
+        return 302 /outpost.goauthentik.io/sign_out;
+      }
+
       location / {
         # Keep the Checkmk upstream request intentionally small and deterministic.
         # The browser may carry stale Checkmk auth_* cookies from previous native-login
