@@ -70,7 +70,7 @@ jobs:
       server_id_override: ${{ inputs.server_id_override }}
       host_ipv4_override: ${{ inputs.host_ipv4_override }}
       target_user: ${{ inputs.target_user || 'devops' }}
-      duration_minutes: '10'
+      duration_minutes: '30'
       mode: observability
 
   deploy:
@@ -140,6 +140,21 @@ jobs:
           done
           echo "FATAL: could not collect SSH host key for $host" >&2
           exit 1
+
+      - name: Refresh temporary CH05 sudo grant
+        env:
+          HOST: ${{ steps.server.outputs.public_ip }}
+          TARGET_USER: ${{ inputs.target_user || 'devops' }}
+          DURATION_MINUTES: '30'
+          SCOPE: observability
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i ~/.ssh/id_ed25519 itadmin@"$HOST" \
+            "sudo -n /usr/local/sbin/platforminit-grant-sudo '$TARGET_USER' '$DURATION_MINUTES' '$SCOPE' '$RUN_ID'"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i ~/.ssh/id_ed25519 "$TARGET_USER@$HOST" \
+            "sudo -n -l | grep -F '/tmp/platforminit-run/ch05-remote.sh' >/dev/null"
 
       - name: Render remote CH05 privileged entrypoint
         shell: bash
@@ -264,6 +279,7 @@ jobs:
             printf 'PLATFORM_HOST=%q\n' "${PLATFORM_HOST:-platforminit-dev-01}"
             printf 'CHECKMK_AGENT_PORT=%q\n' "${CHECKMK_AGENT_PORT:-6556}"
             printf 'CHECKMK_AGENT_ALLOW_CIDRS=%q\n' "${CHECKMK_AGENT_ALLOW_CIDRS:-}"
+            printf 'RUN_DISCOVERY_PROBE=%q\n' "${RUN_DISCOVERY_PROBE:-false}"
           } > ./ch05.env
           retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "
