@@ -64,12 +64,12 @@ Checkmk must have **Authenticate users by incoming HTTP requests** enabled for f
 
 ## Operator UX contract
 
-CH05.5 creates the visible host/service model. CH05.6 configures the operator start experience so the Checkmk UI opens on the PlatformInit services-of-host state view instead of the default onboarding page or an empty dashboard selector.
+CH05.5 creates the visible host/service model. CH05.6 configures the operator start experience so the Checkmk UI opens on the PlatformInit all-hosts state view instead of the default onboarding page or an empty dashboard selector.
 
 Current CH05.6 entrypoint:
 
 ```text
-view.py?view_name=service&host=platforminit-dev-01
+view.py?view_name=allhosts
 ```
 
 CH05.7 should install and register the Checkmk agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery.

@@ -22,15 +22,15 @@ set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
 SITE_ROOT="/omd/sites/${SITE}"
-START_URL="view.py?view_name=service&host=${PLATFORM_HOST}"
+START_URL="view.py?view_name=allhosts"
 HOST_STATUS_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
 ALL_HOSTS_URL="view.py?view_name=allhosts"
-INDEX_START_URL="check_mk/index.py?start_url=view.py%3Fview_name%3Dservice%26host%3D${PLATFORM_HOST}"
+INDEX_START_URL="check_mk/index.py?start_url=view.py%3Fview_name%3Dallhosts"
 
 # CH05.6 is deliberately conservative: Checkmk Raw/Community already provides
 # useful host/service state views. The first PlatformInit operator landing page
-# must show the service list directly, not an empty dashboard selector and not
-# the graph-heavy hoststatus page.
+# must show the stable all-hosts state board directly, not an empty dashboard
+# selector and not a Checkmk detail view that requires additional context fields.
 test -d "${SITE_ROOT}/etc/check_mk/multisite.d/wato"
 test -d "${SITE_ROOT}/var/check_mk/web/cmkadmin"
 
@@ -56,7 +56,7 @@ fi
 
 cat > "${SITE_ROOT}/etc/check_mk/multisite.d/wato/platforminit_operations_ui.mk" <<PLATFORMINIT_UI
 # Managed by PlatformInit CH05.6.
-# Make the PlatformInit services-of-host view the deterministic operator start page.
+# Make the stable Checkmk all-hosts view the deterministic operator start page.
 # The URL is intentionally a Checkmk-native view rather than a fragile custom dashboard object.
 start_url = '${START_URL}'
 PLATFORMINIT_UI
@@ -74,7 +74,7 @@ Primary operator entrypoint:
   /${SITE}/check_mk/${INDEX_START_URL}
 
 Useful Checkmk-native views:
-  PlatformInit service list:
+  All hosts state board:
     /${SITE}/check_mk/${START_URL}
   PlatformInit host status:
     /${SITE}/check_mk/${HOST_STATUS_URL}
@@ -92,9 +92,10 @@ Current CH05.6 success contract:
 
 Rationale:
   The Checkmk dashboard page can be empty in Community/Raw until a dashboard is
-  selected or created interactively. PlatformInit therefore lands operators on
-  the concrete service list for the host, which already exposes the UP/OK/WARN/CRIT
-  state model.
+  selected or created interactively. The Checkmk service detail view requires a
+  service context and crashes if it is used with only a host filter. PlatformInit
+  therefore lands operators on the stable all-hosts state board, which exposes
+  the UP host and OK/WARN/CRIT service counters without fragile URL context.
 
 CH05.7 should add the Checkmk agent so this view becomes full host metrics/service discovery instead of synthetic active checks only.
 PLATFORMINIT_LINKS
@@ -110,7 +111,7 @@ omd restart "${SITE}" >/dev/null
 # Smoke the configured operator view through the local Checkmk frontend.
 for attempt in 1 2 3 4 5 6; do
   code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o /tmp/platforminit-operations-view.html -w '%{http_code}' \
-    "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=hoststatus&host=${PLATFORM_HOST}" || true)"
+    "http://127.0.0.1:5000/${SITE}/check_mk/${START_URL}" || true)"
   case "${code}" in
     200|302|303) break ;;
   esac
@@ -119,7 +120,7 @@ done
 case "${code}" in
   200|302|303) ;;
   *)
-    echo "FATAL: PlatformInit Checkmk operator service-list view did not respond successfully, HTTP=${code}" >&2
+    echo "FATAL: PlatformInit Checkmk all-hosts operator view did not respond successfully, HTTP=${code}" >&2
     head -n 80 /tmp/platforminit-operations-view.html >&2 || true
     exit 1
     ;;
@@ -130,4 +131,4 @@ echo "PASS: PlatformInit Checkmk operator view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} has ${service_count} generated services"
 CHECKMK_DASHBOARD
 
-log "Checkmk operations service-list entrypoint provisioned"
+log "Checkmk operations all-hosts entrypoint provisioned"
