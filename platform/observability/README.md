@@ -7,7 +7,7 @@ PlatformInit CH05 now uses a minimal Checkmk Community based monitoring layer.
 ```text
 Checkmk Community  -> host/service/state operator console
 Authentik          -> SSO gate via Traefik forwardAuth
-Nginx auth-shim    -> maps X-authentik-username to X-Remote-User
+Nginx auth-shim    -> maps approved Authentik sessions to X-Remote-User
 Argo CD            -> owns runtime deployment
 ```
 
@@ -29,6 +29,7 @@ The retired Zabbix / Vector / OpenObserve implementation has been purged from th
 05.3 - Enable Checkmk Trusted-Header SSO
 05.4 - Validate Operations Stack
 05.5 - Provision Checkmk Operations Model
+05.6 - Provision Checkmk Operations Dashboard
 05.4 - Validate Operations Stack
 ```
 
@@ -48,13 +49,27 @@ The generic k3s runtime paths remain unchanged:
 
 ## SSO contract
 
-Checkmk Community/Raw is protected through Authentik forwardAuth. Authentik returns `X-authentik-*` headers. The in-pod auth shim translates these into:
+Checkmk Community/Raw is protected through Authentik forwardAuth. Authentik returns `X-authentik-*` headers. The in-pod auth shim maps approved sessions to the deterministic Checkmk local user for the first Community/Raw SSO proof:
 
 ```text
-X-Remote-User
-X-Remote-Name
-X-Remote-Email
-X-Remote-Groups
+X-Remote-User: cmkadmin
+X-Remote-Original-User: <authentik username>
+X-Remote-Name: <authentik display name>
+X-Remote-Email: <authentik email>
+X-Remote-Groups: <authentik groups>
 ```
 
 Checkmk must have **Authenticate users by incoming HTTP requests** enabled for full trusted-header login. The first implementation keeps local `cmkadmin` as break-glass.
+
+
+## Operator UX contract
+
+CH05.5 creates the visible host/service model. CH05.6 configures the operator start experience so the Checkmk UI opens on the PlatformInit host/service state view instead of the default onboarding page.
+
+Current CH05.6 entrypoint:
+
+```text
+view.py?view_name=hoststatus&host=platforminit-dev-01
+```
+
+CH05.7 should install and register the Checkmk agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery.
