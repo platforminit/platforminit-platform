@@ -270,11 +270,17 @@ grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
 }
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/host-diagnostics.txt" 2>&1 || true
+if grep -Eiq 'Type of agent:[[:space:]]*(PING only|No agent)|no Checkmk agent|No API integrations, no Checkmk agent' "${TMP_DIR}/host-diagnostics.txt"; then
+  echo "FATAL: Checkmk host ${PLATFORM_HOST} is still configured as ping/no-agent; run the fixed CH05.5 host model first" >&2
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  exit 1
+fi
 
 # `cmk -I` is the documented CLI path for service discovery. The --cache flag
 # makes Checkmk use the freshly written cache entry for PLATFORM_HOST instead of
 # trying to resolve/contact the host name again.
-run_site_cmd cmk-discovery "cmk --cache -vI '${PLATFORM_HOST}'"
+run_site_cmd cmk-discovery "cmk --cache --detect-plugins=df,lnx_if,mem,uptime,cpu_load,check_mk -vI '${PLATFORM_HOST}'"
 
 if ! run_site_cmd_warn cmk-reload-after-discovery "cmk -R"; then
   echo "WARN: cmk -R failed after discovery; trying cmk -O as reload fallback" >&2
@@ -299,17 +305,29 @@ service_count="$(awk -v host="${PLATFORM_HOST}" '
 if [[ "${service_count}" -lt 15 ]]; then
   echo "FATAL: expected native agent discovery to increase ${PLATFORM_HOST} service count to at least 15, got ${service_count}" >&2
   grep -A5 -B2 -E "host_name[[:space:]]+${PLATFORM_HOST}|service_description" "${TMP_DIR}/nagios.cfg" | head -n 200 >&2 || true
-  echo "--- discovery output ---" >&2
-  head -n 200 "${TMP_DIR}/cmk-discovery.out" >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  echo "--- discovery stdout ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-discovery.out" >&2 || true
+  echo "--- discovery stderr ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-discovery.err" >&2 || true
+  echo "--- autochecks ---" >&2
+  find "${SITE_ROOT}/var/check_mk/autochecks" -maxdepth 2 -type f -name "${PLATFORM_HOST}.mk" -print -exec sed -n '1,220p' {} \; >&2 || true
   exit 1
 fi
 
-native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP|Check_MK|Disk IO)' "${TMP_DIR}/nagios.cfg" || true)"
+native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP|Check_MK|Disk IO|Memory and swap|Filesystem /)' "${TMP_DIR}/nagios.cfg" || true)"
 if [[ "${native_hits}" -lt 3 ]]; then
   echo "FATAL: expected at least 3 native Linux agent services in generated Checkmk config, got ${native_hits}" >&2
   grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 160 >&2 || true
-  echo "--- discovery output ---" >&2
-  head -n 200 "${TMP_DIR}/cmk-discovery.out" >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  echo "--- discovery stdout ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-discovery.out" >&2 || true
+  echo "--- discovery stderr ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-discovery.err" >&2 || true
+  echo "--- autochecks ---" >&2
+  find "${SITE_ROOT}/var/check_mk/autochecks" -maxdepth 2 -type f -name "${PLATFORM_HOST}.mk" -print -exec sed -n '1,220p' {} \; >&2 || true
   exit 1
 fi
 
