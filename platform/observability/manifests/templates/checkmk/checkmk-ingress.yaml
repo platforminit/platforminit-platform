@@ -51,7 +51,7 @@ metadata:
 spec:
   redirectRegex:
     regex: '^https?://[^/]+/cmk/(check_mk/)?logout\.py(\?.*)?$'
-    replacement: 'https://checkmk.{{ .Values.baseDomain }}/outpost.goauthentik.io/sign_out'
+    replacement: 'https://auth.{{ .Values.baseDomain }}/if/flow/default-invalidation-flow/'
     permanent: false
 ---
 apiVersion: cert-manager.io/v1

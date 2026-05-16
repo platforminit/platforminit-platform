@@ -133,8 +133,8 @@ def provider_payload(mode):
         "name":"PlatformInit Checkmk",
         "authorization_flow":flow('default-provider-authorization-implicit-consent'),
         # Checkmk has no native Authentik/OIDC logout. When the user clicks the
-        # Checkmk logout endpoint, the auth-shim redirects to the proxy provider
-        # sign_out endpoint. Use the global invalidation flow so the Authentik
+        # Checkmk logout endpoint, the auth-shim and public ingress redirect to
+        # the global Authentik invalidation flow so the Authentik
         # browser session is ended as well, which returns the next visit to the
         # Authentik login flow instead of silently re-using the existing SSO
         # session.
