@@ -175,3 +175,21 @@ Checkmk local cmkadmin login remains available as break-glass
 operations-stack Argo CD application is Synced/Healthy
 /srv/observability/data/checkmk is the only CH05 persistent data path
 ```
+
+
+## Deferred graph_recipe follow-up
+
+After the stable CH05 checkpoint is tagged, investigate the remaining Checkmk service graph UI error through the diagnostic-only workflow:
+
+```text
+05.8D - Diagnose Checkmk Graph Rendering
+```
+
+Known symptom:
+
+```text
+Loading graph failed: (Status: 1)
+'graph_recipe'
+```
+
+Do not modify the stable CH05.5/05.7/05.6/05.4 chain until the graph diagnostic artifact is reviewed.

@@ -319,3 +319,15 @@ The 05.7D artifact showed that raw TCP access to the host agent worked, but `cmk
 ### 2026-05-16 diagnostic finding
 
 The CH05.7D artifact confirmed that the host is now a real TCP Checkmk agent target: `cmk -D` shows a TCP agent on `62.238.5.243:6556`, `cmk -d platforminit-dev-01` returns Linux agent sections, and `cmk --debug -vvn` fetches/parses data via the TCP datasource. Do not add pre-discovery assertions that expect native Linux service status lines before `cmk -I` has created autochecks.
+
+
+## CH05.8D Checkmk graph_recipe diagnostics
+
+`05.8D - Diagnose Checkmk Graph Rendering` is a read-only diagnostic workflow for the remaining service-page graph error:
+
+```text
+Loading graph failed: (Status: 1)
+'graph_recipe'
+```
+
+It collects Checkmk graphing and metric plugin paths, service inventory, generated core configuration, RRD/perfdata/cache paths, Checkmk logs and sample trusted-header service-page probes. It must not change Checkmk discovery, graph templates, service rules or RRD state.
