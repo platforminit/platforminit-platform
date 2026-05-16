@@ -148,6 +148,12 @@ PYPLUGIN
 chmod 0755 "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
 chown "${SITE}:${SITE}" "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
 
+# Remove failed CH05.7 experimental host-address overlays before validating or
+# reloading the Checkmk model. The 05.5 workflow may be run before 05.7, so
+# cleanup must live here as well; otherwise a stale overlay can make cmk -R/cmk -N
+# fail before the repaired host model is even evaluated.
+rm -f -- "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk"
+
 cat > "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk" <<PLATFORMINIT_MK
 # Managed by PlatformInit CH05.5.
 # This file intentionally defines a small, operator-first Checkmk model.
@@ -162,13 +168,15 @@ globals().setdefault("custom_checks", [])
 # CH05.5 owns the PlatformInit host object used by the later CH05.7 native
 # Checkmk agent discovery workflow. Keep the object explicit and WATO-compatible:
 # the host must not inherit or silently fall back to a ping/no-agent model.
-# Without the cmk-agent/address-family attributes, native service discovery can
+# Without explicit cmk-agent/no-snmp attributes, native service discovery can
 # fetch data but still discover no native Linux services, leaving only the 11
-# synthetic checks. Avoid backticks in this expanding heredoc: command
-# substitution would run in the container shell before the config is written.
+# synthetic checks. Keep only stable default host tags in all_hosts; richer
+# address-family details are expressed in host_attributes below. Avoid backticks
+# in this expanding heredoc: command substitution would run in the container shell
+# before the config is written.
 all_hosts = [entry for entry in all_hosts if entry.split("|", 1)[0] != "${PLATFORM_HOST}"]
 all_hosts += [
-    "${PLATFORM_HOST}|lan|ip-v4|ip-v4-only|cmk-agent|tcp|prod|site:${SITE}",
+    "${PLATFORM_HOST}|cmk-agent|no-snmp|prod|lan|site:${SITE}",
 ]
 
 ipaddresses.update({
@@ -403,7 +411,28 @@ Provisioned services:
 PLATFORMINIT_README
 chown "${SITE}:${SITE}" "${SITE_ROOT}/local/share/platforminit/README.txt"
 
-su - "${SITE}" -c "cmk -R"
+MODEL_PRECHECK_DIR="$(mktemp -d)"
+run_checkmk_model_cmd() {
+  local label="$1"
+  shift
+  local cmd="$*"
+  if ! su - "${SITE}" -c "${cmd}" > "${MODEL_PRECHECK_DIR}/${label}.out" 2> "${MODEL_PRECHECK_DIR}/${label}.err"; then
+    echo "FATAL: Checkmk command failed during CH05.5 model provisioning: ${cmd}" >&2
+    echo "--- ${label} stdout ---" >&2
+    head -n 200 "${MODEL_PRECHECK_DIR}/${label}.out" >&2 || true
+    echo "--- ${label} stderr ---" >&2
+    head -n 200 "${MODEL_PRECHECK_DIR}/${label}.err" >&2 || true
+    echo "--- platforminit Checkmk config files ---" >&2
+    find "${SITE_ROOT}/etc/check_mk/conf.d/platforminit" -maxdepth 1 -type f -print -exec sed -n '1,240p' {} \; >&2 || true
+    echo "--- Checkmk site status ---" >&2
+    omd status "${SITE}" >&2 || true
+    exit 1
+  fi
+}
+
+run_checkmk_model_cmd cmk-config-preflight "cmk -N"
+run_checkmk_model_cmd cmk-core-reload "cmk -R"
+rm -rf -- "${MODEL_PRECHECK_DIR}"
 su - "${SITE}" -c "omd restart apache" >/dev/null || true
 
 # Force one fresh result pass after switching synthetic services to state-only
