@@ -11,6 +11,7 @@ APP_NAME="${APP_NAME:-operations-stack}"
 BASE_DOMAIN="${BASE_DOMAIN:-}"
 VALIDATION_MODE="${VALIDATION_MODE:-runtime}"
 CHECKMK_SITE="${CHECKMK_SITE:-cmk}"
+PLATFORM_HOST="${PLATFORM_HOST:-platforminit-dev-01}"
 CHECKMK_LOCAL_PORT="${CHECKMK_LOCAL_PORT:-18085}"
 export KUBECONFIG
 [[ -n "${BASE_DOMAIN}" ]] || die "Missing BASE_DOMAIN. Set PLATFORM_BASE_DOMAIN; do not hardcode domains in CH05."
@@ -61,6 +62,55 @@ done
 code="$(curl -sS -o /tmp/ch05-checkmk.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" || true)"
 [[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer; HTTP=${code}"; }
 log "PASS: Checkmk frontend answered HTTP ${code}"
+
+log "Validating Checkmk managed service graph pages when CH05.5 model exists"
+kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" <<'CHECKMK_GRAPH_VALIDATE'
+set -euo pipefail
+SITE="$1"
+PLATFORM_HOST="$2"
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+su - "${SITE}" -c "cmk -l" > "${TMP_DIR}/hosts.txt"
+if ! grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null; then
+  echo "PASS: CH05.5 Checkmk host model not present yet; skipping managed service graph validation"
+  exit 0
+fi
+
+for service in \
+  "Host availability" \
+  "SSH" \
+  "Kubernetes API" \
+  "Checkmk WebUI" \
+  "Argo CD WebUI" \
+  "Authentik WebUI" \
+  "Root filesystem" \
+  "Kubernetes runtime storage" \
+  "Kubernetes PVC storage" \
+  "Checkmk storage" \
+  "Platform runtime artifacts"
+do
+  encoded_service="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "${service}")"
+  detail_file="${TMP_DIR}/service-${encoded_service}.html"
+  code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o "${detail_file}" -w '%{http_code}' \
+    "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=service&host=${PLATFORM_HOST}&service=${encoded_service}" || true)"
+  case "${code}" in
+    200|302|303) ;;
+    *)
+      echo "FATAL: Checkmk service detail page returned HTTP=${code} for service=${service}" >&2
+      head -n 80 "${detail_file}" >&2 || true
+      exit 1
+      ;;
+  esac
+  if grep -Fq "graph_recipe" "${detail_file}"; then
+    echo "FATAL: Checkmk service detail contains graph_recipe error for service=${service}" >&2
+    exit 1
+  fi
+done
+
+echo "PASS: Checkmk managed service detail pages have no graph_recipe errors"
+CHECKMK_GRAPH_VALIDATE
 
 if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   log "Validating Checkmk Authentik trusted-header SSO Kubernetes contract"

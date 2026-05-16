@@ -166,7 +166,10 @@ Checkmk UI shows Hosts > 0 and Services > 0
 
 The first Checkmk model uses Checkmk `custom_checks` in the Checkmk 2.x dict-rule format with a small Nagios-compatible
 plugin generated into the site-local plugin directory. The checks are intentionally
-operator-facing and named after services rather than raw metric keys:
+operator-facing and named after services rather than raw metric keys. Synthetic
+metrics, where present, must use `platforminit_*` metric names and a matching
+Checkmk Graphing API definition; generic ad-hoc perfdata such as `time=0.02s` is
+not allowed because it can produce broken `graph_recipe` panels in service details:
 
 ```text
 Host availability
