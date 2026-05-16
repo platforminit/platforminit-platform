@@ -73,8 +73,24 @@ test -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_add
   exit 1
 }
 
-if ! getent hosts "${PLATFORM_HOST}" >/dev/null 2>&1; then
-  echo "${HOST_IPV4} ${PLATFORM_HOST}" >> /etc/hosts || true
+awk -v h="${PLATFORM_HOST}" '
+  {
+    keep=1
+    for (i = 2; i <= NF; i++) {
+      if ($i == h) { keep=0 }
+    }
+    if (keep) print
+  }
+' /etc/hosts > "${TMP_DIR}/hosts.reconciled" 2>/dev/null || cp /etc/hosts "${TMP_DIR}/hosts.reconciled"
+printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> "${TMP_DIR}/hosts.reconciled"
+cat "${TMP_DIR}/hosts.reconciled" > /etc/hosts 2>/dev/null || {
+  echo "WARN: could not rewrite /etc/hosts; appending resolver override instead" >&2
+  printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> /etc/hosts 2>/dev/null || true
+}
+getent hosts "${PLATFORM_HOST}" > "${TMP_DIR}/resolver.txt" 2>&1 || true
+if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/resolver.txt" >/dev/null 2>&1; then
+  echo "WARN: resolver for ${PLATFORM_HOST} does not visibly point to ${HOST_IPV4}" >&2
+  cat "${TMP_DIR}/resolver.txt" >&2 || true
 fi
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-host-diagnostics.txt" 2>&1 || true
@@ -86,11 +102,15 @@ fi
 if ! su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
   echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
-  head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+  head -n 160 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
   echo "--- cmk -d stderr ---" >&2
-  head -n 80 "${TMP_DIR}/cmk-agent-error.txt" >&2 || true
+  head -n 120 "${TMP_DIR}/cmk-agent-error.txt" >&2 || true
   echo "--- cmk -d stdout ---" >&2
-  head -n 80 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
+  head -n 120 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
+  echo "--- resolver ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  echo "--- direct TCP agent probe from Checkmk pod ---" >&2
+  timeout 10 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/${PORT}; head -n 40 <&3" >&2 || true
   exit 1
 fi
 grep -F '<<<check_mk>>>' "${TMP_DIR}/cmk-agent-output.txt" >/dev/null || {
