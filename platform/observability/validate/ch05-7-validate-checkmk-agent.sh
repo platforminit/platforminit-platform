@@ -92,8 +92,9 @@ if ! su - "${SITE}" -c "cmk-validate-config" > "${TMP_DIR}/cmk-validate-config.o
 fi
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-host-diagnostics.txt" 2>&1 || true
-if grep -Eiq 'Type of agent:[[:space:]]*(PING only|No agent)|no Checkmk agent|No API integrations, no Checkmk agent' "${TMP_DIR}/cmk-host-diagnostics.txt"; then
-  echo "FATAL: Checkmk host ${PLATFORM_HOST} is configured as ping/no-agent; run the fixed CH05.5 host model first" >&2
+if ! grep -Eq 'Type of agent:[[:space:]]*TCP|Normal Checkmk agent' "${TMP_DIR}/cmk-host-diagnostics.txt"; then
+  echo "FATAL: Checkmk host ${PLATFORM_HOST} is not configured as a TCP Checkmk agent target; run the fixed CH05.5 host model first" >&2
+  echo "Expected CH05.5 to write the host with explicit raw tags: cmk-agent|tcp|prod|lan" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   cat "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
   exit 1

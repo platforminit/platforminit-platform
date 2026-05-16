@@ -310,3 +310,7 @@ optional state-changing cmk -I discovery probe when explicitly enabled
 Default mode does not run `cmk -I`, because discovery can write autochecks. Enable
 the workflow input `run_discovery_probe=true` only when the current run is meant
 to capture a state-changing discovery attempt.
+
+### CH05.7 root-cause note
+
+The 05.7D artifact showed that raw TCP access to the host agent worked, but `cmk -D platforminit-dev-01` still reported `Agent mode: No agent` and `cmk -d` returned empty output. The fix is to keep CH05.5 on the stable synthetic service model while writing the host with explicit raw Checkmk agent tags: `cmk-agent|tcp|prod|lan`. The `tcp` tag is required so Checkmk treats the host as a normal TCP agent target instead of a piggyback/PING-only object.

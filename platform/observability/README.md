@@ -76,3 +76,7 @@ view.py?view_name=allhosts
 CH05.7 native Checkmk agent discovery is paused. Use `05.7D - Diagnose Checkmk Agent Discovery` first to collect Checkmk version, site config, host model, agent sections, `cmk -d`, `cmk --debug -vvn`, autochecks and core-config diagnostics without changing the stable 05.5/05.6 operator baseline.
 
 - Checkmk logout is routed through the public Authentik `/if/flow/default-invalidation-flow/` logout flow so users do not remain silently logged in after leaving Checkmk.
+
+### CH05.7 root-cause note
+
+The 05.7D artifact showed that raw TCP access to the host agent worked, but `cmk -D platforminit-dev-01` still reported `Agent mode: No agent` and `cmk -d` returned empty output. The fix is to keep CH05.5 on the stable synthetic service model while writing the host with explicit raw Checkmk agent tags: `cmk-agent|tcp|prod|lan`. The `tcp` tag is required so Checkmk treats the host as a normal TCP agent target instead of a piggyback/PING-only object.
