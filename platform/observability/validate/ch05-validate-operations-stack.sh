@@ -109,7 +109,24 @@ do
   fi
 done
 
+host_graphs_file="${TMP_DIR}/host-graphs.html"
+host_graphs_code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o "${host_graphs_file}" -w '%{http_code}' \
+  "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=host_graphs&host=${PLATFORM_HOST}&site=${SITE}" || true)"
+case "${host_graphs_code}" in
+  200|302|303) ;;
+  *)
+    echo "FATAL: Checkmk host graphs page returned HTTP=${host_graphs_code}" >&2
+    head -n 80 "${host_graphs_file}" >&2 || true
+    exit 1
+    ;;
+esac
+if grep -Fq "graph_recipe" "${host_graphs_file}"; then
+  echo "FATAL: Checkmk host graphs page contains graph_recipe error" >&2
+  exit 1
+fi
+
 echo "PASS: Checkmk managed service detail pages have no graph_recipe errors"
+echo "PASS: Checkmk host graphs page has no graph_recipe errors"
 CHECKMK_GRAPH_VALIDATE
 
 if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then

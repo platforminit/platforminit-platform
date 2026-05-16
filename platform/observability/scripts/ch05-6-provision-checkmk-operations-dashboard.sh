@@ -126,10 +126,9 @@ case "${code}" in
     ;;
 esac
 
-# Synthetic CH05.5 services use namespaced platforminit_* metrics with
-# matching Graphing API definitions. Validate every managed service detail page
-# so stale graph_recipe regressions on only one or two services cannot slip
-# through again.
+# CH05.5 synthetic services are state-only. Validate every managed service
+# detail page and the host-graphs view so stale graph_recipe regressions from
+# earlier perfdata-enabled builds cannot slip through again.
 for service in \
   "Host availability" \
   "SSH" \
@@ -161,10 +160,27 @@ do
   fi
 done
 
+host_graphs_file="/tmp/platforminit-host-graphs.html"
+host_graphs_code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o "${host_graphs_file}" -w '%{http_code}' \
+  "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=host_graphs&host=${PLATFORM_HOST}&site=${SITE}" || true)"
+case "${host_graphs_code}" in
+  200|302|303) ;;
+  *)
+    echo "FATAL: PlatformInit Checkmk host graphs page returned HTTP=${host_graphs_code}" >&2
+    head -n 80 "${host_graphs_file}" >&2 || true
+    exit 1
+    ;;
+esac
+if grep -Fq "graph_recipe" "${host_graphs_file}"; then
+  echo "FATAL: PlatformInit Checkmk host graphs page still contains graph_recipe error" >&2
+  exit 1
+fi
+
 echo "PASS: PlatformInit Checkmk operator start URL set to ${START_URL}"
 echo "PASS: PlatformInit Checkmk operator view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} has ${service_count} generated services"
 echo "PASS: PlatformInit managed service detail pages have no graph_recipe errors"
+echo "PASS: PlatformInit host graphs page has no graph_recipe errors"
 CHECKMK_DASHBOARD
 
 log "Checkmk operations all-hosts entrypoint provisioned"
