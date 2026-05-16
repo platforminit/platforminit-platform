@@ -33,6 +33,7 @@ omd status "$SITE" >/dev/null
 
 mkdir -p \
   "${SITE_ROOT}/local/lib/nagios/plugins" \
+  "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic/graphing" \
   "${SITE_ROOT}/local/share/platforminit" \
   "${SITE_ROOT}/etc/check_mk/conf.d/platforminit"
 
@@ -49,13 +50,16 @@ import urllib.request
 
 
 def emit(code: int, state: str, service: str, detail: str, perfdata: str = "") -> int:
-    # The CH05.5 synthetic checks are intentionally state-only. Earlier builds
-    # emitted ad-hoc Nagios perfdata (for example time=0.016s). Checkmk Raw can
-    # show these in the service detail page but does not have a stable graph
-    # recipe for the custom metrics, which resulted in browser-visible
-    # "Loading graph failed: 'graph_recipe'" errors. Real time-series graphs
-    # belong to CH05.7 after the native Checkmk Linux agent is installed.
-    print(f"{state} - {service}: {detail}")
+    # CH05.5 synthetic checks may expose lightweight, explicitly named metrics.
+    # Do not emit generic/ad-hoc duration perfdata because Checkmk 2.x/2.5
+    # can display that as a metric without a matching graph recipe,
+    # causing browser-visible "Loading graph failed: 'graph_recipe'" errors.
+    # Every emitted metric below is namespaced under platforminit_* and has a
+    # matching Graphing API definition installed by this script.
+    if perfdata:
+        print(f"{state} - {service}: {detail} | {perfdata}")
+    else:
+        print(f"{state} - {service}: {detail}")
     return code
 
 
@@ -64,7 +68,7 @@ def check_tcp(args) -> int:
     try:
         with socket.create_connection((args.host, args.port), timeout=args.timeout):
             elapsed = time.time() - start
-        return emit(0, "OK", args.service, f"TCP {args.host}:{args.port} reachable in {elapsed:.3f}s")
+        return emit(0, "OK", args.service, f"TCP {args.host}:{args.port} reachable in {elapsed:.3f}s", f"platforminit_check_duration={elapsed:.6f}s;5;10;0;")
     except Exception as exc:
         return emit(2, "CRITICAL", args.service, f"TCP {args.host}:{args.port} failed: {exc}")
 
@@ -84,7 +88,7 @@ def check_http(args) -> int:
     except Exception as exc:
         return emit(2, "CRITICAL", args.service, f"HTTP check failed for {args.url}: {exc}")
     if code in codes:
-        return emit(0, "OK", args.service, f"HTTP {code} from {args.url} in {elapsed:.3f}s")
+        return emit(0, "OK", args.service, f"HTTP {code} from {args.url} in {elapsed:.3f}s", f"platforminit_check_duration={elapsed:.6f}s;5;10;0;")
     return emit(2, "CRITICAL", args.service, f"Unexpected HTTP {code} from {args.url}")
 
 
@@ -107,7 +111,8 @@ def check_path_usage(args) -> int:
     elif used_pct >= args.warn:
         state, code = "WARNING", 1
     detail = f"{path} usage is {used_pct:.2f}% ({used // (1024**2)} MiB used of {total // (1024**2)} MiB)"
-    return emit(code, state, args.service, detail)
+    perfdata = f"platforminit_path_used_percent={used_pct:.6f}%;{args.warn};{args.crit};0;100"
+    return emit(code, state, args.service, detail, perfdata)
 
 
 def main() -> int:
@@ -147,6 +152,44 @@ if __name__ == "__main__":
 PYPLUGIN
 chmod 0755 "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
 chown "${SITE}:${SITE}" "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
+
+cat > "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic/graphing/platforminit_synthetic.py" <<'PYGRAPH'
+#!/usr/bin/env python3
+from cmk.graphing.v1 import Title
+from cmk.graphing.v1.graphs import Graph, MinimalRange
+from cmk.graphing.v1.metrics import Color, DecimalNotation, Metric, Unit
+
+
+metric_platforminit_check_duration = Metric(
+    name="platforminit_check_duration",
+    title=Title("PlatformInit synthetic check duration"),
+    unit=Unit(DecimalNotation("s")),
+    color=Color.BLUE,
+)
+
+metric_platforminit_path_used_percent = Metric(
+    name="platforminit_path_used_percent",
+    title=Title("PlatformInit path used"),
+    unit=Unit(DecimalNotation("%")),
+    color=Color.ORANGE,
+)
+
+graph_platforminit_check_duration = Graph(
+    name="platforminit_check_duration",
+    title=Title("PlatformInit synthetic check duration"),
+    simple_lines=["platforminit_check_duration"],
+    minimal_range=MinimalRange(0, 1),
+)
+
+graph_platforminit_path_used_percent = Graph(
+    name="platforminit_path_used_percent",
+    title=Title("PlatformInit path usage"),
+    simple_lines=["platforminit_path_used_percent"],
+    minimal_range=MinimalRange(0, 100),
+)
+PYGRAPH
+chmod 0644 "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic/graphing/platforminit_synthetic.py"
+chown -R "${SITE}:${SITE}" "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic"
 
 cat > "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk" <<PLATFORMINIT_MK
 # Managed by PlatformInit CH05.5.
@@ -194,7 +237,7 @@ custom_checks = [
             "command_name": "platforminit-ssh",
             "service_description": "SSH",
             "command_line": "\$USER2\$/platforminit_check_service --mode tcp --service 'SSH' --host ${HOST_IPV4} --port 22",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -208,7 +251,7 @@ custom_checks = [
             "command_name": "platforminit-kubernetes-api",
             "service_description": "Kubernetes API",
             "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Kubernetes API' --url https://kubernetes.default.svc/healthz --ok-codes 200,401,403",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -222,7 +265,7 @@ custom_checks = [
             "command_name": "platforminit-checkmk-webui",
             "service_description": "Checkmk WebUI",
             "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Checkmk WebUI' --url http://127.0.0.1:5000/${SITE}/ --ok-codes 200,301,302,401,403",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -236,7 +279,7 @@ custom_checks = [
             "command_name": "platforminit-argocd-webui",
             "service_description": "Argo CD WebUI",
             "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Argo CD WebUI' --url https://argocd.${BASE_DOMAIN}/ --ok-codes 200,301,302,401,403",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -250,7 +293,7 @@ custom_checks = [
             "command_name": "platforminit-authentik-webui",
             "service_description": "Authentik WebUI",
             "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Authentik WebUI' --url https://auth.${BASE_DOMAIN}/ --ok-codes 200,301,302,401,403",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -264,7 +307,7 @@ custom_checks = [
             "command_name": "platforminit-root-filesystem",
             "service_description": "Root filesystem",
             "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Root filesystem' --path /platforminit-host/root --warn 80 --crit 90",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -278,7 +321,7 @@ custom_checks = [
             "command_name": "platforminit-k3s-runtime-storage",
             "service_description": "Kubernetes runtime storage",
             "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Kubernetes runtime storage' --path /platforminit-host/srv-data-k3s --warn 80 --crit 90",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -292,7 +335,7 @@ custom_checks = [
             "command_name": "platforminit-k3s-pvc-storage",
             "service_description": "Kubernetes PVC storage",
             "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Kubernetes PVC storage' --path /platforminit-host/srv-data-k3s-storage --warn 80 --crit 90",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -306,7 +349,7 @@ custom_checks = [
             "command_name": "platforminit-checkmk-storage",
             "service_description": "Checkmk storage",
             "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Checkmk storage' --path /platforminit-host/srv-observability-data --warn 80 --crit 90",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -320,7 +363,7 @@ custom_checks = [
             "command_name": "platforminit-platform-runtime-artifacts",
             "service_description": "Platform runtime artifacts",
             "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Platform runtime artifacts' --path /platforminit-host/srv-platforminit --warn 80 --crit 90",
-            "has_perfdata": False,
+            "has_perfdata": True,
         },
         "condition": {"host_name": ["${PLATFORM_HOST}"]},
         "options": {
@@ -332,14 +375,17 @@ custom_checks = [
 PLATFORMINIT_MK
 chown -R "${SITE}:${SITE}" "${SITE_ROOT}/etc/check_mk/conf.d/platforminit" "${SITE_ROOT}/local/share/platforminit"
 
-# CH05.5 synthetic checks are state-only by design. Remove stale graph/metric
-# artifacts left by earlier perfdata-enabled versions so service details stop
-# rendering broken custom graph panels. These paths are host-scoped and safe to
-# recreate later when CH05.7 introduces native Checkmk agent metrics.
+# Remove stale graph/metric artifacts left by earlier generic-perfdata builds.
+# Earlier CH05.5 versions emitted ad-hoc metrics such as time=0.02s, which can
+# survive in graph caches and trigger graph_recipe errors in service details.
+# The current model only emits namespaced platforminit_* metrics with a matching
+# Graphing API definition, so host-scoped graph data can be safely recreated.
 for graph_dir in \
   "${SITE_ROOT}/var/check_mk/rrd/${PLATFORM_HOST}" \
   "${SITE_ROOT}/var/pnp4nagios/perfdata/${PLATFORM_HOST}" \
-  "${SITE_ROOT}/var/check_mk/graphing/${PLATFORM_HOST}"
+  "${SITE_ROOT}/var/check_mk/graphing/${PLATFORM_HOST}" \
+  "${SITE_ROOT}/tmp/check_mk/graphing/${PLATFORM_HOST}" \
+  "${SITE_ROOT}/var/check_mk/web/cmkadmin/cached_graph_images"
 do
   if [[ -e "${graph_dir}" ]]; then
     rm -rf -- "${graph_dir}"
@@ -367,11 +413,14 @@ Provisioned services:
 PLATFORMINIT_README
 chown "${SITE}:${SITE}" "${SITE_ROOT}/local/share/platforminit/README.txt"
 
+# Validate the local graphing plugin and reload both the monitoring core and
+# Apache GUI processes so Checkmk picks up the new Graphing API definitions.
+su - "${SITE}" -c "cmk-validate-plugins"
 su - "${SITE}" -c "cmk -R"
+su - "${SITE}" -c "omd restart apache" >/dev/null
 
-# Force one fresh result pass after switching synthetic services to state-only
-# output. This prevents the UI from showing stale perfdata captured by older
-# versions of the PlatformInit custom checks.
+# Force one fresh result pass so status data no longer references stale generic perfdata
+# from older PlatformInit custom checks.
 now="$(date +%s)"
 cmd_pipe="${SITE_ROOT}/tmp/run/nagios.cmd"
 if [[ -p "${cmd_pipe}" ]]; then

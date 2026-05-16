@@ -126,28 +126,45 @@ case "${code}" in
     ;;
 esac
 
-# Synthetic CH05.5 services are state-only. The service detail page must not
-# expose the old custom perfdata graph failure seen as: Loading graph failed:
-# 'graph_recipe'. The native agent layer in CH05.7 will provide real graphs.
-service_detail_code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o /tmp/platforminit-service-detail-graph-sanity.html -w '%{http_code}' \
-  "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=service&host=${PLATFORM_HOST}&service=Argo%20CD%20WebUI" || true)"
-case "${service_detail_code}" in
-  200|302|303) ;;
-  *)
-    echo "FATAL: PlatformInit Checkmk service detail graph sanity page returned HTTP=${service_detail_code}" >&2
-    head -n 80 /tmp/platforminit-service-detail-graph-sanity.html >&2 || true
+# Synthetic CH05.5 services use namespaced platforminit_* metrics with
+# matching Graphing API definitions. Validate every managed service detail page
+# so stale graph_recipe regressions on only one or two services cannot slip
+# through again.
+for service in \
+  "Host availability" \
+  "SSH" \
+  "Kubernetes API" \
+  "Checkmk WebUI" \
+  "Argo CD WebUI" \
+  "Authentik WebUI" \
+  "Root filesystem" \
+  "Kubernetes runtime storage" \
+  "Kubernetes PVC storage" \
+  "Checkmk storage" \
+  "Platform runtime artifacts"
+do
+  encoded_service="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "${service}")"
+  detail_file="/tmp/platforminit-service-detail-${encoded_service}.html"
+  service_detail_code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o "${detail_file}" -w '%{http_code}' \
+    "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=service&host=${PLATFORM_HOST}&service=${encoded_service}" || true)"
+  case "${service_detail_code}" in
+    200|302|303) ;;
+    *)
+      echo "FATAL: PlatformInit Checkmk service detail page returned HTTP=${service_detail_code} for service=${service}" >&2
+      head -n 80 "${detail_file}" >&2 || true
+      exit 1
+      ;;
+  esac
+  if grep -Fq "graph_recipe" "${detail_file}"; then
+    echo "FATAL: PlatformInit Checkmk service detail still contains graph_recipe error for service=${service}" >&2
     exit 1
-    ;;
-esac
-if grep -Fq "graph_recipe" /tmp/platforminit-service-detail-graph-sanity.html; then
-  echo "FATAL: PlatformInit Checkmk service detail still contains graph_recipe error; run CH05.5 state-only model provisioning and retry" >&2
-  exit 1
-fi
+  fi
+done
 
 echo "PASS: PlatformInit Checkmk operator start URL set to ${START_URL}"
 echo "PASS: PlatformInit Checkmk operator view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} has ${service_count} generated services"
-echo "PASS: PlatformInit service detail page has no stale graph_recipe error"
+echo "PASS: PlatformInit managed service detail pages have no graph_recipe errors"
 CHECKMK_DASHBOARD
 
 log "Checkmk operations all-hosts entrypoint provisioned"

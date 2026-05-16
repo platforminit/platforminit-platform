@@ -19,21 +19,27 @@ SITE_ROOT="/omd/sites/${SITE}"
 test -x "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
 test -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk"
 test -f "${SITE_ROOT}/local/share/platforminit/README.txt"
+test -f "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic/graphing/platforminit_synthetic.py"
 
-# Synthetic PlatformInit services must be state-only until CH05.7 introduces
-# native Checkmk agent metrics. This prevents broken custom graph rendering
-# in service detail pages for ad-hoc Nagios perfdata.
-if grep -q '"has_perfdata": True' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk"; then
-  echo "FATAL: PlatformInit synthetic checks must not enable custom perfdata graphs" >&2
+# Synthetic PlatformInit services must only emit explicitly namespaced metrics
+# with matching Checkmk Graphing API definitions. Generic ad-hoc perfdata such
+# as time=0.02s caused service detail pages to fail with graph_recipe errors.
+if grep -Eq '(^|[^a-zA-Z0-9_])time=' "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"; then
+  echo "FATAL: PlatformInit synthetic plugin must not emit generic time= perfdata" >&2
   exit 1
 fi
-plugin_output="$(${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service --mode ok --service 'Graph sanity' --detail 'state-only smoke')"
+plugin_output="$(${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service --mode path-usage --service 'Graph sanity' --path / --warn 80 --crit 90)"
 case "${plugin_output}" in
-  *'|'*)
-    echo "FATAL: PlatformInit synthetic plugin emitted perfdata unexpectedly: ${plugin_output}" >&2
+  *'| platforminit_path_used_percent='*) ;;
+  *)
+    echo "FATAL: PlatformInit synthetic plugin did not emit the expected namespaced path metric: ${plugin_output}" >&2
     exit 1
     ;;
 esac
+
+grep -F 'name="platforminit_check_duration"' "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic/graphing/platforminit_synthetic.py" >/dev/null
+grep -F 'name="platforminit_path_used_percent"' "${SITE_ROOT}/local/lib/python3/cmk_addons/plugins/platforminit_synthetic/graphing/platforminit_synthetic.py" >/dev/null
+su - "${SITE}" -c "cmk-validate-plugins" >/dev/null
 
 CHECKMK_VALIDATE_DIR="$(mktemp -d)"
 trap 'rm -rf "${CHECKMK_VALIDATE_DIR}"' EXIT
@@ -69,5 +75,5 @@ su - "${SITE}" -c "cmk -R" >/dev/null
 
 echo "PASS: Checkmk host ${PLATFORM_HOST} is visible"
 echo "PASS: PlatformInit custom service checks are present in generated core config"
-echo "PASS: PlatformInit synthetic checks are state-only and do not emit custom perfdata"
+echo "PASS: PlatformInit synthetic metrics are namespaced and have graph definitions"
 CHECKMK_VALIDATE

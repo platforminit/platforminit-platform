@@ -74,4 +74,4 @@ view.py?view_name=allhosts
 
 CH05.7 should install and register the Checkmk agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery.
 
-- Checkmk logout is routed through Authentik `/outpost.goauthentik.io/sign_out` so users return to the SSO/login flow instead of the raw Checkmk 401 page.
+- Checkmk logout is routed through the public Authentik `/if/flow/default-invalidation-flow/` logout flow so users do not remain silently logged in after leaving Checkmk.
