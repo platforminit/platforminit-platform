@@ -1,4 +1,4 @@
-name: 05.6 - Provision Checkmk Operations Dashboard
+name: 05.6 - Configure Checkmk Operations Entry Point
 
 on:
   workflow_dispatch:

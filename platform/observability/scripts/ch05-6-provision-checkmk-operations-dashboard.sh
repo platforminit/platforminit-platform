@@ -15,19 +15,22 @@ kubectl -n "$NAMESPACE" rollout status deployment/checkmk --timeout=180s >/dev/n
 POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$POD" ]] || die "No Checkmk pod found"
 
-log "Provisioning PlatformInit Checkmk operations dashboard entrypoint in pod/${POD} host=${PLATFORM_HOST}"
+log "Provisioning PlatformInit Checkmk operations entrypoint in pod/${POD} host=${PLATFORM_HOST}"
 
 kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" <<'CHECKMK_DASHBOARD'
 set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
 SITE_ROOT="/omd/sites/${SITE}"
-START_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
-INDEX_START_URL="check_mk/index.py?start_url=view.py%3Fview_name%3Dhoststatus%26host%3D${PLATFORM_HOST}"
+START_URL="view.py?view_name=service&host=${PLATFORM_HOST}"
+HOST_STATUS_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
+ALL_HOSTS_URL="view.py?view_name=allhosts"
+INDEX_START_URL="check_mk/index.py?start_url=view.py%3Fview_name%3Dservice%26host%3D${PLATFORM_HOST}"
 
 # CH05.6 is deliberately conservative: Checkmk Raw/Community already provides
-# the useful host/service state views. We make the PlatformInit host view the
-# deterministic landing page and keep deep links documented for operators.
+# useful host/service state views. The first PlatformInit operator landing page
+# must show the service list directly, not an empty dashboard selector and not
+# the graph-heavy hoststatus page.
 test -d "${SITE_ROOT}/etc/check_mk/multisite.d/wato"
 test -d "${SITE_ROOT}/var/check_mk/web/cmkadmin"
 
@@ -53,8 +56,8 @@ fi
 
 cat > "${SITE_ROOT}/etc/check_mk/multisite.d/wato/platforminit_operations_ui.mk" <<PLATFORMINIT_UI
 # Managed by PlatformInit CH05.6.
-# Make the PlatformInit host/service state view the deterministic operator start page.
-# The URL is intentionally a Checkmk-native view rather than a custom fragile dashboard object.
+# Make the PlatformInit services-of-host view the deterministic operator start page.
+# The URL is intentionally a Checkmk-native view rather than a fragile custom dashboard object.
 start_url = '${START_URL}'
 PLATFORMINIT_UI
 
@@ -71,12 +74,12 @@ Primary operator entrypoint:
   /${SITE}/check_mk/${INDEX_START_URL}
 
 Useful Checkmk-native views:
-  Host overview:
-    /${SITE}/check_mk/view.py?view_name=hoststatus&host=${PLATFORM_HOST}
-  Services for host:
-    /${SITE}/check_mk/view.py?view_name=service&host=${PLATFORM_HOST}
+  PlatformInit service list:
+    /${SITE}/check_mk/${START_URL}
+  PlatformInit host status:
+    /${SITE}/check_mk/${HOST_STATUS_URL}
   All hosts:
-    /${SITE}/check_mk/view.py?view_name=allhosts
+    /${SITE}/check_mk/${ALL_HOSTS_URL}
   All services:
     /${SITE}/check_mk/view.py?view_name=allservices
   Service problems:
@@ -86,6 +89,12 @@ Current CH05.6 success contract:
   host=${PLATFORM_HOST}
   services>=10
   start_url=${START_URL}
+
+Rationale:
+  The Checkmk dashboard page can be empty in Community/Raw until a dashboard is
+  selected or created interactively. PlatformInit therefore lands operators on
+  the concrete service list for the host, which already exposes the UP/OK/WARN/CRIT
+  state model.
 
 CH05.7 should add the Checkmk agent so this view becomes full host metrics/service discovery instead of synthetic active checks only.
 PLATFORMINIT_LINKS
@@ -110,7 +119,7 @@ done
 case "${code}" in
   200|302|303) ;;
   *)
-    echo "FATAL: PlatformInit Checkmk operator view did not respond successfully, HTTP=${code}" >&2
+    echo "FATAL: PlatformInit Checkmk operator service-list view did not respond successfully, HTTP=${code}" >&2
     head -n 80 /tmp/platforminit-operations-view.html >&2 || true
     exit 1
     ;;
@@ -121,4 +130,4 @@ echo "PASS: PlatformInit Checkmk operator view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} has ${service_count} generated services"
 CHECKMK_DASHBOARD
 
-log "Checkmk operations dashboard entrypoint provisioned"
+log "Checkmk operations service-list entrypoint provisioned"
