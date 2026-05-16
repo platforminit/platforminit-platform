@@ -68,10 +68,37 @@ grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-from-pod.txt" >/dev/null || {
   exit 1
 }
 
-su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt"
+test -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" || {
+  echo "FATAL: CH05.7 Checkmk agent address overlay is missing" >&2
+  exit 1
+}
+
+if ! getent hosts "${PLATFORM_HOST}" >/dev/null 2>&1; then
+  echo "${HOST_IPV4} ${PLATFORM_HOST}" >> /etc/hosts || true
+fi
+
+su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-host-diagnostics.txt" 2>&1 || true
+if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/cmk-host-diagnostics.txt" >/dev/null; then
+  echo "WARN: cmk -D output does not visibly contain expected host IPv4 ${HOST_IPV4}; continuing with direct fetch validation" >&2
+  head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+fi
+
+if ! su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
+  echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+  echo "--- cmk -d stderr ---" >&2
+  head -n 80 "${TMP_DIR}/cmk-agent-error.txt" >&2 || true
+  echo "--- cmk -d stdout ---" >&2
+  head -n 80 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
+  exit 1
+fi
 grep -F '<<<check_mk>>>' "${TMP_DIR}/cmk-agent-output.txt" >/dev/null || {
   echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
-  head -n 80 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+  echo "--- cmk -d stdout ---" >&2
+  head -n 120 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
   exit 1
 }
 

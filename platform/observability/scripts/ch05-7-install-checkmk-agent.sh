@@ -178,16 +178,58 @@ grep -F '<<<check_mk>>>' "${TMP_OUT}" >/dev/null || {
 CHECK_AGENT_REACHABILITY
 
 log "Discovering native Checkmk agent services for ${PLATFORM_HOST}"
-kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" <<'CHECKMK_DISCOVERY'
+kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" "$HOST_IPV4" <<'CHECKMK_DISCOVERY'
 set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
+HOST_IPV4="$3"
 SITE_ROOT="/omd/sites/${SITE}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 test -d "${SITE_ROOT}" || { echo "FATAL: missing Checkmk site ${SITE}" >&2; exit 1; }
 
+mkdir -p "${SITE_ROOT}/etc/check_mk/conf.d/platforminit"
+
+# CH05.5 originally proved the visible host/service model with active
+# synthetic checks. Native agent discovery is stricter: Checkmk must resolve
+# the host to the same IP that the pod-level /dev/tcp probe already tested,
+# and the host must be tagged as a TCP Checkmk-agent host. Reconcile this here
+# as an idempotent overlay so CH05.7 can be rerun safely even if older CH05.5
+# artifacts still exist in the site.
+cat > "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" <<EOF_AGENT_ADDRESS
+# Managed by PlatformInit CH05.7.
+# Native Checkmk Linux agent discovery address contract.
+
+globals().setdefault("all_hosts", [])
+globals().setdefault("ipaddresses", {})
+globals().setdefault("host_attributes", {})
+
+all_hosts = [entry for entry in all_hosts if entry.split("|", 1)[0] != "${PLATFORM_HOST}"]
+all_hosts += [
+    "${PLATFORM_HOST}|cmk-agent|ip-v4|ip-v4-only|tcp|prod|lan|site:${SITE}",
+]
+
+ipaddresses.update({
+    "${PLATFORM_HOST}": "${HOST_IPV4}",
+})
+
+host_attributes.setdefault("${PLATFORM_HOST}", {})
+host_attributes["${PLATFORM_HOST}"].update({
+    "ipaddress": "${HOST_IPV4}",
+    "site": "${SITE}",
+})
+EOF_AGENT_ADDRESS
+chown "${SITE}:${SITE}" "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk"
+
+# Runtime resolver fallback for the current Checkmk pod. The persistent source
+# of truth remains the Checkmk config above, but this prevents `cmk -d` from
+# falling back to cluster DNS when older cached host state is still present.
+if ! getent hosts "${PLATFORM_HOST}" >/dev/null 2>&1; then
+  echo "${HOST_IPV4} ${PLATFORM_HOST}" >> /etc/hosts || true
+fi
+
+su - "${SITE}" -c "cmk -R"
 su - "${SITE}" -c "cmk -l" > "${TMP_DIR}/hosts.txt"
 grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
   echo "FATAL: Checkmk host ${PLATFORM_HOST} is not defined; run CH05.5 first" >&2
@@ -195,10 +237,25 @@ grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
   exit 1
 }
 
-su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/agent-output.txt"
+su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/host-diagnostics.txt" 2>&1 || true
+if ! su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/agent-output.txt" 2> "${TMP_DIR}/agent-error.txt"; then
+  echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  head -n 120 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  echo "--- cmk -d stderr ---" >&2
+  head -n 80 "${TMP_DIR}/agent-error.txt" >&2 || true
+  echo "--- cmk -d stdout ---" >&2
+  head -n 80 "${TMP_DIR}/agent-output.txt" >&2 || true
+  echo "--- resolver ---" >&2
+  getent hosts "${PLATFORM_HOST}" >&2 || true
+  exit 1
+fi
 grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-output.txt" >/dev/null || {
   echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
-  head -n 80 "${TMP_DIR}/agent-output.txt" >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  head -n 120 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  echo "--- cmk -d stdout ---" >&2
+  head -n 120 "${TMP_DIR}/agent-output.txt" >&2 || true
   exit 1
 }
 
