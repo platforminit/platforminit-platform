@@ -99,13 +99,13 @@ if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/cmk-host-diagnostics.txt" >/dev/null; th
   head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
 fi
 
-if ! su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
+if ! su - "${SITE}" -c "cmk -vvd '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
   echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   head -n 160 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
-  echo "--- cmk -d stderr ---" >&2
+  echo "--- cmk -vvd stderr ---" >&2
   head -n 120 "${TMP_DIR}/cmk-agent-error.txt" >&2 || true
-  echo "--- cmk -d stdout ---" >&2
+  echo "--- cmk -vvd stdout ---" >&2
   head -n 120 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
   echo "--- resolver ${PLATFORM_HOST} ---" >&2
   cat "${TMP_DIR}/resolver.txt" >&2 || true
@@ -117,12 +117,21 @@ grep -F '<<<check_mk>>>' "${TMP_DIR}/cmk-agent-output.txt" >/dev/null || {
   echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
-  echo "--- cmk -d stdout ---" >&2
+  echo "--- cmk -vvd stdout ---" >&2
   head -n 120 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
   exit 1
 }
 
-su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg"
+if ! su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg" 2> "${TMP_DIR}/cmk-nagios.err"; then
+  echo "FATAL: cmk -N failed while validating discovered services" >&2
+  echo "--- cmk -N stderr ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-nagios.err" >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+  echo "--- resolver ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  exit 1
+fi
 service_count="$(awk -v host="${PLATFORM_HOST}" '
   $1 == "define" && $2 == "service" { in_service=1; has_host=0 }
   in_service && $1 == "host_name" && $2 == host { has_host=1 }

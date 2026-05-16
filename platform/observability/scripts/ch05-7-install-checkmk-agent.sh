@@ -246,21 +246,44 @@ ensure_hosts_mapping() {
   getent hosts "${PLATFORM_HOST}" > "${TMP_DIR}/resolver.txt" 2>&1 || true
 }
 
+dump_checkmk_context() {
+  local label="$1"
+  local cmd="$2"
+  echo "--- ${label} command ---" >&2
+  echo "${cmd}" >&2
+  echo "--- ${label} stdout ---" >&2
+  head -n 160 "${TMP_DIR}/${label}.out" >&2 || true
+  echo "--- ${label} stderr ---" >&2
+  head -n 160 "${TMP_DIR}/${label}.err" >&2 || true
+  echo "--- resolver ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" >&2 || true
+  echo "--- omd status ${SITE} ---" >&2
+  omd status "${SITE}" >&2 || true
+  echo "--- CH05.7 agent address overlay ---" >&2
+  sed -n '1,180p' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
+}
+
 run_site_cmd() {
   local label="$1"
   shift
   local cmd="$*"
   if ! su - "${SITE}" -c "${cmd}" > "${TMP_DIR}/${label}.out" 2> "${TMP_DIR}/${label}.err"; then
     echo "FATAL: Checkmk command failed: ${cmd}" >&2
-    echo "--- ${label} stdout ---" >&2
-    head -n 120 "${TMP_DIR}/${label}.out" >&2 || true
-    echo "--- ${label} stderr ---" >&2
-    head -n 120 "${TMP_DIR}/${label}.err" >&2 || true
-    echo "--- resolver ${PLATFORM_HOST} ---" >&2
-    cat "${TMP_DIR}/resolver.txt" >&2 || true
-    echo "--- CH05.7 agent address overlay ---" >&2
-    sed -n '1,160p' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
+    dump_checkmk_context "${label}" "${cmd}"
     exit 1
+  fi
+}
+
+run_site_cmd_warn() {
+  local label="$1"
+  shift
+  local cmd="$*"
+  if ! su - "${SITE}" -c "${cmd}" > "${TMP_DIR}/${label}.out" 2> "${TMP_DIR}/${label}.err"; then
+    echo "WARN: non-fatal Checkmk command failed: ${cmd}" >&2
+    dump_checkmk_context "${label}" "${cmd}"
+    return 1
   fi
 }
 
@@ -270,9 +293,11 @@ if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/resolver.txt" >/dev/null 2>&1; then
   cat "${TMP_DIR}/resolver.txt" >&2 || true
 fi
 
-# Compile/reload before discovery, but emit useful diagnostics instead of the
-# opaque Kubernetes "command terminated with exit code 1" wrapper message.
-run_site_cmd cmk-reload-initial "cmk -R"
+# Validate the Checkmk configuration before discovery, but do not reload the
+# monitoring core yet. In this workflow we only need the site user tools to be
+# able to read the current config and fetch agent data. Reloading first can fail
+# in RAW/Nagios mode for core-runtime reasons and hide the real discovery error.
+run_site_cmd cmk-config-preflight "cmk -N"
 run_site_cmd cmk-host-list "cmk -l"
 cp "${TMP_DIR}/cmk-host-list.out" "${TMP_DIR}/hosts.txt"
 grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
@@ -282,13 +307,13 @@ grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
 }
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/host-diagnostics.txt" 2>&1 || true
-if ! su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/agent-output.txt" 2> "${TMP_DIR}/agent-error.txt"; then
+if ! su - "${SITE}" -c "cmk -vvd '${PLATFORM_HOST}'" > "${TMP_DIR}/agent-output.txt" 2> "${TMP_DIR}/agent-error.txt"; then
   echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   head -n 160 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
-  echo "--- cmk -d stderr ---" >&2
+  echo "--- cmk -vvd stderr ---" >&2
   head -n 120 "${TMP_DIR}/agent-error.txt" >&2 || true
-  echo "--- cmk -d stdout ---" >&2
+  echo "--- cmk -vvd stdout ---" >&2
   head -n 120 "${TMP_DIR}/agent-output.txt" >&2 || true
   echo "--- resolver ${PLATFORM_HOST} ---" >&2
   cat "${TMP_DIR}/resolver.txt" >&2 || true
@@ -300,7 +325,7 @@ grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-output.txt" >/dev/null || {
   echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   head -n 120 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
-  echo "--- cmk -d stdout ---" >&2
+  echo "--- cmk -vvd stdout ---" >&2
   head -n 120 "${TMP_DIR}/agent-output.txt" >&2 || true
   exit 1
 }
@@ -308,8 +333,11 @@ grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-output.txt" >/dev/null || {
 # Full discovery (-II) deliberately accepts new native agent services and removes
 # stale discovered entries for this host. CH05.5 custom synthetic checks remain
 # managed separately through conf.d/platforminit/platforminit_hosts.mk.
-run_site_cmd cmk-discovery "cmk -IIv '${PLATFORM_HOST}'"
-run_site_cmd cmk-reload-after-discovery "cmk -R"
+run_site_cmd cmk-discovery "cmk -vII '${PLATFORM_HOST}'"
+if ! run_site_cmd_warn cmk-reload-after-discovery "cmk -R"; then
+  echo "WARN: cmk -R failed after discovery; trying cmk -O as reload fallback" >&2
+  run_site_cmd cmk-reload-after-discovery-fallback "cmk -O"
+fi
 
 # Run checks once so Livestatus/UI has fresh native-agent state before validation.
 su - "${SITE}" -c "cmk -v '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-check.txt" 2> "${TMP_DIR}/cmk-check.err" || true
