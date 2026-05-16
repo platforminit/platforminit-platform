@@ -279,18 +279,18 @@ if ! grep -Eq 'Type of agent:[[:space:]]*TCP|Normal Checkmk agent' "${TMP_DIR}/h
   exit 1
 fi
 
-# `cmk -I` is the documented CLI path for service discovery. The --cache flag
-# makes Checkmk use the freshly written cache entry for PLATFORM_HOST instead of
-# trying to resolve/contact the host name again.
-run_site_cmd cmk-agent-cache-check "cmk --cache -nv '${PLATFORM_HOST}'"
+# Prove Checkmk's own datasource can fetch and parse the agent before discovery.
+# Do not require native service status lines here: before the first successful
+# discovery there are intentionally no native Linux autochecks yet.
+run_site_cmd cmk-agent-fetch "cmk -d '${PLATFORM_HOST}'"
 
-cache_hits="$(grep -Ec '^(CPU load|CPU utilization|Check_MK Agent|Disk IO|Filesystem|Interface|Kernel Performance|Memory|Number of threads|TCP Connections|Uptime)[[:space:]]' "${TMP_DIR}/cmk-agent-cache-check.out" || true)"
-if [[ "${cache_hits}" -lt 3 ]]; then
-  echo "FATAL: Checkmk can read the raw agent cache but did not process native Linux services from it" >&2
-  echo "--- cmk --cache -nv ${PLATFORM_HOST} stdout ---" >&2
-  head -n 240 "${TMP_DIR}/cmk-agent-cache-check.out" >&2 || true
-  echo "--- cmk --cache -nv ${PLATFORM_HOST} stderr ---" >&2
-  head -n 160 "${TMP_DIR}/cmk-agent-cache-check.err" >&2 || true
+section_hits="$(grep -Ec '^<<<(df_v2|mem|cpu|uptime|lnx_if|systemd_units|diskstat|kernel)' "${TMP_DIR}/cmk-agent-fetch.out" || true)"
+if [[ "${section_hits}" -lt 4 ]]; then
+  echo "FATAL: Checkmk fetched the agent but did not expose enough native Linux sections, got ${section_hits}" >&2
+  echo "--- cmk -d ${PLATFORM_HOST} stdout ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-agent-fetch.out" >&2 || true
+  echo "--- cmk -d ${PLATFORM_HOST} stderr ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-agent-fetch.err" >&2 || true
   echo "--- raw agent cache sections ---" >&2
   grep -E '^<<<[^>]+>>>' "${SITE_ROOT}/tmp/check_mk/cache/${PLATFORM_HOST}" | head -n 120 >&2 || true
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
@@ -298,9 +298,12 @@ if [[ "${cache_hits}" -lt 3 ]]; then
   exit 1
 fi
 
+run_site_cmd_warn cmk-agent-parse-debug "cmk --debug --cache -vvn '${PLATFORM_HOST}'" || true
+
 # Do not restrict the initial discovery to a hand-picked plugin list. Checkmk
 # 2.5 service names/check plug-in names are version-specific; full discovery is
-# safer and matches the documented cmk -I flow.
+# safer and matches the documented cmk -I flow. The --cache flag makes Checkmk
+# use the freshly written cache entry for PLATFORM_HOST.
 run_site_cmd cmk-discovery "cmk --cache -vI '${PLATFORM_HOST}'"
 
 if ! run_site_cmd_warn cmk-reload-after-discovery "cmk -R"; then

@@ -222,7 +222,13 @@ run_site "cmk-fetch-agent-cmk-d" "cmk -d '${PLATFORM_HOST}'"
 run_site "cmk-fetch-agent-debug-cmk-d" "cmk --debug -v -d '${PLATFORM_HOST}'"
 run_site "cmk-check-dry-run-debug-vvn" "cmk --debug -vvn '${PLATFORM_HOST}'"
 run_site "cmk-check-dry-run-debug-cache-vvn" "cmk --debug --cache -vvn '${PLATFORM_HOST}'"
-run_site "cmk-check-dry-run-detect-native-subset" "cmk --debug --cache -vvn --detect-plugins=df,lnx_if,mem_used,uptime,cpu_loads,kernel_util,check_mk '${PLATFORM_HOST}'"
+# Avoid hard-coding Checkmk internal plugin names here. Names changed across
+# versions and an unknown plugin makes the diagnostic output noisier than the
+# actual datasource problem. Section parsing in the two dry-run commands above
+# is enough for read-only diagnostics; state-changing discovery remains below
+# behind run_discovery_probe=true.
+echo "----- cmk-check-dry-run-detect-native-subset -----"
+echo "SKIPPED: plugin-name-specific detect probe intentionally disabled"
 
 section "discovery probe"
 if [[ "${RUN_DISCOVERY_PROBE}" == "true" ]]; then
