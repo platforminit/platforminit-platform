@@ -162,10 +162,10 @@ globals().setdefault("define_hostgroups", {})
 globals().setdefault("host_groups", [])
 globals().setdefault("custom_checks", [])
 
-# Keep the Checkmk host in a normal pull-agent model. The raw `tcp` tag is
-# required in Checkmk 2.x/2.5 for `cmk -D` to expose `Type of agent: TCP`;
-# without it the host can show `Agent mode: No agent` and Checkmk will only
-# try piggyback/PING despite having the `agent:cmk-agent` default tag.
+# Keep the Checkmk host in a normal pull-agent model. The raw tcp tag is
+# required in Checkmk 2.x/2.5 so cmk -D exposes a TCP agent target.
+# Without it the host can remain in a no-agent/piggyback-only state even when
+# the default agent tag is cmk-agent.
 all_hosts += [
     "${PLATFORM_HOST}|cmk-agent|tcp|prod|lan",
 ]
