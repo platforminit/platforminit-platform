@@ -29,22 +29,54 @@ log "Installing Checkmk Linux agent on ${PLATFORM_HOST} (${HOST_IPV4}) from Chec
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+install_agent_script_from_deb() {
+  local deb_path="$1"
+  local extract_dir="${TMP_DIR}/agent-deb-extract"
+
+  rm -rf "$extract_dir"
+  mkdir -p "$extract_dir"
+  dpkg-deb -x "$deb_path" "$extract_dir"
+
+  local extracted_agent=""
+  extracted_agent="$(find "$extract_dir" -type f \( -path '*/usr/bin/check_mk_agent' -o -path '*/usr/bin/check-mk-agent' \) | sort | head -n1)"
+  [[ -n "$extracted_agent" ]] || die "Could not extract check_mk_agent from architecture-mismatched Checkmk .deb"
+
+  log "Installing architecture-independent Checkmk agent script from extracted package payload: ${extracted_agent}"
+  install -m 0755 "$extracted_agent" /usr/bin/check_mk_agent
+}
+
+install_agent_script_from_site() {
+  log "Falling back to site-provided Linux agent script"
+  AGENT_SCRIPT_PATH="$(kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc "find /omd/sites/${CHECKMK_SITE}/share/check_mk/agents -maxdepth 3 -type f \( -name 'check_mk_agent.linux' -o -name 'check_mk_agent' \) 2>/dev/null | sort | head -n1" | tr -d '\r')"
+  [[ -n "$AGENT_SCRIPT_PATH" ]] || die "No Checkmk Linux agent package or script found in Checkmk site"
+  log "Using Checkmk agent script from site: ${AGENT_SCRIPT_PATH}"
+  kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc "cat '${AGENT_SCRIPT_PATH}'" > /usr/bin/check_mk_agent
+  chmod 0755 /usr/bin/check_mk_agent
+}
+
 AGENT_DEB_PATH="$(kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc "find /omd/sites/${CHECKMK_SITE}/share/check_mk/agents -maxdepth 3 -type f -name 'check-mk-agent_*.deb' 2>/dev/null | sort -V | tail -n1" | tr -d '\r')"
 
 if [[ -n "$AGENT_DEB_PATH" ]]; then
   log "Found Checkmk agent package in site: ${AGENT_DEB_PATH}"
   kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc "cat '${AGENT_DEB_PATH}'" > "${TMP_DIR}/check-mk-agent.deb"
   [[ -s "${TMP_DIR}/check-mk-agent.deb" ]] || die "Downloaded Checkmk agent package is empty"
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y >/dev/null
-  apt-get install -y "${TMP_DIR}/check-mk-agent.deb"
+
+  host_arch="$(dpkg --print-architecture)"
+  package_arch="$(dpkg-deb -f "${TMP_DIR}/check-mk-agent.deb" Architecture 2>/dev/null || true)"
+  [[ -n "$package_arch" ]] || die "Could not read Checkmk agent package architecture"
+  log "Host architecture is ${host_arch}; Checkmk site agent package architecture is ${package_arch}"
+
+  if [[ "$package_arch" == "$host_arch" || "$package_arch" == "all" ]]; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y >/dev/null
+    apt-get install -y "${TMP_DIR}/check-mk-agent.deb"
+  else
+    log "Checkmk site package architecture does not match host architecture; avoiding apt install and using agent script fallback"
+    install_agent_script_from_deb "${TMP_DIR}/check-mk-agent.deb"
+  fi
 else
-  log "No Checkmk agent .deb package found in site; falling back to site-provided Linux agent script"
-  AGENT_SCRIPT_PATH="$(kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc "find /omd/sites/${CHECKMK_SITE}/share/check_mk/agents -maxdepth 3 -type f \( -name 'check_mk_agent.linux' -o -name 'check_mk_agent' \) 2>/dev/null | sort | head -n1" | tr -d '\r')"
-  [[ -n "$AGENT_SCRIPT_PATH" ]] || die "No Checkmk Linux agent package or script found in Checkmk site"
-  log "Using Checkmk agent script from site: ${AGENT_SCRIPT_PATH}"
-  kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -lc "cat '${AGENT_SCRIPT_PATH}'" > /usr/bin/check_mk_agent
-  chmod 0755 /usr/bin/check_mk_agent
+  log "No Checkmk agent .deb package found in site"
+  install_agent_script_from_site
 fi
 
 if ! command -v check_mk_agent >/dev/null; then
