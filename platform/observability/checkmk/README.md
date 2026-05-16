@@ -278,42 +278,35 @@ flow instead of showing a raw Checkmk `401 Unauthorized` page.
 This follows the Authentik proxy-provider logout model where single-application
 proxy logout is initiated through `/outpost.goauthentik.io/sign_out`.
 
-## CH05.7 native Checkmk agent and discovery
+## CH05.7D native Checkmk agent discovery diagnostics
 
-`05.7 - Install Checkmk Agent and Discover Services` installs the Checkmk Linux
-agent on `platforminit-dev-01`, exposes it through a systemd socket on TCP/6556,
-and runs Checkmk service discovery for the existing host object.
-
-The workflow intentionally keeps the CH05.5 synthetic services as state-only
-operator checks. Native CPU, memory, filesystem, uptime, interface and kernel
-services are added through Checkmk agent discovery and are the first supported
-source of real Checkmk graphs in CH05.
-
-Runtime contract:
-
-```text
-Host OS:
-  check-mk-agent.socket active
-  TCP/6556 listening
-  UFW allows TCP/6556 only from detected Kubernetes pod CIDRs, localhost and the host IP
-
-Checkmk site:
-  stale zz_platforminit_agent_address.mk overlays are removed
-  agent cache for platforminit-dev-01 is refreshed from the verified HOST_IPV4:6556 path
-  cmk --cache -vI platforminit-dev-01 discovers native Linux services
-  cmk -N contains the CH05.5 synthetic services plus native agent services
-```
+Native Checkmk agent discovery is paused until a diagnostic bundle is reviewed.
+Do not continue raw Checkmk host-model overlays or speculative `cmk -I` patches
+while the stable 05.5/05.6 operator baseline is working.
 
 Run order:
 
 ```text
 00 - Build Platform Artifacts
 05.5 - Provision Checkmk Operations Model
-05.7 - Install Checkmk Agent and Discover Services
+05.7D - Diagnose Checkmk Agent Discovery
 05.6 - Configure Checkmk Operations Entry Point
 05.4 - Validate Operations Stack
 ```
 
-The workflow must run after CH05.5 because it relies on the host object already
-existing in Checkmk. If the host is rebuilt, rerun CH05.7 after the Checkmk
-runtime and model are restored.
+The diagnostic workflow collects:
+
+```text
+Checkmk version and site status
+cmk -D host object state
+cmk -N / cmk-validate-config output
+PlatformInit Checkmk config files
+agent output sections from host-local TCP and Checkmk-pod TCP paths
+cmk -d and cmk --debug -vvn output
+autochecks, autodiscovery and cache state
+optional state-changing cmk -I discovery probe when explicitly enabled
+```
+
+Default mode does not run `cmk -I`, because discovery can write autochecks. Enable
+the workflow input `run_discovery_probe=true` only when the current run is meant
+to capture a state-changing discovery attempt.

@@ -83,6 +83,8 @@ sudo rm -rf "$RETIRED_DIR"
 
 ## Deploy the new Checkmk-based CH05 layer
 
+CH05.7 native agent discovery is currently paused. Use the `05.7D - Diagnose Checkmk Agent Discovery` workflow before attempting another install/discovery implementation. The stable baseline is 05.5 + 05.6.
+
 Run the GitHub Actions workflows in this order:
 
 ```text
@@ -93,7 +95,7 @@ Run the GitHub Actions workflows in this order:
 05.3 - Enable Checkmk Trusted-Header SSO
 05.4 - Validate Operations Stack
 05.5 - Provision Checkmk Operations Model
-05.7 - Install Checkmk Agent and Discover Services
+05.7D - Diagnose Checkmk Agent Discovery
 05.6 - Configure Checkmk Operations Entry Point
 ```
 
@@ -151,7 +153,7 @@ git add \
   .github/workflows/deploy-05-3-enable-checkmk-sso.yml \
   .github/workflows/deploy-05-4-validate-operations-stack.yml \
   .github/workflows/deploy-05-5-provision-checkmk-operations-model.yml \
-  .github/workflows/deploy-05-7-install-checkmk-agent.yml \
+  .github/workflows/deploy-05-7d-diagnose-checkmk-agent.yml \
   .github/workflows/deploy-05-6-provision-checkmk-operations-dashboard.yml \
   platform/observability \
   docs \
