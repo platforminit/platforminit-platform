@@ -162,8 +162,10 @@ globals().setdefault("custom_checks", [])
 # CH05.5 owns the PlatformInit host object used by the later CH05.7 native
 # Checkmk agent discovery workflow. Keep the object explicit and WATO-compatible:
 # the host must not inherit or silently fall back to a ping/no-agent model.
-# Without the cmk-agent/address-family attributes, `cmk -I` can fetch data but
-# still discover no native Linux services, leaving only the 11 synthetic checks.
+# Without the cmk-agent/address-family attributes, native service discovery can
+# fetch data but still discover no native Linux services, leaving only the 11
+# synthetic checks. Avoid backticks in this expanding heredoc: command
+# substitution would run in the container shell before the config is written.
 all_hosts = [entry for entry in all_hosts if entry.split("|", 1)[0] != "${PLATFORM_HOST}"]
 all_hosts += [
     "${PLATFORM_HOST}|lan|ip-v4|ip-v4-only|cmk-agent|tcp|prod|site:${SITE}",
