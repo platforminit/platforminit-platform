@@ -20,14 +20,17 @@ test -x "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
 test -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk"
 test -f "${SITE_ROOT}/local/share/platforminit/README.txt"
 
-hosts="$(su - "${SITE}" -c "cmk -l")"
-echo "$hosts" | grep -Fx "${PLATFORM_HOST}" >/dev/null || {
+CHECKMK_VALIDATE_DIR="$(mktemp -d)"
+trap 'rm -rf "${CHECKMK_VALIDATE_DIR}"' EXIT
+
+su - "${SITE}" -c "cmk -l" > "${CHECKMK_VALIDATE_DIR}/hosts.txt"
+grep -Fx "${PLATFORM_HOST}" "${CHECKMK_VALIDATE_DIR}/hosts.txt" >/dev/null || {
   echo "FATAL: Checkmk host ${PLATFORM_HOST} is not visible in cmk -l" >&2
-  echo "$hosts" >&2
+  cat "${CHECKMK_VALIDATE_DIR}/hosts.txt" >&2
   exit 1
 }
 
-nagios_cfg="$(su - "${SITE}" -c "cmk -N")"
+su - "${SITE}" -c "cmk -N" > "${CHECKMK_VALIDATE_DIR}/nagios.cfg"
 for service in \
   "Host availability" \
   "SSH" \
@@ -41,7 +44,7 @@ for service in \
   "Checkmk storage" \
   "Platform runtime artifacts"
 do
-  echo "$nagios_cfg" | grep -q "service_description[[:space:]]\+${service}" || {
+  grep -q "service_description[[:space:]]\+${service}" "${CHECKMK_VALIDATE_DIR}/nagios.cfg" || {
     echo "FATAL: expected Checkmk service is missing from generated core config: ${service}" >&2
     exit 1
   }
