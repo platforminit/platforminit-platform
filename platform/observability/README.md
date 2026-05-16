@@ -34,6 +34,7 @@ The retired Zabbix / Vector / OpenObserve implementation has been purged from th
 05.6 - Configure Checkmk Operations Entry Point
 05.4 - Validate Operations Stack
 05.8D - Diagnose Checkmk Graph Rendering
+05.8 - Configure Checkmk Operations Dashboards
 ```
 
 ## Storage contract
@@ -75,7 +76,7 @@ Current CH05.6 entrypoint:
 view.py?view_name=allhosts
 ```
 
-CH05.7 native Checkmk agent discovery is part of the stable checkpoint after the TCP agent tag fix and first-run PEND validation adjustment. The remaining known UI issue is Checkmk graph rendering: service pages can show `Loading graph failed: (Status: 1) 'graph_recipe'`. Use `05.8D - Diagnose Checkmk Graph Rendering` before changing graphing, metric definitions, RRD cleanup or service templates.
+CH05.7 native Checkmk agent discovery is part of the stable checkpoint after the TCP agent tag fix and first-run PEND validation adjustment. Checkmk graph rendering is fixed by preserving `Content-Type` through the nginx auth-shim. CH05.8 then configures the operator dashboard landing experience on Checkmk-native dashboards and drill-down views.
 
 - Checkmk logout is routed through the public Authentik `/if/flow/default-invalidation-flow/` logout flow so users do not remain silently logged in after leaving Checkmk.
 
@@ -89,17 +90,29 @@ The 05.7D artifact showed that raw TCP access to the host agent worked, but `cmk
 The CH05.7D artifact confirmed that the host is now a real TCP Checkmk agent target: `cmk -D` shows a TCP agent on `62.238.5.243:6556`, `cmk -d platforminit-dev-01` returns Linux agent sections, and `cmk --debug -vvn` fetches/parses data via the TCP datasource. Do not add pre-discovery assertions that expect native Linux service status lines before `cmk -I` has created autochecks.
 
 
-### CH05 graph_recipe known issue
+### CH05 graph_recipe fix
 
-The stable CH05 checkpoint does not depend on Checkmk graph rendering. Host state, service state, Authentik logout, native Linux agent discovery and operations validation are working. The remaining browser-visible graph error is deferred to a separate diagnostic-first fix path:
+The CH05.8D artifact showed Checkmk WebUI graph rendering requests failing in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The fix keeps `proxy_pass_request_headers off` for security, but explicitly preserves `Content-Type` so Checkmk can parse JSON/AJAX POST bodies.
+
+## CH05.8 operations dashboards
+
+`05.8 - Configure Checkmk Operations Dashboards` configures the Checkmk main dashboard as the operator start page and records a PlatformInit dashboard catalog inside the Checkmk site. It intentionally uses Checkmk-native dashboards/views instead of writing raw internal dashboard object files.
+
+Primary start URL:
 
 ```text
-05.8D - Diagnose Checkmk Graph Rendering
+dashboard.py?name=main&owner=
 ```
 
-Do not change CH05.5, CH05.6 or CH05.7 behavior while collecting graph diagnostics.
+Validated dashboard/drill-down routes:
 
-
-### CH05 graph_recipe follow-up
-
-The CH05.8D artifact showed Checkmk WebUI graph rendering requests failing in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The auth-shim keeps `proxy_pass_request_headers off` for security, but must explicitly preserve `Content-Type` so Checkmk can parse JSON/AJAX POST bodies.
+```text
+dashboard.py?name=main&owner=
+dashboard.py?name=problems&owner=
+dashboard.py?name=simple_problems&owner=
+view.py?view_name=hoststatus&host=platforminit-dev-01
+view.py?view_name=host_graphs&host=platforminit-dev-01&site=cmk
+view.py?view_name=allhosts
+view.py?view_name=allservices
+view.py?view_name=svcproblems
+```
