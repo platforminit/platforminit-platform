@@ -75,11 +75,12 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   [[ "$addr" == *authentik-forward-auth.operations.svc.cluster.local*/outpost.goauthentik.io/auth/traefik* ]] || die "Unexpected forwardAuth endpoint: $addr"
   ingress_yaml="$(kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml)"
   printf '%s\n' "$ingress_yaml" | grep -q 'checkmk-authentik-forward-auth' || die "Checkmk IngressRoute is not protected by Authentik middleware"
-  printf '%s\n' "$ingress_yaml" | grep -q 'checkmk-authentik-logout-redirect' || die "Checkmk IngressRoute does not route native Checkmk logout through Authentik sign_out"
+  printf '%s\n' "$ingress_yaml" | grep -q 'checkmk-authentik-logout-redirect' || die "Checkmk IngressRoute does not route native Checkmk logout through Authentik global logout flow"
   printf '%s\n' "$ingress_yaml" | grep -q 'Path(`/cmk/check_mk/logout.py`)' || die "Checkmk IngressRoute does not have the native Checkmk logout path"
   printf '%s\n' "$ingress_yaml" | grep -q 'Path(`/cmk/logout.py`)' || die "Checkmk IngressRoute does not have the alternate Checkmk logout path"
   logout_redirect_yaml="$(kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-logout-redirect -o yaml)"
-  printf '%s\n' "$logout_redirect_yaml" | grep -q '/outpost.goauthentik.io/sign_out' || die "Checkmk logout redirect middleware does not target Authentik sign_out"
+  printf '%s\n' "$logout_redirect_yaml" | grep -q 'https://auth\.' || die "Checkmk logout redirect middleware must target the Authentik public host, not the Checkmk host"
+  printf '%s\n' "$logout_redirect_yaml" | grep -q '/if/flow/default-invalidation-flow/' || die "Checkmk logout redirect middleware does not target Authentik global logout flow"
 
   shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
   echo "$shim_conf" | grep -Eq 'proxy_pass_request_headers[[:space:]]+off;' || die "Checkmk auth-shim is still forwarding all browser/Authentik headers"
@@ -87,13 +88,15 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Forwarded-Proto[[:space:]]+https;' || die "Checkmk auth-shim does not preserve the public HTTPS scheme"
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;' || die "Checkmk auth-shim does not map approved sessions to cmkadmin"
   echo "$shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' || die "Checkmk auth-shim does not intercept native logout"
-  echo "$shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' || die "Checkmk logout does not redirect to Authentik sign_out"
+  echo "$shim_conf" | grep -Eq 'https://auth\.' || die "Checkmk auth-shim must target the Authentik public host, not the Checkmk host"
+  echo "$shim_conf" | grep -Eq '/if/flow/default-invalidation-flow/' || die "Checkmk logout does not redirect to Authentik global logout flow"
   echo "$shim_conf" | grep -Eq 'add_header[[:space:]]+Cache-Control[[:space:]]+"no-store"[[:space:]]+always;' || die "Checkmk logout redirect does not disable browser caching"
   echo "$shim_conf" | grep -Eq 'Set-Cookie.*auth_cmk=deleted' || die "Checkmk logout redirect does not expire the stale Checkmk browser cookie"
 
   runtime_shim_conf="$(kubectl -n "$NAMESPACE" exec "$POD" -c auth-shim -- sh -lc 'nginx -T 2>/dev/null' || true)"
   echo "$runtime_shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' || die "Running auth-shim nginx config does not contain native logout interception; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
-  echo "$runtime_shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' || die "Running auth-shim nginx config does not target Authentik sign_out; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+  echo "$runtime_shim_conf" | grep -Eq 'https://auth\.' || die "Running auth-shim nginx config must target the Authentik public host, not the Checkmk host; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+  echo "$runtime_shim_conf" | grep -Eq '/if/flow/default-invalidation-flow/' || die "Running auth-shim nginx config does not target Authentik global logout flow; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 
   log "Validating Checkmk auth-shim runtime path through service port 80"
   kill "$PF" >/dev/null 2>&1 || true
@@ -116,10 +119,10 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
     -H "X-authentik-username: platforminit-test" \
     "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/check_mk/logout.py" || true)"
   logout_code="$(printf '%s\n' "$logout_headers" | awk '/^HTTP\//{code=$2} END{print code}')"
-  [[ "$logout_code" =~ ^(301|302|303|307|308)$ ]] || die "Checkmk auth-shim logout path did not redirect to Authentik sign_out, HTTP=${logout_code:-empty}"
+  [[ "$logout_code" =~ ^(301|302|303|307|308)$ ]] || die "Checkmk auth-shim logout path did not redirect to Authentik global logout flow, HTTP=${logout_code:-empty}"
   logout_location="$(printf '%s\n' "$logout_headers" | awk 'BEGIN{IGNORECASE=1} /^Location:/{gsub("\r", "", $0); sub(/^[Ll]ocation:[[:space:]]*/, "", $0); print; exit}')"
   case "$logout_location" in
-    *"/outpost.goauthentik.io/sign_out"*) ;;
+    https://auth.*"/if/flow/default-invalidation-flow/"*) ;;
     *) die "Checkmk auth-shim logout redirect points to unexpected Location=${logout_location:-empty}" ;;
   esac
 
