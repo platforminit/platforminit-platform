@@ -16,6 +16,11 @@ spec:
       app.kubernetes.io/name: checkmk
   template:
     metadata:
+      annotations:
+        # ConfigMap-backed subPath mounts are only read by nginx at container start.
+        # Keep this checksum on the pod template so Argo CD performs a deterministic
+        # rollout whenever the auth-shim config changes.
+        checksum/auth-shim-config: {{ include (print $.Template.BasePath "/checkmk/checkmk-config.yaml") . | sha256sum | quote }}
       labels:
         app.kubernetes.io/name: checkmk
         app.kubernetes.io/part-of: platforminit-operations

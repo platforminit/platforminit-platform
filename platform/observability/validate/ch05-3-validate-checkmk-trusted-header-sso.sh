@@ -13,6 +13,9 @@ kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk >/dev/null || die "M
 kubectl -n "$NAMESPACE" get secret checkmk-sso >/dev/null || die "Missing checkmk-sso secret"
 
 kubectl -n "$NAMESPACE" get service authentik-forward-auth >/dev/null || die "Missing operations-local ExternalName service for Authentik forwardAuth"
+checksum_annotation="$(kubectl -n "$NAMESPACE" get deployment checkmk -o go-template='{{ index .spec.template.metadata.annotations "checksum/auth-shim-config" }}' 2>/dev/null || true)"
+[[ -n "$checksum_annotation" ]] || die "Checkmk Deployment lacks checksum/auth-shim-config; auth-shim nginx can keep stale subPath-mounted ConfigMap content"
+
 external_name="$(kubectl -n "$NAMESPACE" get service authentik-forward-auth -o jsonpath='{.spec.externalName}')"
 case "$external_name" in
   authentik-server.*.svc.cluster.local) ;;
@@ -67,6 +70,12 @@ printf '%s\n' "$shim_conf" | grep -Eq 'Set-Cookie.*auth_cmk=deleted' \
 
 checkmk_pod="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$checkmk_pod" ]] || die "Could not resolve Checkmk pod"
+runtime_shim_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c auth-shim -- sh -lc 'nginx -T 2>/dev/null' || true)"
+printf '%s\n' "$runtime_shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' \
+  || die "Running auth-shim nginx config does not contain the logout route; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+printf '%s\n' "$runtime_shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' \
+  || die "Running auth-shim nginx config does not target Authentik sign_out; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+
 logout_headers="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c auth-shim -- env BASE_DOMAIN="$BASE_DOMAIN" sh -lc '
   curl -ksSI \
     -H "Host: checkmk.${BASE_DOMAIN}" \
