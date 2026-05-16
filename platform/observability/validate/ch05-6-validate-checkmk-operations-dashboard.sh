@@ -61,7 +61,26 @@ case "${code}" in
     ;;
 esac
 
+# Synthetic CH05.5 services are state-only. The service detail page must not
+# expose the old custom perfdata graph failure seen as: Loading graph failed:
+# 'graph_recipe'. The native agent layer in CH05.7 will provide real graphs.
+service_detail_code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o /tmp/platforminit-service-detail-graph-sanity.html -w '%{http_code}' \
+  "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=service&host=${PLATFORM_HOST}&service=Argo%20CD%20WebUI" || true)"
+case "${service_detail_code}" in
+  200|302|303) ;;
+  *)
+    echo "FATAL: PlatformInit Checkmk service detail graph sanity page returned HTTP=${service_detail_code}" >&2
+    head -n 80 /tmp/platforminit-service-detail-graph-sanity.html >&2 || true
+    exit 1
+    ;;
+esac
+if grep -Fq "graph_recipe" /tmp/platforminit-service-detail-graph-sanity.html; then
+  echo "FATAL: PlatformInit Checkmk service detail still contains graph_recipe error; run CH05.5 state-only model provisioning and retry" >&2
+  exit 1
+fi
+
 echo "PASS: PlatformInit Checkmk start URL is configured"
 echo "PASS: PlatformInit Checkmk all-hosts operator view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} is visible with ${service_count} generated services"
+echo "PASS: PlatformInit service detail page has no stale graph_recipe error"
 CHECKMK_DASHBOARD_VALIDATE

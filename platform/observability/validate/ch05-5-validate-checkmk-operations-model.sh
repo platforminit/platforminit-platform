@@ -20,6 +20,21 @@ test -x "${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service"
 test -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk"
 test -f "${SITE_ROOT}/local/share/platforminit/README.txt"
 
+# Synthetic PlatformInit services must be state-only until CH05.7 introduces
+# native Checkmk agent metrics. This prevents broken custom graph rendering
+# in service detail pages for ad-hoc Nagios perfdata.
+if grep -q '"has_perfdata": True' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk"; then
+  echo "FATAL: PlatformInit synthetic checks must not enable custom perfdata graphs" >&2
+  exit 1
+fi
+plugin_output="$(${SITE_ROOT}/local/lib/nagios/plugins/platforminit_check_service --mode ok --service 'Graph sanity' --detail 'state-only smoke')"
+case "${plugin_output}" in
+  *'|'*)
+    echo "FATAL: PlatformInit synthetic plugin emitted perfdata unexpectedly: ${plugin_output}" >&2
+    exit 1
+    ;;
+esac
+
 CHECKMK_VALIDATE_DIR="$(mktemp -d)"
 trap 'rm -rf "${CHECKMK_VALIDATE_DIR}"' EXIT
 
@@ -54,4 +69,5 @@ su - "${SITE}" -c "cmk -R" >/dev/null
 
 echo "PASS: Checkmk host ${PLATFORM_HOST} is visible"
 echo "PASS: PlatformInit custom service checks are present in generated core config"
+echo "PASS: PlatformInit synthetic checks are state-only and do not emit custom perfdata"
 CHECKMK_VALIDATE
