@@ -112,6 +112,18 @@ if ! su - "${SITE}" -c "cmk --cache -nv '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-ag
   exit 1
 fi
 
+cache_hits="$(grep -Ec '^(CPU load|CPU utilization|Check_MK Agent|Disk IO|Filesystem|Interface|Kernel Performance|Memory|Number of threads|TCP Connections|Uptime)[[:space:]]' "${TMP_DIR}/cmk-agent-output.txt" || true)"
+if [[ "${cache_hits}" -lt 3 ]]; then
+  echo "FATAL: Checkmk cache processing did not expose native Linux services, got ${cache_hits} matches" >&2
+  echo "--- cmk --cache -nv stdout ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
+  echo "--- raw agent cache sections ---" >&2
+  grep -E '^<<<[^>]+>>>' "${cache_file}" | head -n 120 >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+  exit 1
+fi
+
 if ! su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg" 2> "${TMP_DIR}/cmk-nagios.err"; then
   echo "FATAL: cmk -N failed while validating discovered services" >&2
   echo "--- cmk -N stderr ---" >&2
