@@ -93,6 +93,8 @@ Run the GitHub Actions workflows in this order:
 05.3 - Enable Checkmk Trusted-Header SSO
 05.4 - Validate Operations Stack
 05.5 - Provision Checkmk Operations Model
+05.7 - Install Checkmk Agent and Discover Services
+05.6 - Configure Checkmk Operations Entry Point
 ```
 
 Use `05.4` with:
@@ -149,6 +151,8 @@ git add \
   .github/workflows/deploy-05-3-enable-checkmk-sso.yml \
   .github/workflows/deploy-05-4-validate-operations-stack.yml \
   .github/workflows/deploy-05-5-provision-checkmk-operations-model.yml \
+  .github/workflows/deploy-05-7-install-checkmk-agent.yml \
+  .github/workflows/deploy-05-6-provision-checkmk-operations-dashboard.yml \
   platform/observability \
   docs \
   README.md

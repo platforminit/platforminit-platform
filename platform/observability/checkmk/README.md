@@ -277,3 +277,42 @@ flow instead of showing a raw Checkmk `401 Unauthorized` page.
 
 This follows the Authentik proxy-provider logout model where single-application
 proxy logout is initiated through `/outpost.goauthentik.io/sign_out`.
+
+## CH05.7 native Checkmk agent and discovery
+
+`05.7 - Install Checkmk Agent and Discover Services` installs the Checkmk Linux
+agent on `platforminit-dev-01`, exposes it through a systemd socket on TCP/6556,
+and runs Checkmk service discovery for the existing host object.
+
+The workflow intentionally keeps the CH05.5 synthetic services as state-only
+operator checks. Native CPU, memory, filesystem, uptime, interface and kernel
+services are added through Checkmk agent discovery and are the first supported
+source of real Checkmk graphs in CH05.
+
+Runtime contract:
+
+```text
+Host OS:
+  check-mk-agent.socket active
+  TCP/6556 listening
+  UFW allows TCP/6556 only from detected Kubernetes pod CIDRs, localhost and the host IP
+
+Checkmk site:
+  cmk -d platforminit-dev-01 returns agent sections
+  cmk -II platforminit-dev-01 discovers native Linux services
+  cmk -N contains the CH05.5 synthetic services plus native agent services
+```
+
+Run order:
+
+```text
+00 - Build Platform Artifacts
+05.5 - Provision Checkmk Operations Model
+05.7 - Install Checkmk Agent and Discover Services
+05.6 - Configure Checkmk Operations Entry Point
+05.4 - Validate Operations Stack
+```
+
+The workflow must run after CH05.5 because it relies on the host object already
+existing in Checkmk. If the host is rebuilt, rerun CH05.7 after the Checkmk
+runtime and model are restored.

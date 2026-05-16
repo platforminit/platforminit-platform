@@ -29,6 +29,7 @@ The retired Zabbix / Vector / OpenObserve implementation has been purged from th
 05.3 - Enable Checkmk Trusted-Header SSO
 05.4 - Validate Operations Stack
 05.5 - Provision Checkmk Operations Model
+05.7 - Install Checkmk Agent and Discover Services
 05.6 - Configure Checkmk Operations Entry Point
 05.4 - Validate Operations Stack
 ```
@@ -72,6 +73,6 @@ Current CH05.6 entrypoint:
 view.py?view_name=allhosts
 ```
 
-CH05.7 should install and register the Checkmk agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery.
+CH05.7 installs and registers the Checkmk Linux agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery. It exposes the agent on TCP/6556 through a systemd socket, restricts access with UFW where available, runs Checkmk discovery, and validates that native Linux services are visible alongside the CH05.5 state-only synthetic services.
 
 - Checkmk logout is routed through the public Authentik `/if/flow/default-invalidation-flow/` logout flow so users do not remain silently logged in after leaving Checkmk.
