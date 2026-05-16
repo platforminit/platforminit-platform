@@ -222,15 +222,59 @@ host_attributes["${PLATFORM_HOST}"].update({
 EOF_AGENT_ADDRESS
 chown "${SITE}:${SITE}" "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk"
 
-# Runtime resolver fallback for the current Checkmk pod. The persistent source
-# of truth remains the Checkmk config above, but this prevents `cmk -d` from
-# falling back to cluster DNS when older cached host state is still present.
-if ! getent hosts "${PLATFORM_HOST}" >/dev/null 2>&1; then
-  echo "${HOST_IPV4} ${PLATFORM_HOST}" >> /etc/hosts || true
+# Runtime resolver override for the current Checkmk pod. The persistent source
+# of truth remains the Checkmk config above, but Checkmk CLI agent fetches can
+# still fall back to the container resolver. Always pin /etc/hosts for this pod,
+# even when getent already returns a stale value from DNS or an older hosts file.
+ensure_hosts_mapping() {
+  local reconciled="${TMP_DIR}/hosts.reconciled"
+  awk -v h="${PLATFORM_HOST}" '
+    BEGIN { changed=0 }
+    {
+      keep=1
+      for (i = 2; i <= NF; i++) {
+        if ($i == h) { keep=0; changed=1 }
+      }
+      if (keep) print
+    }
+  ' /etc/hosts > "${reconciled}" 2>/dev/null || cp /etc/hosts "${reconciled}"
+  printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> "${reconciled}"
+  cat "${reconciled}" > /etc/hosts 2>/dev/null || {
+    echo "WARN: could not rewrite /etc/hosts; appending resolver override instead" >&2
+    printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> /etc/hosts 2>/dev/null || true
+  }
+  getent hosts "${PLATFORM_HOST}" > "${TMP_DIR}/resolver.txt" 2>&1 || true
+}
+
+run_site_cmd() {
+  local label="$1"
+  shift
+  local cmd="$*"
+  if ! su - "${SITE}" -c "${cmd}" > "${TMP_DIR}/${label}.out" 2> "${TMP_DIR}/${label}.err"; then
+    echo "FATAL: Checkmk command failed: ${cmd}" >&2
+    echo "--- ${label} stdout ---" >&2
+    head -n 120 "${TMP_DIR}/${label}.out" >&2 || true
+    echo "--- ${label} stderr ---" >&2
+    head -n 120 "${TMP_DIR}/${label}.err" >&2 || true
+    echo "--- resolver ${PLATFORM_HOST} ---" >&2
+    cat "${TMP_DIR}/resolver.txt" >&2 || true
+    echo "--- CH05.7 agent address overlay ---" >&2
+    sed -n '1,160p' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
+    exit 1
+  fi
+}
+
+ensure_hosts_mapping
+if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/resolver.txt" >/dev/null 2>&1; then
+  echo "WARN: resolver for ${PLATFORM_HOST} does not visibly point to ${HOST_IPV4}" >&2
+  cat "${TMP_DIR}/resolver.txt" >&2 || true
 fi
 
-su - "${SITE}" -c "cmk -R"
-su - "${SITE}" -c "cmk -l" > "${TMP_DIR}/hosts.txt"
+# Compile/reload before discovery, but emit useful diagnostics instead of the
+# opaque Kubernetes "command terminated with exit code 1" wrapper message.
+run_site_cmd cmk-reload-initial "cmk -R"
+run_site_cmd cmk-host-list "cmk -l"
+cp "${TMP_DIR}/cmk-host-list.out" "${TMP_DIR}/hosts.txt"
 grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
   echo "FATAL: Checkmk host ${PLATFORM_HOST} is not defined; run CH05.5 first" >&2
   cat "${TMP_DIR}/hosts.txt" >&2
@@ -241,13 +285,15 @@ su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/host-diagnostics.txt
 if ! su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/agent-output.txt" 2> "${TMP_DIR}/agent-error.txt"; then
   echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
-  head -n 120 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  head -n 160 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
   echo "--- cmk -d stderr ---" >&2
-  head -n 80 "${TMP_DIR}/agent-error.txt" >&2 || true
+  head -n 120 "${TMP_DIR}/agent-error.txt" >&2 || true
   echo "--- cmk -d stdout ---" >&2
-  head -n 80 "${TMP_DIR}/agent-output.txt" >&2 || true
-  echo "--- resolver ---" >&2
-  getent hosts "${PLATFORM_HOST}" >&2 || true
+  head -n 120 "${TMP_DIR}/agent-output.txt" >&2 || true
+  echo "--- resolver ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  echo "--- direct TCP agent probe from Checkmk pod ---" >&2
+  timeout 10 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/6556; head -n 40 <&3" >&2 || true
   exit 1
 fi
 grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-output.txt" >/dev/null || {
@@ -262,12 +308,13 @@ grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-output.txt" >/dev/null || {
 # Full discovery (-II) deliberately accepts new native agent services and removes
 # stale discovered entries for this host. CH05.5 custom synthetic checks remain
 # managed separately through conf.d/platforminit/platforminit_hosts.mk.
-su - "${SITE}" -c "cmk -II '${PLATFORM_HOST}'"
-su - "${SITE}" -c "cmk -R"
+run_site_cmd cmk-discovery "cmk -IIv '${PLATFORM_HOST}'"
+run_site_cmd cmk-reload-after-discovery "cmk -R"
 
 # Run checks once so Livestatus/UI has fresh native-agent state before validation.
-su - "${SITE}" -c "cmk -v '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-check.txt" || true
-su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg"
+su - "${SITE}" -c "cmk -v '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-check.txt" 2> "${TMP_DIR}/cmk-check.err" || true
+run_site_cmd cmk-core-config "cmk -N"
+cp "${TMP_DIR}/cmk-core-config.out" "${TMP_DIR}/nagios.cfg"
 
 service_count="$(awk -v host="${PLATFORM_HOST}" '
   $1 == "define" && $2 == "service" { in_service=1; has_host=0 }
