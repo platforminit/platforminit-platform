@@ -92,6 +92,12 @@ if ! su - "${SITE}" -c "cmk-validate-config" > "${TMP_DIR}/cmk-validate-config.o
 fi
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-host-diagnostics.txt" 2>&1 || true
+if grep -Eiq 'Type of agent:[[:space:]]*(PING only|No agent)|no Checkmk agent|No API integrations, no Checkmk agent' "${TMP_DIR}/cmk-host-diagnostics.txt"; then
+  echo "FATAL: Checkmk host ${PLATFORM_HOST} is configured as ping/no-agent; run the fixed CH05.5 host model first" >&2
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
+  exit 1
+fi
 
 if ! su - "${SITE}" -c "cmk --cache -nv '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
   echo "FATAL: Checkmk site cannot run native checks from refreshed cache for ${PLATFORM_HOST}" >&2
@@ -129,7 +135,7 @@ if [[ "${service_count}" -lt 15 ]]; then
   exit 1
 fi
 
-native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP|Check_MK|Disk IO)' "${TMP_DIR}/nagios.cfg" || true)"
+native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP|Check_MK|Disk IO|Memory and swap|Filesystem /)' "${TMP_DIR}/nagios.cfg" || true)"
 if [[ "${native_hits}" -lt 3 ]]; then
   echo "FATAL: expected native Linux agent service descriptions, got ${native_hits}" >&2
   grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 120 >&2 || true
