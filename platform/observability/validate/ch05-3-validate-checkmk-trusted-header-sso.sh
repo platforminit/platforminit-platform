@@ -8,6 +8,7 @@ BASE_DOMAIN="${BASE_DOMAIN:-}"
 export KUBECONFIG
 [[ -n "$BASE_DOMAIN" ]] || die "Missing BASE_DOMAIN"
 kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth >/dev/null || die "Missing Checkmk Authentik forwardAuth middleware"
+kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-logout-redirect >/dev/null || die "Missing Checkmk Authentik logout redirect middleware"
 kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk >/dev/null || die "Missing Checkmk IngressRoute"
 kubectl -n "$NAMESPACE" get secret checkmk-sso >/dev/null || die "Missing checkmk-sso secret"
 
@@ -22,8 +23,15 @@ case "$addr" in
   *authentik-forward-auth.operations.svc.cluster.local*/outpost.goauthentik.io/auth/traefik*) ;;
   *) die "Checkmk middleware does not point to the operations-local Authentik forwardAuth endpoint: $addr" ;;
 esac
-kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml | grep -q 'checkmk-authentik-forward-auth' || die "Checkmk IngressRoute is not protected by Authentik middleware"
+ingress_yaml="$(kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml)"
+printf '%s\n' "$ingress_yaml" | grep -q 'checkmk-authentik-forward-auth' || die "Checkmk IngressRoute is not protected by Authentik middleware"
+printf '%s\n' "$ingress_yaml" | grep -q 'checkmk-authentik-logout-redirect' || die "Checkmk IngressRoute does not route native Checkmk logout through Authentik sign_out"
+printf '%s\n' "$ingress_yaml" | grep -q 'Path(`/cmk/check_mk/logout.py`)' || die "Checkmk IngressRoute does not have the native Checkmk logout path"
+printf '%s\n' "$ingress_yaml" | grep -q 'Path(`/cmk/logout.py`)' || die "Checkmk IngressRoute does not have the alternate Checkmk logout path"
 kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth -o yaml | grep -qi 'X-authentik-username' || die "Checkmk forwardAuth middleware does not forward X-authentik-username"
+logout_redirect_yaml="$(kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-logout-redirect -o yaml)"
+printf '%s\n' "$logout_redirect_yaml" | grep -q '/outpost.goauthentik.io/sign_out' || die "Checkmk logout redirect middleware does not target Authentik sign_out"
+printf '%s\n' "$logout_redirect_yaml" | grep -q 'permanent: false' || die "Checkmk logout redirect must be temporary, not permanent"
 
 shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
 [[ -n "$shim_conf" ]] || die "Checkmk auth shim ConfigMap does not contain default.conf"
@@ -52,10 +60,29 @@ printf '%s\n' "$shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/che
   || die "Checkmk auth shim does not intercept the native Checkmk logout endpoint"
 printf '%s\n' "$shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' \
   || die "Checkmk logout is not redirected to the Authentik proxy sign_out endpoint"
+printf '%s\n' "$shim_conf" | grep -Eq 'add_header[[:space:]]+Cache-Control[[:space:]]+"no-store"[[:space:]]+always;' \
+  || die "Checkmk logout redirect does not disable browser caching"
+printf '%s\n' "$shim_conf" | grep -Eq 'Set-Cookie.*auth_cmk=deleted' \
+  || die "Checkmk logout redirect does not expire the stale Checkmk browser cookie"
 
 checkmk_pod="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$checkmk_pod" ]] || die "Could not resolve Checkmk pod"
+logout_headers="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c auth-shim -- env BASE_DOMAIN="$BASE_DOMAIN" sh -lc '
+  curl -ksSI \
+    -H "Host: checkmk.${BASE_DOMAIN}" \
+    -H "X-authentik-username: cmkadmin" \
+    http://127.0.0.1:8080/cmk/check_mk/logout.py
+' || true)"
+logout_code="$(printf '%s\n' "$logout_headers" | awk '/^HTTP\//{code=$2} END{print code}')"
+[[ "$logout_code" =~ ^(301|302|303|307|308)$ ]] || die "Checkmk auth-shim logout path did not redirect to Authentik sign_out, HTTP=${logout_code:-empty}"
+logout_location="$(printf '%s\n' "$logout_headers" | awk 'BEGIN{IGNORECASE=1} /^Location:/{gsub("\r", "", $0); sub(/^[Ll]ocation:[[:space:]]*/, "", $0); print; exit}')"
+case "$logout_location" in
+  *"/outpost.goauthentik.io/sign_out"*) ;;
+  *) die "Checkmk auth-shim logout redirect points to unexpected Location=${logout_location:-empty}" ;;
+esac
+
 checkmk_auth_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/cmk/etc/check_mk/multisite.d/wato 2>/dev/null || true")"
 echo "$checkmk_auth_conf" | grep -q "X-Remote-User" || die "Checkmk site is not configured for X-Remote-User trusted-header authentication"
 
 echo "PASS: Checkmk trusted-header SSO Kubernetes contract exists"
+echo "PASS: Checkmk native logout redirects to Authentik sign_out"

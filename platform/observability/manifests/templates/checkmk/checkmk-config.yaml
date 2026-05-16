@@ -21,12 +21,20 @@ data:
       # session. In a trusted-header SSO setup the browser must be handed back to
       # the Authentik proxy provider logout endpoint instead, otherwise users can
       # land on a raw Checkmk 401 page after clicking Log out.
+      #
+      # This is a pod-local fallback. The public ingress also owns a higher-priority
+      # Traefik redirect for these paths so logout is deterministic even before the
+      # request reaches the auth-shim container.
       location = /cmk/check_mk/logout.py {
-        return 302 /outpost.goauthentik.io/sign_out;
+        add_header Cache-Control "no-store" always;
+        add_header Set-Cookie "auth_cmk=deleted; Path=/cmk/; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 https://checkmk.{{ .Values.baseDomain }}/outpost.goauthentik.io/sign_out;
       }
 
       location = /cmk/logout.py {
-        return 302 /outpost.goauthentik.io/sign_out;
+        add_header Cache-Control "no-store" always;
+        add_header Set-Cookie "auth_cmk=deleted; Path=/cmk/; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 https://checkmk.{{ .Values.baseDomain }}/outpost.goauthentik.io/sign_out;
       }
 
       location / {

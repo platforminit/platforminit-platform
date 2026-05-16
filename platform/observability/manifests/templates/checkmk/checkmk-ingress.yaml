@@ -40,6 +40,20 @@ spec:
       - X-authentik-meta-app
       - X-authentik-meta-version
 ---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: checkmk-authentik-logout-redirect
+  namespace: operations
+  labels:
+    app.kubernetes.io/name: checkmk
+    app.kubernetes.io/part-of: platforminit-operations
+spec:
+  redirectRegex:
+    regex: '^https?://[^/]+/cmk/(check_mk/)?logout\.py(\?.*)?$'
+    replacement: 'https://checkmk.{{ .Values.baseDomain }}/outpost.goauthentik.io/sign_out'
+    permanent: false
+---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -68,6 +82,16 @@ spec:
   entryPoints:
     - websecure
   routes:
+    - kind: Rule
+      match: "Host(`checkmk.{{ .Values.baseDomain }}`) && (Path(`/cmk/check_mk/logout.py`) || Path(`/cmk/logout.py`))"
+      priority: 30
+      middlewares:
+        - name: checkmk-authentik-logout-redirect
+          namespace: operations
+      services:
+        - kind: Service
+          name: authentik-forward-auth
+          port: {{ .Values.authentik.embeddedOutpostPort }}
     - kind: Rule
       match: "Host(`checkmk.{{ .Values.baseDomain }}`) && PathPrefix(`/outpost.goauthentik.io/`)"
       priority: 20
