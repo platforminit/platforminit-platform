@@ -151,3 +151,37 @@ This separation keeps the lifecycle clear:
 
 If `05.2` fails, troubleshoot Argo CD sync/health only. Do not treat a browser/public SSO problem as a `05.2` concern.
 
+
+## CH05.5 visible operations model
+
+`05.5 - Provision Checkmk Operations Model` must not be treated as successful just
+because the workflow exits with code `0`. The success contract is visible Checkmk
+runtime state:
+
+```text
+cmk -l contains platforminit-dev-01
+cmk -N contains PlatformInit custom services
+Checkmk UI shows Hosts > 0 and Services > 0
+```
+
+The first Checkmk model uses Checkmk `custom_checks` with a small Nagios-compatible
+plugin generated into the site-local plugin directory. The checks are intentionally
+operator-facing and named after services rather than raw metric keys:
+
+```text
+Host availability
+SSH
+Kubernetes API
+Checkmk WebUI
+Argo CD WebUI
+Authentik WebUI
+Root filesystem
+Kubernetes runtime storage
+Kubernetes PVC storage
+Checkmk storage
+Platform runtime artifacts
+```
+
+Storage checks read host paths through read-only `hostPath` mounts in the Checkmk
+container. This means any change to the mounted path contract requires `05.2 - Sync
+Operations Stack` before rerunning `05.5`.

@@ -46,6 +46,21 @@ spec:
               mountPath: /omd/sites
             - name: checkmk-tmp
               mountPath: /opt/omd/sites/{{ .Values.checkmk.site }}/tmp
+            - name: host-root
+              mountPath: /platforminit-host/root
+              readOnly: true
+            - name: host-srv-data-k3s
+              mountPath: /platforminit-host/srv-data-k3s
+              readOnly: true
+            - name: host-srv-data-k3s-storage
+              mountPath: /platforminit-host/srv-data-k3s-storage
+              readOnly: true
+            - name: host-srv-observability-data
+              mountPath: /platforminit-host/srv-observability-data
+              readOnly: true
+            - name: host-srv-platforminit
+              mountPath: /platforminit-host/srv-platforminit
+              readOnly: true
           resources:
 {{ toYaml .Values.checkmk.resources | indent 12 }}
           readinessProbe:
@@ -93,6 +108,26 @@ spec:
         - name: checkmk-tmp
           emptyDir:
             medium: Memory
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: host-srv-data-k3s
+          hostPath:
+            path: /srv/data/k3s
+            type: DirectoryOrCreate
+        - name: host-srv-data-k3s-storage
+          hostPath:
+            path: /srv/data/k3s/storage
+            type: DirectoryOrCreate
+        - name: host-srv-observability-data
+          hostPath:
+            path: /srv/observability/data
+            type: DirectoryOrCreate
+        - name: host-srv-platforminit
+          hostPath:
+            path: /srv/platforminit
+            type: DirectoryOrCreate
         - name: checkmk-nginx-auth-shim
           configMap:
             name: checkmk-nginx-auth-shim
