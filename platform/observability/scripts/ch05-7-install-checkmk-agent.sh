@@ -255,9 +255,10 @@ run_site_cmd_warn() {
 }
 
 # CH05.7 already proved direct pod-to-host TCP reachability before entering this
-# block. Refresh the Checkmk agent cache from that deterministic IP path and run
-# discovery from cache. This avoids DNS/IPv6 resolver drift for the hostname
-# while still creating native services for the existing Checkmk host object.
+# block. CH05.5 must also expose the host as a TCP Checkmk agent target via the
+# explicit raw `tcp` host tag; otherwise Checkmk 2.5 fetches only piggyback data.
+# Refresh the Checkmk agent cache from the deterministic IP path and run discovery
+# from cache so DNS/IPv6 resolver drift cannot change the data source path.
 write_agent_cache
 
 run_site_cmd config-validation "cmk-validate-config"
@@ -270,8 +271,9 @@ grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
 }
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/host-diagnostics.txt" 2>&1 || true
-if grep -Eiq 'Type of agent:[[:space:]]*(PING only|No agent)|no Checkmk agent|No API integrations, no Checkmk agent' "${TMP_DIR}/host-diagnostics.txt"; then
-  echo "FATAL: Checkmk host ${PLATFORM_HOST} is still configured as ping/no-agent; run the fixed CH05.5 host model first" >&2
+if ! grep -Eq 'Type of agent:[[:space:]]*TCP|Normal Checkmk agent' "${TMP_DIR}/host-diagnostics.txt"; then
+  echo "FATAL: Checkmk host ${PLATFORM_HOST} is not a TCP Checkmk agent target; run the fixed CH05.5 host model first" >&2
+  echo "Expected CH05.5 to write the host with explicit raw tags: cmk-agent|tcp|prod|lan" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   cat "${TMP_DIR}/host-diagnostics.txt" >&2 || true
   exit 1

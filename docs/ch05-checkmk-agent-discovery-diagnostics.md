@@ -101,3 +101,7 @@ Use the logs to decide which of these is actually broken:
 | `cmk --debug -vvn` shows Linux services, autochecks stay empty | discovery/autocheck write path issue |
 | `cmk -N` fails | invalid Checkmk config or stale overlay |
 | native services exist but graphs fail | graphing/metric rendering issue after discovery |
+
+### CH05.7 root-cause note
+
+The 05.7D artifact showed that raw TCP access to the host agent worked, but `cmk -D platforminit-dev-01` still reported `Agent mode: No agent` and `cmk -d` returned empty output. The fix is to keep CH05.5 on the stable synthetic service model while writing the host with explicit raw Checkmk agent tags: `cmk-agent|tcp|prod|lan`. The `tcp` tag is required so Checkmk treats the host as a normal TCP agent target instead of a piggyback/PING-only object.
