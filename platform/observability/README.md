@@ -98,3 +98,8 @@ The stable CH05 checkpoint does not depend on Checkmk graph rendering. Host stat
 ```
 
 Do not change CH05.5, CH05.6 or CH05.7 behavior while collecting graph diagnostics.
+
+
+### CH05 graph_recipe follow-up
+
+The CH05.8D artifact showed Checkmk WebUI graph rendering requests failing in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The auth-shim keeps `proxy_pass_request_headers off` for security, but must explicitly preserve `Content-Type` so Checkmk can parse JSON/AJAX POST bodies.

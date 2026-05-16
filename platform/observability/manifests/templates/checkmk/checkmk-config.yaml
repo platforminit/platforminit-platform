@@ -53,6 +53,14 @@ data:
         proxy_set_header X-Forwarded-Ssl on;
         proxy_set_header X-Forwarded-Port 443;
         proxy_set_header X-Forwarded-Host $host;
+
+        # Preserve the request body parser contract for Checkmk's own WebUI AJAX
+        # endpoints while still stripping arbitrary browser/AuthentiK headers.
+        # Without Content-Type, JSON POST requests such as graph rendering can
+        # reach Checkmk with a body that the WebUI does not parse, causing
+        # ajax_render_graph_content.py to fail with a missing graph_recipe key.
+        proxy_set_header Content-Type $content_type;
+
         proxy_set_header Cookie "";
         proxy_set_header Authorization "";
 

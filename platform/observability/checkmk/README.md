@@ -127,6 +127,7 @@ The Checkmk Community trusted-header SSO proof intentionally keeps the
 `checkmk-nginx-auth-shim` request to the Checkmk upstream minimal:
 
 - `proxy_pass_request_headers off` prevents arbitrary browser/Authentik headers
+- `Content-Type` is explicitly preserved so Checkmk WebUI JSON/AJAX POST requests, including graph rendering, keep their request-body parser contract
   and stale Checkmk cookies from being forwarded into the site Apache process.
 - `Cookie ""` avoids stale `auth_cmk` cookies from older native-login attempts.
 - `Authorization ""` avoids leaking unrelated browser credentials to Checkmk.
