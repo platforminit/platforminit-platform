@@ -15,7 +15,7 @@ set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
 SITE_ROOT="/omd/sites/${SITE}"
-START_URL="view.py?view_name=service&host=${PLATFORM_HOST}"
+START_URL="view.py?view_name=allhosts"
 HOST_STATUS_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
 
 UI_FILE="${SITE_ROOT}/etc/check_mk/multisite.d/wato/platforminit_operations_ui.mk"
@@ -27,7 +27,7 @@ test -f "${USER_START_FILE}"
 test -f "${ENTRYPOINTS}"
 grep -F "start_url = '${START_URL}'" "${UI_FILE}" >/dev/null
 grep -F "start_url = '${START_URL}'" "${USER_START_FILE}" >/dev/null
-grep -F "view.py?view_name=service&host=${PLATFORM_HOST}" "${ENTRYPOINTS}" >/dev/null
+grep -F "view.py?view_name=allhosts" "${ENTRYPOINTS}" >/dev/null
 grep -F "view.py?view_name=hoststatus&host=${PLATFORM_HOST}" "${ENTRYPOINTS}" >/dev/null
 
 TMP_DIR="$(mktemp -d)"
@@ -51,17 +51,17 @@ if [[ "${service_count}" -lt 10 ]]; then
 fi
 
 code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o /tmp/platforminit-operations-view-validate.html -w '%{http_code}' \
-  "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=hoststatus&host=${PLATFORM_HOST}" || true)"
+  "http://127.0.0.1:5000/${SITE}/check_mk/${START_URL}" || true)"
 case "${code}" in
   200|302|303) ;;
   *)
-    echo "FATAL: operator service-list view returned HTTP=${code}" >&2
+    echo "FATAL: operator all-hosts view returned HTTP=${code}" >&2
     head -n 80 /tmp/platforminit-operations-view-validate.html >&2 || true
     exit 1
     ;;
 esac
 
 echo "PASS: PlatformInit Checkmk start URL is configured"
-echo "PASS: PlatformInit Checkmk operator service-list view responds with HTTP=${code}"
+echo "PASS: PlatformInit Checkmk all-hosts operator view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} is visible with ${service_count} generated services"
 CHECKMK_DASHBOARD_VALIDATE

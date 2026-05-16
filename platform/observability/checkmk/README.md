@@ -211,7 +211,7 @@ object generator. The first implementation tried to use dashboard naming/start
 URLs, but that leads to an empty dashboard selector in Checkmk Community/Raw and
 is not an acceptable operator experience.
 
-CH05.6 now uses a conservative Checkmk-native service-list view as the landing
+CH05.6 now uses a conservative Checkmk-native all-hosts view as the landing
 page. This is closer to the desired Checkmk/Nagios mental model because it shows
 host -> services -> state directly.
 
@@ -226,7 +226,7 @@ The workflow writes:
 The configured start URL is:
 
 ```text
-view.py?view_name=service&host=platforminit-dev-01
+view.py?view_name=allhosts
 ```
 
 The host status page is kept as a secondary deep link only:
@@ -245,7 +245,7 @@ The success contract is:
 platforminit-dev-01 is visible in cmk -l
 at least 10 generated services exist in cmk -N
 cmkadmin has a PlatformInit start URL
-local Checkmk frontend returns HTTP 200/302/303 for the hoststatus view
+local Checkmk frontend returns HTTP 200/302/303 for the all-hosts view
 ```
 
 CH05.6 does not install the Checkmk agent. CH05.7 should add the host agent and
