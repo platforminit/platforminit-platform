@@ -164,16 +164,6 @@ ipaddresses.update({
     "${PLATFORM_HOST}": "${HOST_IPV4}",
 })
 
-extra_host_conf.setdefault("alias", [])
-extra_host_conf["alias"] += [
-    ("PlatformInit development host", ["${PLATFORM_HOST}"]),
-]
-
-extra_host_conf.setdefault("check_command", [])
-extra_host_conf["check_command"] += [
-    ("check-mk-dummy", ["${PLATFORM_HOST}"]),
-]
-
 define_hostgroups.update({
     "platforminit_hosts": "PlatformInit / Hosts",
     "platforminit_kubernetes": "PlatformInit / Kubernetes",
@@ -181,24 +171,162 @@ define_hostgroups.update({
     "platforminit_storage": "PlatformInit / Storage",
 })
 
-host_groups += [
-    ("platforminit_hosts", [], ["${PLATFORM_HOST}"]),
-]
-
-custom_checks += [
-    ({"command_name": "platforminit-host-availability", "service_description": "Host availability", "command_line": "\$USER2\$/platforminit_check_service --mode ok --service 'Host availability' --detail 'PlatformInit Checkmk host object is active'", "has_perfdata": False}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-ssh", "service_description": "SSH", "command_line": "\$USER2\$/platforminit_check_service --mode tcp --service 'SSH' --host ${HOST_IPV4} --port 22", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-kubernetes-api", "service_description": "Kubernetes API", "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Kubernetes API' --url https://kubernetes.default.svc/healthz --ok-codes 200,401,403", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-checkmk-webui", "service_description": "Checkmk WebUI", "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Checkmk WebUI' --url http://127.0.0.1:5000/${SITE}/ --ok-codes 200,301,302,401,403", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-argocd-webui", "service_description": "Argo CD WebUI", "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Argo CD WebUI' --url https://argocd.${BASE_DOMAIN}/ --ok-codes 200,301,302,401,403", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-authentik-webui", "service_description": "Authentik WebUI", "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Authentik WebUI' --url https://auth.${BASE_DOMAIN}/ --ok-codes 200,301,302,401,403", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-root-filesystem", "service_description": "Root filesystem", "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Root filesystem' --path /platforminit-host/root --warn 80 --crit 90", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-k3s-runtime-storage", "service_description": "Kubernetes runtime storage", "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Kubernetes runtime storage' --path /platforminit-host/srv-data-k3s --warn 80 --crit 90", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-k3s-pvc-storage", "service_description": "Kubernetes PVC storage", "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Kubernetes PVC storage' --path /platforminit-host/srv-data-k3s-storage --warn 80 --crit 90", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-checkmk-storage", "service_description": "Checkmk storage", "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Checkmk storage' --path /platforminit-host/srv-observability-data --warn 80 --crit 90", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-    ({"command_name": "platforminit-platform-runtime-artifacts", "service_description": "Platform runtime artifacts", "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Platform runtime artifacts' --path /platforminit-host/srv-platforminit --warn 80 --crit 90", "has_perfdata": True}, [], ["${PLATFORM_HOST}"]),
-]
-PLATFORMINIT_MK
+custom_checks = [
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000001",
+        "value": {
+            "command_name": "platforminit-host-availability",
+            "service_description": "Host availability",
+            "command_line": "\$USER2\$/platforminit_check_service --mode ok --service 'Host availability' --detail 'PlatformInit Checkmk host object is active'",
+            "has_perfdata": False,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Host availability",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000002",
+        "value": {
+            "command_name": "platforminit-ssh",
+            "service_description": "SSH",
+            "command_line": "\$USER2\$/platforminit_check_service --mode tcp --service 'SSH' --host ${HOST_IPV4} --port 22",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: SSH",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000003",
+        "value": {
+            "command_name": "platforminit-kubernetes-api",
+            "service_description": "Kubernetes API",
+            "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Kubernetes API' --url https://kubernetes.default.svc/healthz --ok-codes 200,401,403",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Kubernetes API",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000004",
+        "value": {
+            "command_name": "platforminit-checkmk-webui",
+            "service_description": "Checkmk WebUI",
+            "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Checkmk WebUI' --url http://127.0.0.1:5000/${SITE}/ --ok-codes 200,301,302,401,403",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Checkmk WebUI",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000005",
+        "value": {
+            "command_name": "platforminit-argocd-webui",
+            "service_description": "Argo CD WebUI",
+            "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Argo CD WebUI' --url https://argocd.${BASE_DOMAIN}/ --ok-codes 200,301,302,401,403",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Argo CD WebUI",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000006",
+        "value": {
+            "command_name": "platforminit-authentik-webui",
+            "service_description": "Authentik WebUI",
+            "command_line": "\$USER2\$/platforminit_check_service --mode http --service 'Authentik WebUI' --url https://auth.${BASE_DOMAIN}/ --ok-codes 200,301,302,401,403",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Authentik WebUI",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000007",
+        "value": {
+            "command_name": "platforminit-root-filesystem",
+            "service_description": "Root filesystem",
+            "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Root filesystem' --path /platforminit-host/root --warn 80 --crit 90",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Root filesystem",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000008",
+        "value": {
+            "command_name": "platforminit-k3s-runtime-storage",
+            "service_description": "Kubernetes runtime storage",
+            "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Kubernetes runtime storage' --path /platforminit-host/srv-data-k3s --warn 80 --crit 90",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Kubernetes runtime storage",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000009",
+        "value": {
+            "command_name": "platforminit-k3s-pvc-storage",
+            "service_description": "Kubernetes PVC storage",
+            "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Kubernetes PVC storage' --path /platforminit-host/srv-data-k3s-storage --warn 80 --crit 90",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Kubernetes PVC storage",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000010",
+        "value": {
+            "command_name": "platforminit-checkmk-storage",
+            "service_description": "Checkmk storage",
+            "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Checkmk storage' --path /platforminit-host/srv-observability-data --warn 80 --crit 90",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Checkmk storage",
+        },
+    },
+    {
+        "id": "b1d7a4d2-3f20-4d8e-9c1a-000000000011",
+        "value": {
+            "command_name": "platforminit-platform-runtime-artifacts",
+            "service_description": "Platform runtime artifacts",
+            "command_line": "\$USER2\$/platforminit_check_service --mode path-usage --service 'Platform runtime artifacts' --path /platforminit-host/srv-platforminit --warn 80 --crit 90",
+            "has_perfdata": True,
+        },
+        "condition": {"host_name": ["${PLATFORM_HOST}"]},
+        "options": {
+            "disabled": False,
+            "description": "PlatformInit CH05 managed service: Platform runtime artifacts",
+        },
+    }
+] + custom_checksPLATFORMINIT_MK
 chown -R "${SITE}:${SITE}" "${SITE_ROOT}/etc/check_mk/conf.d/platforminit" "${SITE_ROOT}/local/share/platforminit"
 
 cat > "${SITE_ROOT}/local/share/platforminit/README.txt" <<PLATFORMINIT_README
