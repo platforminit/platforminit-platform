@@ -193,3 +193,7 @@ CH05.5 must not write deprecated tuple-style `custom_checks` rules such as
 `value`, `condition`, and `options`. The PlatformInit bootstrap therefore writes
 only dict-style `custom_checks` entries and keeps the first model minimal to
 avoid legacy tuple-rule conversion failures during `cmk -R`.
+
+### CH05.5 heredoc safety
+
+The Checkmk operations model writes `platforminit_hosts.mk` through a shell heredoc. The `PLATFORMINIT_MK` terminator must stay on its own line; otherwise the shell appends the rest of the script into the generated Checkmk configuration and the workflow can report a misleading partial success before validation fails.

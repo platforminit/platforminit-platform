@@ -326,7 +326,8 @@ custom_checks = [
             "description": "PlatformInit CH05 managed service: Platform runtime artifacts",
         },
     }
-] + custom_checksPLATFORMINIT_MK
+] + custom_checks
+PLATFORMINIT_MK
 chown -R "${SITE}:${SITE}" "${SITE_ROOT}/etc/check_mk/conf.d/platforminit" "${SITE_ROOT}/local/share/platforminit"
 
 cat > "${SITE_ROOT}/local/share/platforminit/README.txt" <<PLATFORMINIT_README
