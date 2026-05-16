@@ -332,3 +332,28 @@ Loading graph failed: (Status: 1)
 ```
 
 It collects Checkmk graphing and metric plugin paths, service inventory, generated core configuration, RRD/perfdata/cache paths, Checkmk logs and sample trusted-header service-page probes. It must not change Checkmk discovery, graph templates, service rules or RRD state.
+
+
+## CH05.8 operations dashboards
+
+`05.8 - Configure Checkmk Operations Dashboards` is the first dashboard layer after the stable Checkmk checkpoint. It keeps the implementation conservative by promoting Checkmk-native dashboards and views instead of creating raw dashboard object definitions.
+
+The workflow sets the cmkadmin/global start URL to:
+
+```text
+dashboard.py?name=main&owner=
+```
+
+It writes the dashboard catalog to:
+
+```text
+/omd/sites/cmk/local/share/platforminit/checkmk-operations-dashboards.txt
+```
+
+The validation requires:
+
+- `platforminit-dev-01` has `cmk-agent` and `tcp` tags.
+- Checkmk reports a TCP agent datasource for the host.
+- the generated service count is at least the expected CH05.7 native discovery threshold.
+- main/problems/simple-problems dashboards and host/service drill-down views respond.
+- dashboard and graph probes do not contain `graph_recipe` errors.

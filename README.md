@@ -46,6 +46,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 22 | `05.7 - Install Checkmk Agent and Discover Services` | `observability-release-*` |
 | 23 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
 | 24 | `05.8D - Diagnose Checkmk Graph Rendering` | `observability-release-*` |
+| 25 | `05.8 - Configure Checkmk Operations Dashboards` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -74,7 +75,7 @@ Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
 Argo CD           -> owns runtime deployment
 ```
 
-CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The remaining `graph_recipe` UI error is a deferred known issue and should be investigated through `05.8D - Diagnose Checkmk Graph Rendering` before making graph-related changes.
+CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8 configures Checkmk-native dashboard entrypoints on top of the stable runtime.
 
 Public operations WebUI:
 
@@ -175,6 +176,7 @@ git checkout -b feat/ch05-checkmk-community-operations-layer
 | Release model | `docs/release-model.md` |
 | CH05 operations monitoring design | `docs/ch05-operations-monitoring-design.md` |
 | CH05 Checkmk migration runbook | `docs/ch05-checkmk-migration-runbook.md` |
+| CH05 Checkmk operations dashboards | `docs/ch05-checkmk-operations-dashboards.md` |
 | CH05 Argo CD refactor runbook | `docs/ch05-argocd-operations-refactor-runbook.md` |
 | Checkmk monitoring | `platform/observability/checkmk/README.md` |
 | External host monitoring backlog | `platform/observability/external-hosts/README.md` |

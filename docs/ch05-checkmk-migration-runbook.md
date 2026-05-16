@@ -177,19 +177,31 @@ operations-stack Argo CD application is Synced/Healthy
 ```
 
 
-## Deferred graph_recipe follow-up
+## CH05.8D graph_recipe diagnostic and fix
 
-After the stable CH05 checkpoint is tagged, investigate the remaining Checkmk service graph UI error through the diagnostic-only workflow:
+The service graph UI error was investigated through the diagnostic-only workflow:
 
 ```text
 05.8D - Diagnose Checkmk Graph Rendering
 ```
 
-Known symptom:
+Observed symptom:
 
 ```text
 Loading graph failed: (Status: 1)
 'graph_recipe'
 ```
 
-Do not modify the stable CH05.5/05.7/05.6/05.4 chain until the graph diagnostic artifact is reviewed.
+The diagnostic artifact showed Checkmk graph AJAX requests failing because the auth-shim stripped `Content-Type` from JSON POST requests. The fix explicitly preserves `Content-Type` while keeping broad request-header stripping.
+
+
+## CH05.8 - Configure Checkmk Operations Dashboards
+
+Run after the graph Content-Type fix and stable CH05.5/05.7/05.6/05.4 checkpoint.
+
+```text
+00 - Build Platform Artifacts
+05.8 - Configure Checkmk Operations Dashboards
+```
+
+This workflow sets the Checkmk main dashboard as the operator start page and validates the main, problems, host status, host graphs, all hosts, all services and service problems routes through the trusted-header WebUI path. It does not change the Checkmk runtime deployment or native service discovery.
