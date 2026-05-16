@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
+CHECKMK_SITE="${CHECKMK_SITE:-cmk}"
+PLATFORM_HOST="${PLATFORM_HOST:-platforminit-dev-01}"
+CHECKMK_AGENT_PORT="${CHECKMK_AGENT_PORT:-6556}"
+export KUBECONFIG
+
+[[ ${EUID} -eq 0 ]] || { echo "FATAL: Run as root (sudo)." >&2; exit 1; }
+[[ -f "$KUBECONFIG" ]] || { echo "FATAL: missing kubeconfig at ${KUBECONFIG}" >&2; exit 1; }
+
+systemctl is-active --quiet check-mk-agent.socket || {
+  echo "FATAL: check-mk-agent.socket is not active" >&2
+  systemctl status check-mk-agent.socket --no-pager >&2 || true
+  exit 1
+}
+
+if ! ss -ltn "sport = :${CHECKMK_AGENT_PORT}" | grep -q ":${CHECKMK_AGENT_PORT}"; then
+  echo "FATAL: Checkmk agent is not listening on TCP/${CHECKMK_AGENT_PORT}" >&2
+  ss -ltn >&2 || true
+  exit 1
+fi
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+if ! timeout 10 bash -lc "exec 3<>/dev/tcp/127.0.0.1/${CHECKMK_AGENT_PORT}; head -n 80 <&3" > "${TMP_DIR}/agent-local.txt"; then
+  echo "FATAL: could not read Checkmk agent locally" >&2
+  exit 1
+fi
+grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-local.txt" >/dev/null || {
+  echo "FATAL: local Checkmk agent output does not contain <<<check_mk>>>" >&2
+  head -n 40 "${TMP_DIR}/agent-local.txt" >&2 || true
+  exit 1
+}
+
+kubectl -n "$NAMESPACE" rollout status deployment/checkmk --timeout=180s >/dev/null
+POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$POD" ]] || { echo "FATAL: no Checkmk pod found" >&2; exit 1; }
+
+HOST_IPV4="${HOST_IPV4:-$(hostname -I | awk '{print $1}') }"
+HOST_IPV4="${HOST_IPV4%% }"
+[[ -n "$HOST_IPV4" ]] || { echo "FATAL: could not resolve host IPv4" >&2; exit 1; }
+
+kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" "$HOST_IPV4" "$CHECKMK_AGENT_PORT" <<'CHECKMK_AGENT_VALIDATE'
+set -euo pipefail
+SITE="$1"
+PLATFORM_HOST="$2"
+HOST_IPV4="$3"
+PORT="$4"
+SITE_ROOT="/omd/sites/${SITE}"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+test -f "${SITE_ROOT}/local/share/platforminit/checkmk-agent-discovery.txt" || {
+  echo "FATAL: CH05.7 discovery marker is missing" >&2
+  exit 1
+}
+
+if ! timeout 15 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/${PORT}; head -n 80 <&3" > "${TMP_DIR}/agent-from-pod.txt"; then
+  echo "FATAL: Checkmk pod cannot reach host agent at ${HOST_IPV4}:${PORT}" >&2
+  exit 1
+fi
+grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-from-pod.txt" >/dev/null || {
+  echo "FATAL: pod-read agent output does not contain <<<check_mk>>>" >&2
+  head -n 40 "${TMP_DIR}/agent-from-pod.txt" >&2 || true
+  exit 1
+}
+
+su - "${SITE}" -c "cmk -d '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt"
+grep -F '<<<check_mk>>>' "${TMP_DIR}/cmk-agent-output.txt" >/dev/null || {
+  echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
+  head -n 80 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
+  exit 1
+}
+
+su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg"
+service_count="$(awk -v host="${PLATFORM_HOST}" '
+  $1 == "define" && $2 == "service" { in_service=1; has_host=0 }
+  in_service && $1 == "host_name" && $2 == host { has_host=1 }
+  in_service && has_host && $1 == "service_description" { count++ }
+  in_service && $1 == "}" { in_service=0 }
+  END { print count + 0 }
+' "${TMP_DIR}/nagios.cfg")"
+if [[ "${service_count}" -lt 15 ]]; then
+  echo "FATAL: expected at least 15 services after native Checkmk agent discovery, got ${service_count}" >&2
+  grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 120 >&2 || true
+  exit 1
+fi
+
+native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP)' "${TMP_DIR}/nagios.cfg" || true)"
+if [[ "${native_hits}" -lt 3 ]]; then
+  echo "FATAL: expected native Linux agent service descriptions, got ${native_hits}" >&2
+  grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 120 >&2 || true
+  exit 1
+fi
+
+host_graphs_file="${TMP_DIR}/host-graphs.html"
+host_graphs_code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o "${host_graphs_file}" -w '%{http_code}' \
+  "http://127.0.0.1:5000/${SITE}/check_mk/view.py?view_name=host_graphs&host=${PLATFORM_HOST}&site=${SITE}" || true)"
+case "${host_graphs_code}" in
+  200|302|303) ;;
+  *)
+    echo "FATAL: Checkmk host graphs page returned HTTP=${host_graphs_code}" >&2
+    head -n 80 "${host_graphs_file}" >&2 || true
+    exit 1
+    ;;
+esac
+if grep -Fq "graph_recipe" "${host_graphs_file}"; then
+  echo "FATAL: Checkmk host graphs page still contains graph_recipe error after native agent discovery" >&2
+  exit 1
+fi
+
+echo "PASS: Checkmk pod can read host agent on ${HOST_IPV4}:${PORT}"
+echo "PASS: Checkmk site can fetch native agent data for ${PLATFORM_HOST}"
+echo "PASS: ${PLATFORM_HOST} has ${service_count} services after discovery"
+echo "PASS: native Linux service matches detected: ${native_hits}"
+echo "PASS: host graphs page has no graph_recipe error"
+CHECKMK_AGENT_VALIDATE
+
+echo "PASS: check-mk-agent.socket is active and listening on TCP/${CHECKMK_AGENT_PORT}"
