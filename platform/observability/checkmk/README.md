@@ -206,10 +206,14 @@ Capture command output to a temporary file first, then grep the file.
 
 ## CH05.6 operator start experience
 
-`05.6 - Provision Checkmk Operations Dashboard` currently uses a conservative
-Checkmk Community/Raw approach: it makes the native host/service state view for
-`platforminit-dev-01` the deterministic operator landing page instead of trying
-to generate fragile dashboard internals directly.
+`05.6 - Configure Checkmk Operations Entry Point` is not a synthetic dashboard
+object generator. The first implementation tried to use dashboard naming/start
+URLs, but that leads to an empty dashboard selector in Checkmk Community/Raw and
+is not an acceptable operator experience.
+
+CH05.6 now uses a conservative Checkmk-native service-list view as the landing
+page. This is closer to the desired Checkmk/Nagios mental model because it shows
+host -> services -> state directly.
 
 The workflow writes:
 
@@ -222,12 +226,18 @@ The workflow writes:
 The configured start URL is:
 
 ```text
+view.py?view_name=service&host=platforminit-dev-01
+```
+
+The host status page is kept as a secondary deep link only:
+
+```text
 view.py?view_name=hoststatus&host=platforminit-dev-01
 ```
 
-This intentionally replaces the default `Welcome to Checkmk` entrypoint with a
-Checkmk-native operator view that shows the PlatformInit host and lets the user
-drill into the current service states.
+This intentionally avoids the default `Welcome to Checkmk` page and the empty
+`dashboard.py` selector. Operators land on the concrete list of PlatformInit
+services and can drill into current state from there.
 
 The success contract is:
 

@@ -15,7 +15,8 @@ set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
 SITE_ROOT="/omd/sites/${SITE}"
-START_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
+START_URL="view.py?view_name=service&host=${PLATFORM_HOST}"
+HOST_STATUS_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
 
 UI_FILE="${SITE_ROOT}/etc/check_mk/multisite.d/wato/platforminit_operations_ui.mk"
 USER_START_FILE="${SITE_ROOT}/var/check_mk/web/cmkadmin/start_url.mk"
@@ -26,6 +27,7 @@ test -f "${USER_START_FILE}"
 test -f "${ENTRYPOINTS}"
 grep -F "start_url = '${START_URL}'" "${UI_FILE}" >/dev/null
 grep -F "start_url = '${START_URL}'" "${USER_START_FILE}" >/dev/null
+grep -F "view.py?view_name=service&host=${PLATFORM_HOST}" "${ENTRYPOINTS}" >/dev/null
 grep -F "view.py?view_name=hoststatus&host=${PLATFORM_HOST}" "${ENTRYPOINTS}" >/dev/null
 
 TMP_DIR="$(mktemp -d)"
@@ -53,13 +55,13 @@ code="$(curl -ksS -H 'X-Remote-User: cmkadmin' -o /tmp/platforminit-operations-v
 case "${code}" in
   200|302|303) ;;
   *)
-    echo "FATAL: operator hoststatus view returned HTTP=${code}" >&2
+    echo "FATAL: operator service-list view returned HTTP=${code}" >&2
     head -n 80 /tmp/platforminit-operations-view-validate.html >&2 || true
     exit 1
     ;;
 esac
 
 echo "PASS: PlatformInit Checkmk start URL is configured"
-echo "PASS: PlatformInit Checkmk operator view responds with HTTP=${code}"
+echo "PASS: PlatformInit Checkmk operator service-list view responds with HTTP=${code}"
 echo "PASS: ${PLATFORM_HOST} is visible with ${service_count} generated services"
 CHECKMK_DASHBOARD_VALIDATE
