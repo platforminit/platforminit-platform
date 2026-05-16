@@ -251,3 +251,23 @@ local Checkmk frontend returns HTTP 200/302/303 for the all-hosts view
 CH05.6 does not install the Checkmk agent. CH05.7 should add the host agent and
 run service discovery so this landing page becomes a full host metrics and
 service-discovery view rather than a synthetic active-check view.
+
+### Logout behaviour
+
+Checkmk Raw/Community does not own the external browser session in this
+PlatformInit setup. The application is protected by Authentik forwardAuth and
+Checkmk receives a trusted `X-Remote-User` header from the nginx auth-shim.
+
+Therefore the native Checkmk logout endpoint is intercepted by the auth-shim:
+
+```text
+/cmk/check_mk/logout.py -> /outpost.goauthentik.io/sign_out
+```
+
+The Checkmk Authentik proxy provider uses `default-invalidation-flow`, not
+`default-provider-invalidation-flow`, so application-initiated logout terminates
+the Authentik browser session and the next visit returns to the Authentik login
+flow instead of showing a raw Checkmk `401 Unauthorized` page.
+
+This follows the Authentik proxy-provider logout model where single-application
+proxy logout is initiated through `/outpost.goauthentik.io/sign_out`.
