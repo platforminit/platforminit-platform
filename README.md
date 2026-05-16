@@ -42,7 +42,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 18 | `05.3 - Enable Checkmk Trusted-Header SSO` | `observability-release-*` |
 | 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
 | 20 | `05.5 - Provision Checkmk Operations Model` | `observability-release-*` |
-| 21 | `05.7 - Install Checkmk Agent and Discover Services` | `observability-release-*` |
+| 21 | `05.7D - Diagnose Checkmk Agent Discovery` | `observability-release-*` |
 | 22 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
@@ -71,6 +71,8 @@ Authentik         -> SSO gate through Traefik forwardAuth
 Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
 Argo CD           -> owns runtime deployment
 ```
+
+CH05.7 native agent discovery is paused behind a diagnostic workflow. Keep the stable 05.5/05.6 Checkmk operator baseline intact until the 05.7D logs are reviewed.
 
 Public operations WebUI:
 
