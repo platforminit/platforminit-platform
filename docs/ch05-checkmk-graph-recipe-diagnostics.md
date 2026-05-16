@@ -68,3 +68,8 @@ Do not modify CH05.5, CH05.6 or CH05.7 runtime behavior while diagnosing this is
 ```text
 ch05-checkmk-stable-2026-05-16
 ```
+
+
+## CH05.8D artifact conclusion
+
+The diagnostic artifact showed repeated Checkmk WebUI crashes in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The host is a valid TCP Checkmk agent target and native services exist, so the issue is not agent discovery. The likely ingress/auth-shim root cause is that the shim stripped request headers broadly and did not preserve `Content-Type`, causing Checkmk graph AJAX JSON POST bodies to reach the backend without the parser contract needed to populate `graph_recipe`.

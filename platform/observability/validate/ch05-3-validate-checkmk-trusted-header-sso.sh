@@ -47,6 +47,8 @@ if ! printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote
 fi
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_pass_request_headers[[:space:]]+off;' \
   || die "Checkmk auth shim still forwards all browser/Authentik headers"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Content-Type[[:space:]]+\$content_type;' \
+  || die "Checkmk auth-shim does not preserve Content-Type for WebUI JSON/AJAX POST requests"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+"";' \
   || die "Checkmk auth shim does not clear stale browser cookies"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Authorization[[:space:]]+"";' \
@@ -76,6 +78,8 @@ checkmk_pod="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk
 runtime_shim_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c auth-shim -- sh -lc 'nginx -T 2>/dev/null' || true)"
 printf '%s\n' "$runtime_shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' \
   || die "Running auth-shim nginx config does not contain the logout route; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+printf '%s\n' "$runtime_shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Content-Type[[:space:]]+\$content_type;' \
+  || die "Running auth-shim nginx config does not preserve Content-Type for WebUI JSON/AJAX POST requests; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 printf '%s\n' "$runtime_shim_conf" | grep -Eq 'https://auth\.' \
   || die "Running auth-shim nginx config must target the Authentik public host, not the Checkmk host; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 printf '%s\n' "$runtime_shim_conf" | grep -Eq '/if/flow/default-invalidation-flow/' \
