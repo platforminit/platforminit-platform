@@ -1,4 +1,4 @@
-name: 05.2 - Sync Operations Stack
+name: 05.6 - Provision Checkmk Operations Dashboard
 
 on:
   workflow_dispatch:
@@ -257,7 +257,7 @@ jobs:
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "
             set -euo pipefail
             chmod +x /tmp/platforminit-run/ch05-remote.sh
-            sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' 'ch05-sync-operations-stack.sh' 'ch05-noop.sh' '${HOST_LOGIN_USER}'
+            sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' 'ch05-6-provision-checkmk-operations-dashboard.sh' 'ch05-6-validate-checkmk-operations-dashboard.sh' '${HOST_LOGIN_USER}'
           "
 
       - name: Fetch CH05 reports
