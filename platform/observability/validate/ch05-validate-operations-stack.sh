@@ -68,6 +68,9 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-logout-redirect >/dev/null || die "Missing Authentik logout redirect middleware"
   kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk >/dev/null || die "Missing Checkmk IngressRoute"
   kubectl -n "$NAMESPACE" get certificate checkmk-tls >/dev/null || die "Missing Checkmk TLS Certificate"
+  checksum_annotation="$(kubectl -n "$NAMESPACE" get deployment checkmk -o go-template='{{ index .spec.template.metadata.annotations "checksum/auth-shim-config" }}' 2>/dev/null || true)"
+  [[ -n "$checksum_annotation" ]] || die "Checkmk Deployment lacks checksum/auth-shim-config; auth-shim nginx can keep stale subPath-mounted ConfigMap content"
+
   addr="$(kubectl -n "$NAMESPACE" get middleware.traefik.io checkmk-authentik-forward-auth -o jsonpath='{.spec.forwardAuth.address}')"
   [[ "$addr" == *authentik-forward-auth.operations.svc.cluster.local*/outpost.goauthentik.io/auth/traefik* ]] || die "Unexpected forwardAuth endpoint: $addr"
   ingress_yaml="$(kubectl -n "$NAMESPACE" get ingressroute.traefik.io checkmk -o yaml)"
@@ -87,6 +90,10 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   echo "$shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' || die "Checkmk logout does not redirect to Authentik sign_out"
   echo "$shim_conf" | grep -Eq 'add_header[[:space:]]+Cache-Control[[:space:]]+"no-store"[[:space:]]+always;' || die "Checkmk logout redirect does not disable browser caching"
   echo "$shim_conf" | grep -Eq 'Set-Cookie.*auth_cmk=deleted' || die "Checkmk logout redirect does not expire the stale Checkmk browser cookie"
+
+  runtime_shim_conf="$(kubectl -n "$NAMESPACE" exec "$POD" -c auth-shim -- sh -lc 'nginx -T 2>/dev/null' || true)"
+  echo "$runtime_shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' || die "Running auth-shim nginx config does not contain native logout interception; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+  echo "$runtime_shim_conf" | grep -Eq '/outpost\.goauthentik\.io/sign_out' || die "Running auth-shim nginx config does not target Authentik sign_out; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 
   log "Validating Checkmk auth-shim runtime path through service port 80"
   kill "$PF" >/dev/null 2>&1 || true
