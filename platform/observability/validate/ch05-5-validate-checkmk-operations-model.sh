@@ -10,7 +10,7 @@ kubectl -n "$NAMESPACE" rollout status deployment/checkmk --timeout=180s >/dev/n
 POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}')"
 [[ -n "$POD" ]] || { echo "FATAL: no Checkmk pod found" >&2; exit 1; }
 
-kubectl -n "$NAMESPACE" exec "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" <<'CHECKMK_VALIDATE'
+kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" <<'CHECKMK_VALIDATE'
 set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"

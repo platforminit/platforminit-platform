@@ -164,7 +164,7 @@ cmk -N contains PlatformInit custom services
 Checkmk UI shows Hosts > 0 and Services > 0
 ```
 
-The first Checkmk model uses Checkmk `custom_checks` with a small Nagios-compatible
+The first Checkmk model uses Checkmk `custom_checks` in the Checkmk 2.x dict-rule format with a small Nagios-compatible
 plugin generated into the site-local plugin directory. The checks are intentionally
 operator-facing and named after services rather than raw metric keys:
 
@@ -185,3 +185,11 @@ Platform runtime artifacts
 Storage checks read host paths through read-only `hostPath` mounts in the Checkmk
 container. This means any change to the mounted path contract requires `05.2 - Sync
 Operations Stack` before rerunning `05.5`.
+
+### CH05.5 Checkmk 2.x rule format note
+
+CH05.5 must not write deprecated tuple-style `custom_checks` rules such as
+`({value}, [], [host])`. Checkmk 2.2+ expects dict-style rules with `id`,
+`value`, `condition`, and `options`. The PlatformInit bootstrap therefore writes
+only dict-style `custom_checks` entries and keeps the first model minimal to
+avoid legacy tuple-rule conversion failures during `cmk -R`.
