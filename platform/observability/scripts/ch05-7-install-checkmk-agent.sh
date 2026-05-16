@@ -280,7 +280,26 @@ fi
 # `cmk -I` is the documented CLI path for service discovery. The --cache flag
 # makes Checkmk use the freshly written cache entry for PLATFORM_HOST instead of
 # trying to resolve/contact the host name again.
-run_site_cmd cmk-discovery "cmk --cache --detect-plugins=df,lnx_if,mem,uptime,cpu_load,check_mk -vI '${PLATFORM_HOST}'"
+run_site_cmd cmk-agent-cache-check "cmk --cache -nv '${PLATFORM_HOST}'"
+
+cache_hits="$(grep -Ec '^(CPU load|CPU utilization|Check_MK Agent|Disk IO|Filesystem|Interface|Kernel Performance|Memory|Number of threads|TCP Connections|Uptime)[[:space:]]' "${TMP_DIR}/cmk-agent-cache-check.out" || true)"
+if [[ "${cache_hits}" -lt 3 ]]; then
+  echo "FATAL: Checkmk can read the raw agent cache but did not process native Linux services from it" >&2
+  echo "--- cmk --cache -nv ${PLATFORM_HOST} stdout ---" >&2
+  head -n 240 "${TMP_DIR}/cmk-agent-cache-check.out" >&2 || true
+  echo "--- cmk --cache -nv ${PLATFORM_HOST} stderr ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-agent-cache-check.err" >&2 || true
+  echo "--- raw agent cache sections ---" >&2
+  grep -E '^<<<[^>]+>>>' "${SITE_ROOT}/tmp/check_mk/cache/${PLATFORM_HOST}" | head -n 120 >&2 || true
+  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
+  cat "${TMP_DIR}/host-diagnostics.txt" >&2 || true
+  exit 1
+fi
+
+# Do not restrict the initial discovery to a hand-picked plugin list. Checkmk
+# 2.5 service names/check plug-in names are version-specific; full discovery is
+# safer and matches the documented cmk -I flow.
+run_site_cmd cmk-discovery "cmk --cache -vI '${PLATFORM_HOST}'"
 
 if ! run_site_cmd_warn cmk-reload-after-discovery "cmk -R"; then
   echo "WARN: cmk -R failed after discovery; trying cmk -O as reload fallback" >&2

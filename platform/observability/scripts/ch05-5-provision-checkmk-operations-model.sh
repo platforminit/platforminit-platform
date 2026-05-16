@@ -160,39 +160,22 @@ cat > "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_hosts.mk" <<PL
 
 globals().setdefault("all_hosts", [])
 globals().setdefault("ipaddresses", {})
-globals().setdefault("host_attributes", {})
 globals().setdefault("define_hostgroups", {})
 globals().setdefault("host_groups", [])
 globals().setdefault("custom_checks", [])
 
-# CH05.5 owns the PlatformInit host object used by the later CH05.7 native
-# Checkmk agent discovery workflow. Keep the object explicit and WATO-compatible:
-# the host must not inherit or silently fall back to a ping/no-agent model.
-# Without explicit cmk-agent/no-snmp attributes, native service discovery can
-# fetch data but still discover no native Linux services, leaving only the 11
-# synthetic checks. Keep only stable default host tags in all_hosts; richer
-# address-family details are expressed in host_attributes below. Avoid backticks
-# in this expanding heredoc: command substitution would run in the container shell
-# before the config is written.
+# Keep CH05.5 conservative. It is the known-good synthetic operations model:
+# one Checkmk host, eleven state-only PlatformInit services, and an explicit IPv4
+# address. Do not write raw host_attributes/tag overlays here. Those fields are
+# version-sensitive in Checkmk 2.5 and can make cmk -N/cmk -R fail before the
+# model is loaded. CH05.7 performs agent installation/discovery separately.
 all_hosts = [entry for entry in all_hosts if entry.split("|", 1)[0] != "${PLATFORM_HOST}"]
 all_hosts += [
-    "${PLATFORM_HOST}|cmk-agent|no-snmp|prod|lan|site:${SITE}",
+    "${PLATFORM_HOST}|prod|lan",
 ]
 
 ipaddresses.update({
     "${PLATFORM_HOST}": "${HOST_IPV4}",
-})
-
-host_attributes.setdefault("${PLATFORM_HOST}", {})
-host_attributes["${PLATFORM_HOST}"].update({
-    "alias": "PlatformInit development host",
-    "ipaddress": "${HOST_IPV4}",
-    "site": "${SITE}",
-    "tag_agent": "cmk-agent",
-    "tag_snmp_ds": "no-snmp",
-    "tag_address_family": "ip-v4-only",
-    "tag_criticality": "prod",
-    "tag_networking": "lan",
 })
 
 define_hostgroups.update({
