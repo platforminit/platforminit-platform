@@ -43,7 +43,9 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
 | 20 | `05.5 - Provision Checkmk Operations Model` | `observability-release-*` |
 | 21 | `05.7D - Diagnose Checkmk Agent Discovery` | `observability-release-*` |
-| 22 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
+| 22 | `05.7 - Install Checkmk Agent and Discover Services` | `observability-release-*` |
+| 23 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
+| 24 | `05.8D - Diagnose Checkmk Graph Rendering` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -72,7 +74,7 @@ Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
 Argo CD           -> owns runtime deployment
 ```
 
-CH05.7 native agent discovery is paused behind a diagnostic workflow. Keep the stable 05.5/05.6 Checkmk operator baseline intact until the 05.7D logs are reviewed.
+CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The remaining `graph_recipe` UI error is a deferred known issue and should be investigated through `05.8D - Diagnose Checkmk Graph Rendering` before making graph-related changes.
 
 Public operations WebUI:
 
