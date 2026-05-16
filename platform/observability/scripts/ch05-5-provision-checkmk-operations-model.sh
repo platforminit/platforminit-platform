@@ -158,24 +158,17 @@ globals().setdefault("define_hostgroups", {})
 globals().setdefault("host_groups", [])
 globals().setdefault("custom_checks", [])
 
-# Keep the PlatformInit host usable both for CH05.5 state-only synthetic
-# checks and CH05.7 native Checkmk agent discovery. The explicit agent/address
-# tags avoid a subtle failure mode where custom checks render correctly but
-# `cmk -d <host>` cannot select a TCP Checkmk-agent data source for discovery.
+# CH05.5 keeps the operator-first synthetic model intentionally simple.
+# Native Checkmk agent discovery in CH05.7 uses a refreshed agent cache from
+# the directly verified HOST_IPV4:6556 path instead of writing fragile raw
+# Checkmk host-attribute overlays.
 all_hosts = [entry for entry in all_hosts if entry.split("|", 1)[0] != "${PLATFORM_HOST}"]
 all_hosts += [
-    "${PLATFORM_HOST}|cmk-agent|ip-v4|ip-v4-only|tcp|prod|lan|site:${SITE}",
+    "${PLATFORM_HOST}|prod|lan",
 ]
 
 ipaddresses.update({
     "${PLATFORM_HOST}": "${HOST_IPV4}",
-})
-
-globals().setdefault("host_attributes", {})
-host_attributes.setdefault("${PLATFORM_HOST}", {})
-host_attributes["${PLATFORM_HOST}"].update({
-    "ipaddress": "${HOST_IPV4}",
-    "site": "${SITE}",
 })
 
 define_hostgroups.update({

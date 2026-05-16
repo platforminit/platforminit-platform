@@ -68,59 +68,43 @@ grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-from-pod.txt" >/dev/null || {
   exit 1
 }
 
-test -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" || {
-  echo "FATAL: CH05.7 Checkmk agent address overlay is missing" >&2
+# CH05.7 must not leave the earlier raw host-address overlay behind. That
+# overlay made cmk -N fail in some Checkmk 2.5 RAW environments before service
+# discovery could even run.
+if [[ -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" ]]; then
+  echo "FATAL: stale CH05.7 agent address overlay still exists" >&2
+  sed -n '1,160p' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
   exit 1
-}
+fi
 
-awk -v h="${PLATFORM_HOST}" '
-  {
-    keep=1
-    for (i = 2; i <= NF; i++) {
-      if ($i == h) { keep=0 }
-    }
-    if (keep) print
-  }
-' /etc/hosts > "${TMP_DIR}/hosts.reconciled" 2>/dev/null || cp /etc/hosts "${TMP_DIR}/hosts.reconciled"
-printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> "${TMP_DIR}/hosts.reconciled"
-cat "${TMP_DIR}/hosts.reconciled" > /etc/hosts 2>/dev/null || {
-  echo "WARN: could not rewrite /etc/hosts; appending resolver override instead" >&2
-  printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> /etc/hosts 2>/dev/null || true
-}
-getent hosts "${PLATFORM_HOST}" > "${TMP_DIR}/resolver.txt" 2>&1 || true
-if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/resolver.txt" >/dev/null 2>&1; then
-  echo "WARN: resolver for ${PLATFORM_HOST} does not visibly point to ${HOST_IPV4}" >&2
-  cat "${TMP_DIR}/resolver.txt" >&2 || true
+mkdir -p "${SITE_ROOT}/tmp/check_mk/cache"
+cache_file="${SITE_ROOT}/tmp/check_mk/cache/${PLATFORM_HOST}"
+install -m 0644 "${TMP_DIR}/agent-from-pod.txt" "${cache_file}"
+chown "${SITE}:${SITE}" "${cache_file}"
+
+if ! su - "${SITE}" -c "cmk-validate-config" > "${TMP_DIR}/cmk-validate-config.out" 2> "${TMP_DIR}/cmk-validate-config.err"; then
+  echo "FATAL: cmk-validate-config failed" >&2
+  echo "--- stdout ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-validate-config.out" >&2 || true
+  echo "--- stderr ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-validate-config.err" >&2 || true
+  exit 1
 fi
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-host-diagnostics.txt" 2>&1 || true
-if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/cmk-host-diagnostics.txt" >/dev/null; then
-  echo "WARN: cmk -D output does not visibly contain expected host IPv4 ${HOST_IPV4}; continuing with direct fetch validation" >&2
-  head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
-fi
 
-if ! su - "${SITE}" -c "cmk -vvd '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
-  echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
+if ! su - "${SITE}" -c "cmk --cache -nv '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-agent-output.txt" 2> "${TMP_DIR}/cmk-agent-error.txt"; then
+  echo "FATAL: Checkmk site cannot run native checks from refreshed cache for ${PLATFORM_HOST}" >&2
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   head -n 160 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
-  echo "--- cmk -vvd stderr ---" >&2
+  echo "--- cmk --cache -nv stderr ---" >&2
   head -n 120 "${TMP_DIR}/cmk-agent-error.txt" >&2 || true
-  echo "--- cmk -vvd stdout ---" >&2
-  head -n 120 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
-  echo "--- resolver ${PLATFORM_HOST} ---" >&2
-  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  echo "--- cmk --cache -nv stdout ---" >&2
+  head -n 160 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
   echo "--- direct TCP agent probe from Checkmk pod ---" >&2
   timeout 10 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/${PORT}; head -n 40 <&3" >&2 || true
   exit 1
 fi
-grep -F '<<<check_mk>>>' "${TMP_DIR}/cmk-agent-output.txt" >/dev/null || {
-  echo "FATAL: Checkmk site cannot fetch agent output for ${PLATFORM_HOST}" >&2
-  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
-  head -n 120 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
-  echo "--- cmk -vvd stdout ---" >&2
-  head -n 120 "${TMP_DIR}/cmk-agent-output.txt" >&2 || true
-  exit 1
-}
 
 if ! su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg" 2> "${TMP_DIR}/cmk-nagios.err"; then
   echo "FATAL: cmk -N failed while validating discovered services" >&2
@@ -128,8 +112,8 @@ if ! su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg" 2> "${TMP_DIR}/cmk-nag
   head -n 160 "${TMP_DIR}/cmk-nagios.err" >&2 || true
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   head -n 160 "${TMP_DIR}/cmk-host-diagnostics.txt" >&2 || true
-  echo "--- resolver ${PLATFORM_HOST} ---" >&2
-  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  echo "--- stale CH05.7 address overlay should be absent ---" >&2
+  ls -l "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
   exit 1
 fi
 service_count="$(awk -v host="${PLATFORM_HOST}" '
@@ -145,7 +129,7 @@ if [[ "${service_count}" -lt 15 ]]; then
   exit 1
 fi
 
-native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP)' "${TMP_DIR}/nagios.cfg" || true)"
+native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP|Check_MK|Disk IO)' "${TMP_DIR}/nagios.cfg" || true)"
 if [[ "${native_hits}" -lt 3 ]]; then
   echo "FATAL: expected native Linux agent service descriptions, got ${native_hits}" >&2
   grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 120 >&2 || true
