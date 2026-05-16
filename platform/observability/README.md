@@ -73,6 +73,6 @@ Current CH05.6 entrypoint:
 view.py?view_name=allhosts
 ```
 
-CH05.7 installs and registers the Checkmk Linux agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery. It exposes the agent on TCP/6556 through a systemd socket, pins the Checkmk host object to the resolved host IPv4 with explicit TCP-agent/address tags, restricts access with UFW where available, runs Checkmk discovery, and validates that native Linux services are visible alongside the CH05.5 state-only synthetic services.
+CH05.7 installs and registers the Checkmk Linux agent on `platforminit-dev-01` so the same operator view is backed by real host metrics and service discovery. It exposes the agent on TCP/6556 through a systemd socket, restricts access with UFW where available, refreshes the Checkmk agent cache from the directly verified host IPv4 path, runs Checkmk service discovery from that cache, and validates that native Linux services are visible alongside the CH05.5 state-only synthetic services.
 
 - Checkmk logout is routed through the public Authentik `/if/flow/default-invalidation-flow/` logout flow so users do not remain silently logged in after leaving Checkmk.

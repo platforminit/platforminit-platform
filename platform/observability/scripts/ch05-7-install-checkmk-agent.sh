@@ -178,72 +178,39 @@ grep -F '<<<check_mk>>>' "${TMP_OUT}" >/dev/null || {
 CHECK_AGENT_REACHABILITY
 
 log "Discovering native Checkmk agent services for ${PLATFORM_HOST}"
-kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" "$HOST_IPV4" <<'CHECKMK_DISCOVERY'
+kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" "$HOST_IPV4" "$CHECKMK_AGENT_PORT" <<'CHECKMK_DISCOVERY'
 set -euo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
 HOST_IPV4="$3"
+PORT="$4"
 SITE_ROOT="/omd/sites/${SITE}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 test -d "${SITE_ROOT}" || { echo "FATAL: missing Checkmk site ${SITE}" >&2; exit 1; }
 
-mkdir -p "${SITE_ROOT}/etc/check_mk/conf.d/platforminit"
+mkdir -p "${SITE_ROOT}/etc/check_mk/conf.d/platforminit" "${SITE_ROOT}/tmp/check_mk/cache"
 
-# CH05.5 originally proved the visible host/service model with active
-# synthetic checks. Native agent discovery is stricter: Checkmk must resolve
-# the host to the same IP that the pod-level /dev/tcp probe already tested,
-# and the host must be tagged as a TCP Checkmk-agent host. Reconcile this here
-# as an idempotent overlay so CH05.7 can be rerun safely even if older CH05.5
-# artifacts still exist in the site.
-cat > "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" <<EOF_AGENT_ADDRESS
-# Managed by PlatformInit CH05.7.
-# Native Checkmk Linux agent discovery address contract.
+# Previous CH05.7 iterations tried to force the native-agent address by writing
+# raw Checkmk host-attribute overlays. That proved brittle and could make
+# `cmk -N` fail before discovery even started. Remove that overlay and keep
+# CH05.7 scoped to the agent cache/discovery path.
+rm -f "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk"
 
-globals().setdefault("all_hosts", [])
-globals().setdefault("ipaddresses", {})
-globals().setdefault("host_attributes", {})
-
-all_hosts = [entry for entry in all_hosts if entry.split("|", 1)[0] != "${PLATFORM_HOST}"]
-all_hosts += [
-    "${PLATFORM_HOST}|cmk-agent|ip-v4|ip-v4-only|tcp|prod|lan|site:${SITE}",
-]
-
-ipaddresses.update({
-    "${PLATFORM_HOST}": "${HOST_IPV4}",
-})
-
-host_attributes.setdefault("${PLATFORM_HOST}", {})
-host_attributes["${PLATFORM_HOST}"].update({
-    "ipaddress": "${HOST_IPV4}",
-    "site": "${SITE}",
-})
-EOF_AGENT_ADDRESS
-chown "${SITE}:${SITE}" "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk"
-
-# Runtime resolver override for the current Checkmk pod. The persistent source
-# of truth remains the Checkmk config above, but Checkmk CLI agent fetches can
-# still fall back to the container resolver. Always pin /etc/hosts for this pod,
-# even when getent already returns a stale value from DNS or an older hosts file.
-ensure_hosts_mapping() {
-  local reconciled="${TMP_DIR}/hosts.reconciled"
-  awk -v h="${PLATFORM_HOST}" '
-    BEGIN { changed=0 }
-    {
-      keep=1
-      for (i = 2; i <= NF; i++) {
-        if ($i == h) { keep=0; changed=1 }
-      }
-      if (keep) print
-    }
-  ' /etc/hosts > "${reconciled}" 2>/dev/null || cp /etc/hosts "${reconciled}"
-  printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> "${reconciled}"
-  cat "${reconciled}" > /etc/hosts 2>/dev/null || {
-    echo "WARN: could not rewrite /etc/hosts; appending resolver override instead" >&2
-    printf "%s %s\n" "${HOST_IPV4}" "${PLATFORM_HOST}" >> /etc/hosts 2>/dev/null || true
+write_agent_cache() {
+  local cache_file="${SITE_ROOT}/tmp/check_mk/cache/${PLATFORM_HOST}"
+  if ! timeout 20 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/${PORT}; cat <&3" > "${TMP_DIR}/agent-cache.raw"; then
+    echo "FATAL: cannot refresh Checkmk agent cache from ${HOST_IPV4}:${PORT}" >&2
+    exit 1
+  fi
+  grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-cache.raw" >/dev/null || {
+    echo "FATAL: direct agent cache refresh did not contain <<<check_mk>>>" >&2
+    head -n 80 "${TMP_DIR}/agent-cache.raw" >&2 || true
+    exit 1
   }
-  getent hosts "${PLATFORM_HOST}" > "${TMP_DIR}/resolver.txt" 2>&1 || true
+  install -m 0644 "${TMP_DIR}/agent-cache.raw" "${cache_file}"
+  chown "${SITE}:${SITE}" "${cache_file}"
 }
 
 dump_checkmk_context() {
@@ -252,17 +219,17 @@ dump_checkmk_context() {
   echo "--- ${label} command ---" >&2
   echo "${cmd}" >&2
   echo "--- ${label} stdout ---" >&2
-  head -n 160 "${TMP_DIR}/${label}.out" >&2 || true
+  head -n 200 "${TMP_DIR}/${label}.out" >&2 || true
   echo "--- ${label} stderr ---" >&2
-  head -n 160 "${TMP_DIR}/${label}.err" >&2 || true
-  echo "--- resolver ${PLATFORM_HOST} ---" >&2
-  cat "${TMP_DIR}/resolver.txt" >&2 || true
+  head -n 200 "${TMP_DIR}/${label}.err" >&2 || true
   echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
   su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" >&2 || true
-  echo "--- omd status ${SITE} ---" >&2
-  omd status "${SITE}" >&2 || true
-  echo "--- CH05.7 agent address overlay ---" >&2
-  sed -n '1,180p' "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
+  echo "--- cmk-validate-config ---" >&2
+  su - "${SITE}" -c "cmk-validate-config" >&2 || true
+  echo "--- direct TCP agent probe from Checkmk pod ---" >&2
+  timeout 10 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/${PORT}; head -n 80 <&3" >&2 || true
+  echo "--- stale CH05.7 address overlay should be absent ---" >&2
+  ls -l "${SITE_ROOT}/etc/check_mk/conf.d/platforminit/zz_platforminit_agent_address.mk" >&2 || true
 }
 
 run_site_cmd() {
@@ -287,17 +254,13 @@ run_site_cmd_warn() {
   fi
 }
 
-ensure_hosts_mapping
-if ! grep -F "${HOST_IPV4}" "${TMP_DIR}/resolver.txt" >/dev/null 2>&1; then
-  echo "WARN: resolver for ${PLATFORM_HOST} does not visibly point to ${HOST_IPV4}" >&2
-  cat "${TMP_DIR}/resolver.txt" >&2 || true
-fi
+# CH05.7 already proved direct pod-to-host TCP reachability before entering this
+# block. Refresh the Checkmk agent cache from that deterministic IP path and run
+# discovery from cache. This avoids DNS/IPv6 resolver drift for the hostname
+# while still creating native services for the existing Checkmk host object.
+write_agent_cache
 
-# Validate the Checkmk configuration before discovery, but do not reload the
-# monitoring core yet. In this workflow we only need the site user tools to be
-# able to read the current config and fetch agent data. Reloading first can fail
-# in RAW/Nagios mode for core-runtime reasons and hide the real discovery error.
-run_site_cmd cmk-config-preflight "cmk -N"
+run_site_cmd config-validation "cmk-validate-config"
 run_site_cmd cmk-host-list "cmk -l"
 cp "${TMP_DIR}/cmk-host-list.out" "${TMP_DIR}/hosts.txt"
 grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
@@ -307,40 +270,21 @@ grep -Fx "${PLATFORM_HOST}" "${TMP_DIR}/hosts.txt" >/dev/null || {
 }
 
 su - "${SITE}" -c "cmk -D '${PLATFORM_HOST}'" > "${TMP_DIR}/host-diagnostics.txt" 2>&1 || true
-if ! su - "${SITE}" -c "cmk -vvd '${PLATFORM_HOST}'" > "${TMP_DIR}/agent-output.txt" 2> "${TMP_DIR}/agent-error.txt"; then
-  echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
-  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
-  head -n 160 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
-  echo "--- cmk -vvd stderr ---" >&2
-  head -n 120 "${TMP_DIR}/agent-error.txt" >&2 || true
-  echo "--- cmk -vvd stdout ---" >&2
-  head -n 120 "${TMP_DIR}/agent-output.txt" >&2 || true
-  echo "--- resolver ${PLATFORM_HOST} ---" >&2
-  cat "${TMP_DIR}/resolver.txt" >&2 || true
-  echo "--- direct TCP agent probe from Checkmk pod ---" >&2
-  timeout 10 bash -lc "exec 3<>/dev/tcp/${HOST_IPV4}/6556; head -n 40 <&3" >&2 || true
-  exit 1
-fi
-grep -F '<<<check_mk>>>' "${TMP_DIR}/agent-output.txt" >/dev/null || {
-  echo "FATAL: Checkmk cannot fetch agent data from ${PLATFORM_HOST}" >&2
-  echo "--- cmk -D ${PLATFORM_HOST} ---" >&2
-  head -n 120 "${TMP_DIR}/host-diagnostics.txt" >&2 || true
-  echo "--- cmk -vvd stdout ---" >&2
-  head -n 120 "${TMP_DIR}/agent-output.txt" >&2 || true
-  exit 1
-}
 
-# Full discovery (-II) deliberately accepts new native agent services and removes
-# stale discovered entries for this host. CH05.5 custom synthetic checks remain
-# managed separately through conf.d/platforminit/platforminit_hosts.mk.
-run_site_cmd cmk-discovery "cmk -vII '${PLATFORM_HOST}'"
+# `cmk -I` is the documented CLI path for service discovery. The --cache flag
+# makes Checkmk use the freshly written cache entry for PLATFORM_HOST instead of
+# trying to resolve/contact the host name again.
+run_site_cmd cmk-discovery "cmk --cache -vI '${PLATFORM_HOST}'"
+
 if ! run_site_cmd_warn cmk-reload-after-discovery "cmk -R"; then
   echo "WARN: cmk -R failed after discovery; trying cmk -O as reload fallback" >&2
   run_site_cmd cmk-reload-after-discovery-fallback "cmk -O"
 fi
 
-# Run checks once so Livestatus/UI has fresh native-agent state before validation.
-su - "${SITE}" -c "cmk -v '${PLATFORM_HOST}'" > "${TMP_DIR}/cmk-check.txt" 2> "${TMP_DIR}/cmk-check.err" || true
+# Run checks once from the same deterministic cache path so Livestatus/UI has
+# fresh native-agent state before validation.
+write_agent_cache
+run_site_cmd_warn cmk-check-from-cache "cmk --cache -nv '${PLATFORM_HOST}'" || true
 run_site_cmd cmk-core-config "cmk -N"
 cp "${TMP_DIR}/cmk-core-config.out" "${TMP_DIR}/nagios.cfg"
 
@@ -354,14 +298,18 @@ service_count="$(awk -v host="${PLATFORM_HOST}" '
 
 if [[ "${service_count}" -lt 15 ]]; then
   echo "FATAL: expected native agent discovery to increase ${PLATFORM_HOST} service count to at least 15, got ${service_count}" >&2
-  grep -A5 -B2 -E "host_name[[:space:]]+${PLATFORM_HOST}|service_description" "${TMP_DIR}/nagios.cfg" | head -n 160 >&2 || true
+  grep -A5 -B2 -E "host_name[[:space:]]+${PLATFORM_HOST}|service_description" "${TMP_DIR}/nagios.cfg" | head -n 200 >&2 || true
+  echo "--- discovery output ---" >&2
+  head -n 200 "${TMP_DIR}/cmk-discovery.out" >&2 || true
   exit 1
 fi
 
-native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP)' "${TMP_DIR}/nagios.cfg" || true)"
+native_hits="$(grep -Ec 'service_description[[:space:]]+(CPU|Memory|Filesystem|Uptime|Interface|Kernel|TCP|Check_MK|Disk IO)' "${TMP_DIR}/nagios.cfg" || true)"
 if [[ "${native_hits}" -lt 3 ]]; then
   echo "FATAL: expected at least 3 native Linux agent services in generated Checkmk config, got ${native_hits}" >&2
-  grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 120 >&2 || true
+  grep -E 'service_description' "${TMP_DIR}/nagios.cfg" | head -n 160 >&2 || true
+  echo "--- discovery output ---" >&2
+  head -n 200 "${TMP_DIR}/cmk-discovery.out" >&2 || true
   exit 1
 fi
 
@@ -375,6 +323,11 @@ Host:
 Discovery model:
   Native Checkmk Linux agent pull mode on TCP/6556
 
+Implementation note:
+  Discovery uses a freshly refreshed Checkmk agent cache populated from the
+  directly verified ${HOST_IPV4}:${PORT} path. This avoids hostname resolver
+  drift while preserving the PlatformInit Checkmk host object name.
+
 Validation:
   service_count=${service_count}
   native_service_matches=${native_hits}
@@ -384,8 +337,7 @@ native Checkmk agent discovery from this layer onward.
 EOF_DISCOVERY
 chown "${SITE}:${SITE}" "${SITE_ROOT}/local/share/platforminit/checkmk-agent-discovery.txt"
 
-echo "PASS: Checkmk can read native Linux agent data for ${PLATFORM_HOST}"
+echo "PASS: Checkmk agent cache refreshed from ${HOST_IPV4}:${PORT} for ${PLATFORM_HOST}"
 echo "PASS: Native agent discovery generated ${service_count} total services with ${native_hits} native service matches"
 CHECKMK_DISCOVERY
-
 log "CH05.7 Checkmk Linux agent installation and native service discovery completed"

@@ -298,10 +298,9 @@ Host OS:
   UFW allows TCP/6556 only from detected Kubernetes pod CIDRs, localhost and the host IP
 
 Checkmk site:
-  zz_platforminit_agent_address.mk pins platforminit-dev-01 to the resolved host IPv4
-  host object has explicit TCP Checkmk-agent/address tags
-  cmk -d platforminit-dev-01 returns agent sections
-  cmk -II platforminit-dev-01 discovers native Linux services
+  stale zz_platforminit_agent_address.mk overlays are removed
+  agent cache for platforminit-dev-01 is refreshed from the verified HOST_IPV4:6556 path
+  cmk --cache -vI platforminit-dev-01 discovers native Linux services
   cmk -N contains the CH05.5 synthetic services plus native agent services
 ```
 
