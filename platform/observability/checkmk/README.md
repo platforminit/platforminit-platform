@@ -203,3 +203,41 @@ The Checkmk operations model writes `platforminit_hosts.mk` through a shell here
 Do not pipe Checkmk Python-backed commands such as `cmk -N` directly into `grep -q`.
 When `grep -q` exits early after a match, Checkmk can hit a Python `BrokenPipeError` while flushing stdout and return rc=120 even though the generated core configuration is valid.
 Capture command output to a temporary file first, then grep the file.
+
+## CH05.6 operator start experience
+
+`05.6 - Provision Checkmk Operations Dashboard` currently uses a conservative
+Checkmk Community/Raw approach: it makes the native host/service state view for
+`platforminit-dev-01` the deterministic operator landing page instead of trying
+to generate fragile dashboard internals directly.
+
+The workflow writes:
+
+```text
+/omd/sites/cmk/etc/check_mk/multisite.d/wato/platforminit_operations_ui.mk
+/omd/sites/cmk/var/check_mk/web/cmkadmin/start_url.mk
+/omd/sites/cmk/local/share/platforminit/checkmk-operations-entrypoints.txt
+```
+
+The configured start URL is:
+
+```text
+view.py?view_name=hoststatus&host=platforminit-dev-01
+```
+
+This intentionally replaces the default `Welcome to Checkmk` entrypoint with a
+Checkmk-native operator view that shows the PlatformInit host and lets the user
+drill into the current service states.
+
+The success contract is:
+
+```text
+platforminit-dev-01 is visible in cmk -l
+at least 10 generated services exist in cmk -N
+cmkadmin has a PlatformInit start URL
+local Checkmk frontend returns HTTP 200/302/303 for the hoststatus view
+```
+
+CH05.6 does not install the Checkmk agent. CH05.7 should add the host agent and
+run service discovery so this landing page becomes a full host metrics and
+service-discovery view rather than a synthetic active-check view.
