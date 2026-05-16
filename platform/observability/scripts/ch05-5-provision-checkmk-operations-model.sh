@@ -352,9 +352,19 @@ PLATFORMINIT_README
 chown "${SITE}:${SITE}" "${SITE_ROOT}/local/share/platforminit/README.txt"
 
 su - "${SITE}" -c "cmk -R"
-su - "${SITE}" -c "cmk -l" | grep -Fx "${PLATFORM_HOST}" >/dev/null
-su - "${SITE}" -c "cmk -N" | grep -q "host_name[[:space:]]\+${PLATFORM_HOST}"
-su - "${SITE}" -c "cmk -N" | grep -q "service_description[[:space:]]\+SSH"
+
+# Do not pipe Checkmk Python commands into grep -q. In Checkmk 2.x, cmk output
+# can raise BrokenPipeError and exit with rc=120 when the downstream grep closes
+# early after a match. Capture output first, then grep the stable files.
+MODEL_CHECK_DIR="$(mktemp -d)"
+trap 'rm -rf "${MODEL_CHECK_DIR}"' EXIT
+
+su - "${SITE}" -c "cmk -l" > "${MODEL_CHECK_DIR}/hosts.txt"
+su - "${SITE}" -c "cmk -N" > "${MODEL_CHECK_DIR}/nagios.cfg"
+
+grep -Fx "${PLATFORM_HOST}" "${MODEL_CHECK_DIR}/hosts.txt" >/dev/null
+grep -q "host_name[[:space:]]\+${PLATFORM_HOST}" "${MODEL_CHECK_DIR}/nagios.cfg"
+grep -q "service_description[[:space:]]\+SSH" "${MODEL_CHECK_DIR}/nagios.cfg"
 CHECKMK_MODEL
 
 log "Checkmk operations model provisioned and core configuration reloaded"

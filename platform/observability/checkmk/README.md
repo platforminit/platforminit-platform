@@ -197,3 +197,9 @@ avoid legacy tuple-rule conversion failures during `cmk -R`.
 ### CH05.5 heredoc safety
 
 The Checkmk operations model writes `platforminit_hosts.mk` through a shell heredoc. The `PLATFORMINIT_MK` terminator must stay on its own line; otherwise the shell appends the rest of the script into the generated Checkmk configuration and the workflow can report a misleading partial success before validation fails.
+
+### Checkmk command output safety
+
+Do not pipe Checkmk Python-backed commands such as `cmk -N` directly into `grep -q`.
+When `grep -q` exits early after a match, Checkmk can hit a Python `BrokenPipeError` while flushing stdout and return rc=120 even though the generated core configuration is valid.
+Capture command output to a temporary file first, then grep the file.
