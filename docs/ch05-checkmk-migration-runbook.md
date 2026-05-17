@@ -146,23 +146,11 @@ git diff --stat
 git diff -- .github/workflows platform/observability docs README.md
 
 git add \
-  .github/workflows/build-platform-artifacts.yml \
-  .github/workflows/deploy-05-register-operations-stack.yml \
-  .github/workflows/deploy-05-1-reconcile-operations-prereqs.yml \
-  .github/workflows/deploy-05-2-sync-operations-stack.yml \
-  .github/workflows/deploy-05-3-enable-checkmk-sso.yml \
-  .github/workflows/deploy-05-4-validate-operations-stack.yml \
-  .github/workflows/deploy-05-5-provision-checkmk-operations-model.yml \
-  .github/workflows/deploy-05-7d-diagnose-checkmk-agent.yml \
-  .github/workflows/deploy-05-6-provision-checkmk-operations-dashboard.yml \
-  platform/observability \
-  docs \
-  README.md
-
-git commit -m "feat(ch05): replace observability proof with Checkmk operations layer" \
-  -m "Purge the retired Zabbix/OpenObserve/Vector CH05 proof from the active lifecycle and introduce a Checkmk Community based operations console." \
-  -m "Add Authentik forwardAuth integration through Traefik and an auth-shim that maps X-authentik identity headers to the X-Remote-User trusted-header contract used by Checkmk Raw/Community." \
-  -m "Keep CH05 Argo CD-owned and preserve a local cmkadmin break-glass path while documenting the runtime purge and validation sequence."
+  .github/workflows/deploy-05-operations-monitoring.yml \
+  .github/workflows/deploy-05-operations-diagnostics.yml \
+  README.md \
+  docs/ch05-workflow-ux-consolidation.md \
+  docs/ch05-checkmk-migration-runbook.md
 ```
 
 ## Acceptance criteria
@@ -254,4 +242,4 @@ After the Checkmk Alert Manager checkpoint, CH05 is operated through two workflo
 
 Use `05 - Operations Monitoring` with `action=full_reconcile` for a complete CH05 reconciliation. Use individual actions only for targeted recovery. Use `05.D - Operations Diagnostics` for agent-discovery or graph/dashboard/session diagnostic bundles.
 
-The former granular implementation workflows remain reusable internal `workflow_call` steps and are no longer the normal GitHub Actions UI entry points.
+The former granular implementation workflow files were removed from `.github/workflows/` so they no longer appear in the GitHub Actions sidebar. Their behavior is now available through the consolidated workflow action inputs.

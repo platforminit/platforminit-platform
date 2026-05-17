@@ -46,14 +46,14 @@ Use these workflows from the GitHub Actions UI:
 
 ## Diagnostics modes
 
-| Mode | Internal diagnostic workflow |
+| Mode | Diagnostic bundle |
 |---|---|
-| `agent_discovery` | `05.7D - Diagnose Checkmk Agent Discovery` |
-| `graph_dashboard_session` | `05.8D - Diagnose Checkmk Graph Rendering` |
+| `agent_discovery` | Checkmk Linux agent, TCP datasource and native discovery diagnostics |
+| `graph_dashboard_session` | Checkmk graph rendering, dashboard AJAX, session and CSRF diagnostics |
 | `all` | runs both diagnostic bundles |
 
 ## Implementation workflow status
 
-The granular CH05 workflows remain in `.github/workflows/` as reusable internal workflows using `workflow_call`. They should not be treated as the normal user-facing workflow surface.
+The granular numbered CH05 workflow files were removed from `.github/workflows/` so they no longer appear in the GitHub Actions sidebar. The consolidated workflows run the same validated CH05 scripts and validators directly from the released observability artifact.
 
-This keeps the validated implementation steps intact while reducing the daily operator choice to two workflows.
+This reduces the daily operator choice to two workflows while keeping targeted actions available through the `action` and `diagnostic_mode` inputs.

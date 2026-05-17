@@ -41,7 +41,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 
 Each CH05 workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
-CH05 implementation workflows such as `05.2`, `05.3`, `05.5`, `05.7`, `05.8`, `05.8B`, `05.7D` and `05.8D` remain in `.github/workflows/` as reusable internal workflow steps. They are intentionally not the operator-facing entry points anymore; use `05 - Operations Monitoring` for day-to-day reconcile actions and `05.D - Operations Diagnostics` for diagnostic bundles.
+Only two CH05 workflow files remain in `.github/workflows/`: `05 - Operations Monitoring` and `05.D - Operations Diagnostics`. The former numbered CH05 implementation workflows were removed from the Actions sidebar; their behavior is now executed by the consolidated workflows through the existing CH05 scripts and validators.
 
 ## Active environment contract
 
@@ -162,7 +162,7 @@ Identity is deployed early in the lifecycle.
 |---|---|---|
 | `04.5 - Deploy Identity Foundation` | Authentik core | required before app SSO |
 | `04.6 - Enable Argo CD SSO` | Argo CD → Authentik | GitOps UI login |
-| `05.3 - Enable Checkmk Trusted-Header SSO` | Checkmk trusted-header SSO via Authentik forwardAuth | identity binding only; no app rollout |
+| `05 - Operations Monitoring` action `enable_sso` | Checkmk trusted-header SSO via Authentik forwardAuth | identity binding only; no app rollout |
 
 
 CH05 workflow privilege contract:
