@@ -1,50 +1,46 @@
 name: 05.5 - Provision Checkmk Operations Model
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       artifact_run_id:
-        description: Producing build workflow run ID
         required: true
         type: string
       artifact_id:
-        description: Operations artifact ID
         required: true
         type: string
       project:
-        description: PlatformInit project label / logical environment
         required: false
-        default: development
+        type: string
+        default: 'development'
       host_name:
-        description: Logical host name within the project
         required: false
-        default: platforminit-dev-01
+        type: string
+        default: 'platforminit-dev-01'
       role:
-        description: Target host role used for label discovery when host_name is empty
         required: false
-        default: primary
+        type: string
+        default: 'primary'
       server_id_override:
-        description: Optional server ID override
         required: false
+        type: string
         default: ''
       host_ipv4_override:
-        description: Optional explicit IPv4 override for break-glass/debug
         required: false
+        type: string
         default: ''
       target_user:
-        description: Host user that receives temporary sudo grant and runs the workflow
         required: false
-        default: devops
+        type: string
+        default: 'devops'
       platform_repo_url:
-        description: Git repository URL used by the Argo CD Application
         required: false
-        default: https://github.com/platforminit/platforminit-platform.git
+        type: string
+        default: 'https://github.com/platforminit/platforminit-platform.git'
       target_revision:
-        description: Git revision for Argo CD to sync. Default is the artifact commit SHA.
         required: false
+        type: string
         default: ''
-
-
 permissions:
   contents: read
   actions: read

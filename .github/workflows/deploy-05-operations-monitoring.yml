@@ -1,0 +1,266 @@
+name: 05 - Operations Monitoring
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Producing build workflow run ID from 00 - Build Platform Artifacts
+        required: true
+        type: string
+      artifact_id:
+        description: Operations artifact ID from 00 - Build Platform Artifacts
+        required: true
+        type: string
+      action:
+        description: CH05 operation to run
+        required: true
+        default: full_reconcile
+        type: choice
+        options:
+          - full_reconcile
+          - register_stack
+          - reconcile_prereqs
+          - sync_stack
+          - enable_sso
+          - provision_model
+          - install_agent_discovery
+          - configure_entrypoint
+          - configure_dashboards
+          - clean_alert_noise
+          - validate
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: development
+        type: string
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-dev-01
+        type: string
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
+        type: string
+      server_id_override:
+        description: Optional server ID override
+        required: false
+        default: ''
+        type: string
+      host_ipv4_override:
+        description: Optional explicit IPv4 override for break-glass/debug
+        required: false
+        default: ''
+        type: string
+      target_user:
+        description: Host user that receives temporary sudo grant and runs CH05 steps
+        required: false
+        default: devops
+        type: string
+      expected_min_services:
+        description: Minimum generated Checkmk service count expected after native discovery
+        required: false
+        default: '20'
+        type: string
+      stale_failed_units:
+        description: Space-separated failed systemd units to reset during alert-noise cleanup
+        required: false
+        default: 'cloud-init-hotplugd.service dailyaidecheck.service'
+        type: string
+      platform_repo_url:
+        description: Git repository URL used by the Argo CD Application
+        required: false
+        default: https://github.com/platforminit/platforminit-platform.git
+        type: string
+      target_revision:
+        description: Git revision for Argo CD to sync. Default is the artifact commit SHA.
+        required: false
+        default: ''
+        type: string
+      validation_mode:
+        description: Validation scope for the final validate action
+        required: false
+        default: runtime_with_sso
+        type: choice
+        options:
+          - runtime
+          - runtime_with_sso
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  register_stack:
+    if: ${{ inputs.action == 'register_stack' || inputs.action == 'full_reconcile' }}
+    uses: ./.github/workflows/deploy-05-register-operations-stack.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  reconcile_prereqs:
+    needs: register_stack
+    if: ${{ always() && (inputs.action == 'reconcile_prereqs' || inputs.action == 'full_reconcile') && (needs.register_stack.result == 'success' || needs.register_stack.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-1-reconcile-operations-prereqs.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  sync_stack:
+    needs: reconcile_prereqs
+    if: ${{ always() && (inputs.action == 'sync_stack' || inputs.action == 'full_reconcile') && (needs.reconcile_prereqs.result == 'success' || needs.reconcile_prereqs.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-2-sync-operations-stack.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  enable_sso:
+    needs: sync_stack
+    if: ${{ always() && (inputs.action == 'enable_sso' || inputs.action == 'full_reconcile') && (needs.sync_stack.result == 'success' || needs.sync_stack.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-3-enable-checkmk-sso.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  provision_model:
+    needs: enable_sso
+    if: ${{ always() && (inputs.action == 'provision_model' || inputs.action == 'full_reconcile') && (needs.enable_sso.result == 'success' || needs.enable_sso.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-5-provision-checkmk-operations-model.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  install_agent_discovery:
+    needs: provision_model
+    if: ${{ always() && (inputs.action == 'install_agent_discovery' || inputs.action == 'full_reconcile') && (needs.provision_model.result == 'success' || needs.provision_model.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-7-install-checkmk-agent.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  configure_entrypoint:
+    needs: install_agent_discovery
+    if: ${{ always() && (inputs.action == 'configure_entrypoint' || inputs.action == 'full_reconcile') && (needs.install_agent_discovery.result == 'success' || needs.install_agent_discovery.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-6-provision-checkmk-operations-dashboard.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  configure_dashboards:
+    needs: configure_entrypoint
+    if: ${{ always() && (inputs.action == 'configure_dashboards' || inputs.action == 'full_reconcile') && (needs.configure_entrypoint.result == 'success' || needs.configure_entrypoint.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-8-provision-checkmk-operations-dashboards.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      expected_min_services: ${{ inputs.expected_min_services }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  clean_alert_noise:
+    needs: configure_dashboards
+    if: ${{ always() && (inputs.action == 'clean_alert_noise' || inputs.action == 'full_reconcile') && (needs.configure_dashboards.result == 'success' || needs.configure_dashboards.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-8b-clean-checkmk-alert-noise.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      expected_min_services: ${{ inputs.expected_min_services }}
+      stale_failed_units: ${{ inputs.stale_failed_units }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  validate:
+    needs: clean_alert_noise
+    if: ${{ always() && (inputs.action == 'validate' || inputs.action == 'full_reconcile') && (needs.clean_alert_noise.result == 'success' || needs.clean_alert_noise.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-4-validate-operations-stack.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+      validation_mode: ${{ inputs.validation_mode }}

@@ -36,20 +36,12 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 12 | `04 - Enable Platform (Ingress, TLS, ArgoCD)` | `platform-services-release-*` |
 | 13 | `04.5 - Deploy Identity Foundation` | `identity-release-*` |
 | 14 | `04.6 - Enable Argo CD SSO` | `identity-release-*` |
-| 15 | `05 - Register Operations Stack` | `observability-release-*` |
-| 16 | `05.1 - Reconcile Operations Prerequisites` | `observability-release-*` |
-| 17 | `05.2 - Sync Operations Stack` | `observability-release-*` |
-| 18 | `05.3 - Enable Checkmk Trusted-Header SSO` | `observability-release-*` |
-| 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
-| 20 | `05.5 - Provision Checkmk Operations Model` | `observability-release-*` |
-| 21 | `05.7D - Diagnose Checkmk Agent Discovery` | `observability-release-*` |
-| 22 | `05.7 - Install Checkmk Agent and Discover Services` | `observability-release-*` |
-| 23 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
-| 24 | `05.8D - Diagnose Checkmk Graph Rendering` | `observability-release-*` |
-| 25 | `05.8 - Configure Checkmk Operations Dashboards` | `observability-release-*` |
-| 26 | `05.8B - Clean Checkmk Alert Noise` | `observability-release-*` |
+| 15 | `05 - Operations Monitoring` | `observability-release-*` |
+| 16 | `05.D - Operations Diagnostics` | `observability-release-*` |
 
-Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
+Each CH05 workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
+
+CH05 implementation workflows such as `05.2`, `05.3`, `05.5`, `05.7`, `05.8`, `05.8B`, `05.7D` and `05.8D` remain in `.github/workflows/` as reusable internal workflow steps. They are intentionally not the operator-facing entry points anymore; use `05 - Operations Monitoring` for day-to-day reconcile actions and `05.D - Operations Diagnostics` for diagnostic bundles.
 
 ## Active environment contract
 
@@ -77,6 +69,46 @@ Argo CD           -> owns runtime deployment
 ```
 
 CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8D now also collects dashboard AJAX and session/CSRF diagnostics for the empty built-in dashboard selector and invalid-CSRF save symptoms. CH05.8 configures a Checkmk-native PlatformInit Alert Manager landing page backed by the built-in Host & service problems dashboard and applies a noise policy for transient k3s/containerd overlay filesystem services. CH05.8B reconciles remaining alert noise by clearing stale failed systemd states for known bootstrap/FIM units, refreshing the Checkmk agent cache, running full discovery reconcile, and validating that Check_MK Discovery and known stale systemd failures are no longer active Alert Manager problems.
+
+### CH05 workflow UX
+
+Operator-facing CH05 workflow surface is intentionally small:
+
+| Workflow | Purpose |
+|---|---|
+| `05 - Operations Monitoring` | runs one selected CH05 operation or the full reconcile chain |
+| `05.D - Operations Diagnostics` | collects agent, graph, dashboard, session and CSRF diagnostics |
+
+`05 - Operations Monitoring` supports these actions:
+
+```text
+full_reconcile
+register_stack
+reconcile_prereqs
+sync_stack
+enable_sso
+provision_model
+install_agent_discovery
+configure_entrypoint
+configure_dashboards
+clean_alert_noise
+validate
+```
+
+`full_reconcile` runs the stable end-to-end CH05 sequence:
+
+```text
+05 Register Operations Stack
+05.1 Reconcile Operations Prerequisites
+05.2 Sync Operations Stack
+05.3 Enable Checkmk Trusted-Header SSO
+05.5 Provision Checkmk Operations Model
+05.7 Install Checkmk Agent and Discover Services
+05.6 Configure Checkmk Operations Entry Point
+05.8 Configure Checkmk Operations Dashboards
+05.8B Clean Checkmk Alert Noise
+05.4 Validate Operations Stack
+```
 
 Public operations WebUI:
 

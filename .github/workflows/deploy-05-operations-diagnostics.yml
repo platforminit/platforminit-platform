@@ -1,0 +1,124 @@
+name: 05.D - Operations Diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Producing build workflow run ID from 00 - Build Platform Artifacts
+        required: true
+        type: string
+      artifact_id:
+        description: Operations artifact ID from 00 - Build Platform Artifacts
+        required: true
+        type: string
+      diagnostic_mode:
+        description: Diagnostic bundle to collect
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - agent_discovery
+          - graph_dashboard_session
+      project:
+        description: PlatformInit project label / logical environment
+        required: false
+        default: development
+        type: string
+      host_name:
+        description: Logical host name within the project
+        required: false
+        default: platforminit-dev-01
+        type: string
+      role:
+        description: Target host role used for label discovery when host_name is empty
+        required: false
+        default: primary
+        type: string
+      server_id_override:
+        description: Optional server ID override
+        required: false
+        default: ''
+        type: string
+      host_ipv4_override:
+        description: Optional explicit IPv4 override for break-glass/debug
+        required: false
+        default: ''
+        type: string
+      target_user:
+        description: Host user that receives temporary sudo grant and runs diagnostics
+        required: false
+        default: devops
+        type: string
+      run_discovery_probe:
+        description: Optional state-changing cmk -I probe for agent diagnostics. Keep false for read-only diagnostics.
+        required: false
+        default: false
+        type: boolean
+      sample_service_limit:
+        description: Number of Checkmk service pages to probe for graph diagnostics
+        required: false
+        default: '25'
+        type: string
+      dashboard_sample_names:
+        description: Space-separated Checkmk dashboard names to probe
+        required: false
+        default: 'main checkmk problems simple_problems'
+        type: string
+      session_probe_paths:
+        description: Space-separated Checkmk WebUI paths to probe for session/cookie/CSRF diagnostics
+        required: false
+        default: 'check_mk/dashboard.py?name=main&owner= check_mk/view.py?view_name=allhosts check_mk/wato.py?mode=global_settings'
+        type: string
+      platform_repo_url:
+        description: Git repository URL used by the Argo CD Application
+        required: false
+        default: https://github.com/platforminit/platforminit-platform.git
+        type: string
+      target_revision:
+        description: Git revision for Argo CD to sync. Default is the artifact commit SHA.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  agent_discovery:
+    if: ${{ inputs.diagnostic_mode == 'agent_discovery' || inputs.diagnostic_mode == 'all' }}
+    uses: ./.github/workflows/deploy-05-7d-diagnose-checkmk-agent.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      run_discovery_probe: ${{ inputs.run_discovery_probe }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
+
+  graph_dashboard_session:
+    needs: agent_discovery
+    if: ${{ always() && (inputs.diagnostic_mode == 'graph_dashboard_session' || inputs.diagnostic_mode == 'all') && (needs.agent_discovery.result == 'success' || needs.agent_discovery.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-05-8d-diagnose-checkmk-graphs.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      artifact_id: ${{ inputs.artifact_id }}
+      project: ${{ inputs.project }}
+      host_name: ${{ inputs.host_name }}
+      role: ${{ inputs.role }}
+      server_id_override: ${{ inputs.server_id_override }}
+      host_ipv4_override: ${{ inputs.host_ipv4_override }}
+      target_user: ${{ inputs.target_user }}
+      sample_service_limit: ${{ inputs.sample_service_limit }}
+      dashboard_sample_names: ${{ inputs.dashboard_sample_names }}
+      session_probe_paths: ${{ inputs.session_probe_paths }}
+      platform_repo_url: ${{ inputs.platform_repo_url }}
+      target_revision: ${{ inputs.target_revision }}
