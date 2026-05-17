@@ -38,6 +38,17 @@ The retired Zabbix / Vector / OpenObserve implementation has been purged from th
 05.8B - Clean Checkmk Alert Noise
 ```
 
+## Operator-facing workflow UX
+
+CH05 now exposes two operator-facing workflows:
+
+| Workflow | Purpose |
+|---|---|
+| `05 - Operations Monitoring` | one selected operation or the full stable reconcile chain |
+| `05.D - Operations Diagnostics` | diagnostic-only bundles for agent discovery, graph rendering, dashboard AJAX and session/CSRF issues |
+
+The granular CH05 implementation workflows are reusable internal steps. Keep them available for the consolidated workflows, but do not use them as the normal operator UX.
+
 ## Storage contract
 
 ```text

@@ -241,3 +241,17 @@ Expected effects:
 - if `cloud-init-hotplugd.service` or `dailyaidecheck.service` still fails immediately, the workflow fails and provides systemd/journal context.
 
 Do not use CH05.8B to hide real failures. It is a cleanup/reconcile layer after the Alert Manager dashboard is functional.
+
+
+## CH05 workflow UX consolidation
+
+After the Checkmk Alert Manager checkpoint, CH05 is operated through two workflows:
+
+```text
+05 - Operations Monitoring
+05.D - Operations Diagnostics
+```
+
+Use `05 - Operations Monitoring` with `action=full_reconcile` for a complete CH05 reconciliation. Use individual actions only for targeted recovery. Use `05.D - Operations Diagnostics` for agent-discovery or graph/dashboard/session diagnostic bundles.
+
+The former granular implementation workflows remain reusable internal `workflow_call` steps and are no longer the normal GitHub Actions UI entry points.
