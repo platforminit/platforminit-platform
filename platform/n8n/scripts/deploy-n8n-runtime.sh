@@ -31,19 +31,64 @@ SOURCE_DIR="${SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 log "Deploying standalone n8n runtime domain=${N8N_DOMAIN} runtime_dir=${RUNTIME_DIR}"
 
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v docker >/dev/null 2>&1; then
-  log "Installing Docker from Ubuntu packages"
+
+apt_has_package() {
+  local package_name="$1"
+  apt-cache show "$package_name" >/dev/null 2>&1
+}
+
+install_docker_official_repository() {
+  local arch
+  local codename
+
+  arch="$(dpkg --print-architecture)"
+  codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME}")"
+
+  log "Adding Docker official apt repository for ${codename}/${arch}"
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+
+  cat > /etc/apt/sources.list.d/docker.list <<EOF
+# Managed by PlatformInit n8n runtime bootstrap
+deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${codename} stable
+EOF
+
   apt-get update
-  apt-get install -y docker.io docker-compose-plugin
-else
-  log "Docker already installed: $(docker --version)"
-  if ! docker compose version >/dev/null 2>&1; then
-    log "Installing docker-compose-plugin"
-    apt-get update
+}
+
+install_compose_v2() {
+  if docker compose version >/dev/null 2>&1; then
+    log "Docker Compose already installed: $(docker compose version)"
+    return 0
+  fi
+
+  log "Installing Docker Compose v2"
+  apt-get update
+
+  if apt_has_package docker-compose-v2; then
+    apt-get install -y docker-compose-v2
+  elif apt_has_package docker-compose-plugin; then
+    apt-get install -y docker-compose-plugin
+  else
+    install_docker_official_repository
     apt-get install -y docker-compose-plugin
   fi
+
+  docker compose version >/dev/null 2>&1 || fatal "docker compose plugin is not available after installation"
+}
+
+if ! command -v docker >/dev/null 2>&1; then
+  log "Installing Docker Engine from Ubuntu packages"
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg docker.io
+else
+  log "Docker already installed: $(docker --version)"
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg
 fi
 
+install_compose_v2
 systemctl enable --now docker
 
 install -d -m 0750 "${RUNTIME_DIR}"
