@@ -18,6 +18,8 @@
 - `AUTHENTIK_BOOTSTRAP_EMAIL` (optional)
 - `AUTHENTIK_BOOTSTRAP_TOKEN` (optional)
 - `CHECKMK_ADMIN_PASSWORD` (optional)
+- `N8N_ENCRYPTION_KEY`
+- `N8N_POSTGRES_PASSWORD`
 
 ## Secret model rules
 
@@ -54,6 +56,26 @@ Do not commit any generated Authentik secret values. Store them as GitHub reposi
 
 Do not add Grafana secrets to the default lifecycle. Grafana is not a CH05 default component.
 
+
+
+## N8N standalone runtime secrets
+
+| Secret | Purpose | Required |
+|---|---|---|
+| `N8N_ENCRYPTION_KEY` | Stable n8n encryption key for stored credentials. Generate once and do not rotate casually. | yes |
+| `N8N_POSTGRES_PASSWORD` | PostgreSQL password used by the standalone n8n Docker Compose runtime. | yes |
+| `TLS_CONTACT_EMAIL` | ACME registration email used by Caddy for the n8n HTTPS certificate. | yes |
+
+Recommended one-time setup for the `n8n` GitHub environment:
+
+```bash
+openssl rand -hex 32 | gh secret set N8N_ENCRYPTION_KEY --env n8n --repo platforminit/platforminit-platform
+openssl rand -hex 32 | gh secret set N8N_POSTGRES_PASSWORD --env n8n --repo platforminit/platforminit-platform
+printf '%s' 'admin@example.com' | gh secret set TLS_CONTACT_EMAIL --env n8n --repo platforminit/platforminit-platform
+```
+
+`N8N_ENCRYPTION_KEY` is part of the data recovery contract. If the `/srv/n8n`
+data directory or database is retained, the same key must be reused.
 
 ## CH05 Operations SSO optional secrets
 

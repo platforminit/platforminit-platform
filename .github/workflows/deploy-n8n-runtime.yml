@@ -62,8 +62,48 @@ env:
   HCLOUD_TOKEN_PLATFORMINIT: ${{ secrets.HCLOUD_TOKEN_PLATFORMINIT }}
 
 jobs:
+  preflight:
+    if: ${{ inputs.action == 'deploy' || inputs.action == 'full' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.project || 'n8n' }}
+    steps:
+      - name: Validate required n8n runtime secrets
+        env:
+          N8N_ENCRYPTION_KEY: ${{ secrets.N8N_ENCRYPTION_KEY }}
+          N8N_POSTGRES_PASSWORD: ${{ secrets.N8N_POSTGRES_PASSWORD }}
+          TLS_CONTACT_EMAIL: ${{ secrets.TLS_CONTACT_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in N8N_ENCRYPTION_KEY N8N_POSTGRES_PASSWORD TLS_CONTACT_EMAIL; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing GitHub secret::${name} is required in the '${{ inputs.project || 'n8n' }}' GitHub environment or repository secrets."
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Required one-time setup example:"
+            echo
+            echo "  openssl rand -hex 32 | gh secret set N8N_ENCRYPTION_KEY --env n8n --repo platforminit/platforminit-platform"
+            echo "  openssl rand -hex 32 | gh secret set N8N_POSTGRES_PASSWORD --env n8n --repo platforminit/platforminit-platform"
+            echo "  printf '%s' 'admin@example.com' | gh secret set TLS_CONTACT_EMAIL --env n8n --repo platforminit/platforminit-platform"
+            echo
+            echo "Keep N8N_ENCRYPTION_KEY stable. Rotating it without migration can make existing n8n credentials unreadable."
+            exit 1
+          fi
+
+          if [ "${#N8N_ENCRYPTION_KEY}" -lt 32 ]; then
+            echo "::error title=Weak n8n encryption key::N8N_ENCRYPTION_KEY must be at least 32 characters."
+            exit 1
+          fi
+
+          echo "n8n runtime secret preflight passed."
+
   grant:
-    if: ${{ inputs.action == 'deploy' || inputs.action == 'full' || inputs.action == 'validate' }}
+    needs: preflight
+    if: ${{ always() && (inputs.action == 'deploy' || inputs.action == 'full' || inputs.action == 'validate') && (inputs.action == 'validate' || needs.preflight.result == 'success') }}
     uses: ./.github/workflows/a1-access-elevation.yml
     secrets: inherit
     with:
@@ -76,7 +116,7 @@ jobs:
       mode: interactive-elevation
 
   deploy:
-    needs: grant
+    needs: [preflight, grant]
     if: ${{ always() && (inputs.action == 'deploy' || inputs.action == 'full') && needs.grant.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.project || 'n8n' }}
