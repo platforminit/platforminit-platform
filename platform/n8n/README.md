@@ -55,6 +55,18 @@ N8N_POSTGRES_PASSWORD
 TLS_CONTACT_EMAIL
 ```
 
+One-time runtime secret setup:
+
+```bash
+openssl rand -hex 32 | gh secret set N8N_ENCRYPTION_KEY --env n8n --repo platforminit/platforminit-platform
+openssl rand -hex 32 | gh secret set N8N_POSTGRES_PASSWORD --env n8n --repo platforminit/platforminit-platform
+printf '%s' 'admin@example.com' | gh secret set TLS_CONTACT_EMAIL --env n8n --repo platforminit/platforminit-platform
+```
+
+`N8N_ENCRYPTION_KEY` must remain stable after first deployment. n8n uses it to
+encrypt stored credentials, so replacing it later can make existing credentials
+unreadable.
+
 ## Host creation
 
 Use the existing host lifecycle workflow:
