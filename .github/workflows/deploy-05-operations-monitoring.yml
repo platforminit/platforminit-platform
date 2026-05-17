@@ -267,6 +267,7 @@ jobs:
           mkdir -p ./operations-reports
           TARGET_REVISION="${TARGET_REVISION_INPUT:-$SHORTSHA}"
           SSH_OPTS=(
+            -n
             -o BatchMode=yes
             -o StrictHostKeyChecking=yes
             -o ServerAliveInterval=30
