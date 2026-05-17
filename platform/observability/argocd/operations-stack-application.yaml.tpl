@@ -14,7 +14,7 @@ spec:
   project: operations
   source:
     repoURL: __REPO_URL__
-    targetRevision: __TARGET_REVISION__
+    targetRevision: "__TARGET_REVISION__"
     path: platform/observability/manifests
     helm:
       releaseName: platforminit-operations
