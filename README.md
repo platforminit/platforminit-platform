@@ -241,3 +241,17 @@ CH05 observability data is intentionally kept separate from the generic k3s loca
 
 Checkmk uses a static Retain hostPath PV under `/srv/observability/data/checkmk`. See `docs/ch05-observability-storage-contract.md`.
 
+## n8n standalone host
+
+The repository includes a lightweight standalone n8n host track for the `n8n`
+Hetzner project. It targets a CX23 Ubuntu 24.04 VPS with Docker Compose, Caddy,
+n8n and PostgreSQL. It intentionally avoids k3s, attached Hetzner Volumes and a
+local observability stack for the first iteration.
+
+Main workflow:
+
+```text
+N8N - Deploy Standalone Runtime
+```
+
+Design note: `docs/n8n-cx23-standalone-architecture.md`.

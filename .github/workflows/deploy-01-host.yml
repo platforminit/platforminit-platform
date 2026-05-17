@@ -38,6 +38,7 @@ name: 01 - Create or Rebuild Host
         default: cax31
         type: choice
         options:
+          - cx23
           - cax31
           - cx43
       region:
