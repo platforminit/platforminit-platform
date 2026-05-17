@@ -103,3 +103,8 @@ The intent is to distinguish these cases:
 | Dashboard HTML references AJAX endpoints that fail only through shim | preserve additional Checkmk-required request headers or cookies selectively |
 
 CH05.8D remains read-only. It does not submit form POSTs or change Checkmk settings.
+
+
+### Session / CSRF note
+
+Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.

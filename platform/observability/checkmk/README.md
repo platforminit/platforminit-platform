@@ -370,3 +370,8 @@ The workflow compares:
 ```
 
 It records Set-Cookie headers with values redacted, curl cookie jars, CSRF/token/session markers and dashboard AJAX references. This should be reviewed before changing the shim from `Cookie ""` to a selective Checkmk session-cookie forwarding model.
+
+
+### Session / CSRF note
+
+Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.

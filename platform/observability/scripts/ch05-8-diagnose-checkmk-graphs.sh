@@ -12,7 +12,7 @@ PLATFORM_HOST="${PLATFORM_HOST:-platforminit-dev-01}"
 SAMPLE_SERVICE_LIMIT="${SAMPLE_SERVICE_LIMIT:-25}"
 BASE_DOMAIN="${BASE_DOMAIN:-example.invalid}"
 DASHBOARD_SAMPLE_NAMES="${DASHBOARD_SAMPLE_NAMES:-main checkmk problems simple_problems}"
-SESSION_PROBE_PATHS="${SESSION_PROBE_PATHS:-dashboard.py?name=main&owner= view.py?view_name=allhosts wato.py?mode=global_settings}"
+SESSION_PROBE_PATHS="${SESSION_PROBE_PATHS:-check_mk/dashboard.py?name=main&owner= check_mk/view.py?view_name=allhosts check_mk/wato.py?mode=global_settings}"
 export KUBECONFIG
 
 [[ ${EUID} -eq 0 ]] || die "Run as root (sudo)."
@@ -207,9 +207,9 @@ for service in services:
     if service not in seen:
         seen.append(service)
 for service in seen[:limit]:
-    qs = 'view.py?view_name=service&host=' + quote('${PLATFORM_HOST}', safe='') + '&service=' + quote(service, safe='')
+    qs = 'check_mk/view.py?view_name=service&host=' + quote('${PLATFORM_HOST}', safe='') + '&service=' + quote(service, safe='')
     print('probe_service ' + quote(service) + ' ' + quote(qs, safe='/:?=&%'))
-print('probe_hostgraphs ' + quote('host_graphs') + ' ' + quote('view.py?view_name=host_graphs&host=' + '${PLATFORM_HOST}', safe='/:?=&%'))
+print('probe_hostgraphs ' + quote('host_graphs') + ' ' + quote('check_mk/view.py?view_name=host_graphs&host=' + '${PLATFORM_HOST}', safe='/:?=&%'))
 PY_SERVICE
 cat "${TMP_DIR}/probe_urls.sh"
 while read -r kind encoded_name encoded_path; do
@@ -271,10 +271,11 @@ section "dashboard route probes: direct backend vs auth-shim"
 python3 - <<PY_DASH >"${TMP_DIR}/dashboard_probe_urls.sh"
 from urllib.parse import quote
 names = '''${DASHBOARD_SAMPLE_NAMES}'''.split()
-paths = ['dashboard.py']
+paths = ['check_mk/dashboard.py']
 for name in names:
-    paths.append('dashboard.py?name=' + quote(name, safe='') + '&owner=')
-    paths.append('index.py?start_url=' + quote('/cmk/dashboard.py?name=' + name + '&owner=', safe=''))
+    base = 'check_mk/dashboard.py?name=' + quote(name, safe='') + '&owner='
+    paths.append(base)
+    paths.append('check_mk/index.py?start_url=' + quote('/cmk/' + base, safe=''))
 for path in dict.fromkeys(paths):
     print(path)
 PY_DASH
@@ -313,7 +314,7 @@ SESSION_NOTE
 python3 - <<PY_SESSION >"${TMP_DIR}/session_probe_urls.sh"
 paths = '''${SESSION_PROBE_PATHS}'''.split()
 if not paths:
-    paths = ['dashboard.py?name=main&owner=', 'view.py?view_name=allhosts', 'wato.py?mode=global_settings']
+    paths = ['check_mk/dashboard.py?name=main&owner=', 'check_mk/view.py?view_name=allhosts', 'check_mk/wato.py?mode=global_settings']
 for path in dict.fromkeys(paths):
     print(path)
 PY_SESSION

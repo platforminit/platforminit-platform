@@ -122,3 +122,8 @@ view.py?view_name=svcproblems
 `05.8D - Diagnose Checkmk Graph Rendering` also collects dashboard and session diagnostics. This is used when built-in dashboards return HTTP 200 but render an empty selector/spinner, or when Checkmk form saves fail with `Invalid CSRF token` behind the trusted-header auth-shim.
 
 The diagnostic compares direct Checkmk backend access with the auth-shim path, captures dashboard route output, candidate AJAX references, cookie jars, CSRF/session markers, and Checkmk logs. It is read-only and does not submit save actions.
+
+
+### Session / CSRF note
+
+Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.
