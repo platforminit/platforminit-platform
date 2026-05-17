@@ -43,7 +43,10 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 19 | `05.4 - Validate Operations Stack` | `observability-release-*` |
 | 20 | `05.5 - Provision Checkmk Operations Model` | `observability-release-*` |
 | 21 | `05.7D - Diagnose Checkmk Agent Discovery` | `observability-release-*` |
-| 22 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
+| 22 | `05.7 - Install Checkmk Agent and Discover Services` | `observability-release-*` |
+| 23 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
+| 24 | `05.8D - Diagnose Checkmk Graph Rendering` | `observability-release-*` |
+| 25 | `05.8 - Configure Checkmk Operations Dashboards` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -72,7 +75,7 @@ Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
 Argo CD           -> owns runtime deployment
 ```
 
-CH05.7 native agent discovery is paused behind a diagnostic workflow. Keep the stable 05.5/05.6 Checkmk operator baseline intact until the 05.7D logs are reviewed.
+CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8D now also collects dashboard AJAX and session/CSRF diagnostics for the empty built-in dashboard selector and invalid-CSRF save symptoms. CH05.8 configures a Checkmk-native PlatformInit Alert Manager landing page backed by the built-in Host & service problems dashboard and applies a noise policy for transient k3s/containerd overlay filesystem services.
 
 Public operations WebUI:
 
@@ -173,6 +176,7 @@ git checkout -b feat/ch05-checkmk-community-operations-layer
 | Release model | `docs/release-model.md` |
 | CH05 operations monitoring design | `docs/ch05-operations-monitoring-design.md` |
 | CH05 Checkmk migration runbook | `docs/ch05-checkmk-migration-runbook.md` |
+| CH05 Checkmk operations dashboards | `docs/ch05-checkmk-operations-dashboards.md` |
 | CH05 Argo CD refactor runbook | `docs/ch05-argocd-operations-refactor-runbook.md` |
 | Checkmk monitoring | `platform/observability/checkmk/README.md` |
 | External host monitoring backlog | `platform/observability/external-hosts/README.md` |

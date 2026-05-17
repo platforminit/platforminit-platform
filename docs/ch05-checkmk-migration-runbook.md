@@ -175,3 +175,48 @@ Checkmk local cmkadmin login remains available as break-glass
 operations-stack Argo CD application is Synced/Healthy
 /srv/observability/data/checkmk is the only CH05 persistent data path
 ```
+
+
+## CH05.8D graph_recipe diagnostic and fix
+
+The service graph UI error was investigated through the diagnostic-only workflow:
+
+```text
+05.8D - Diagnose Checkmk Graph Rendering
+```
+
+Observed symptom:
+
+```text
+Loading graph failed: (Status: 1)
+'graph_recipe'
+```
+
+The diagnostic artifact showed Checkmk graph AJAX requests failing because the auth-shim stripped `Content-Type` from JSON POST requests. The fix explicitly preserves `Content-Type` while keeping broad request-header stripping.
+
+
+## CH05.8 - Configure Checkmk Operations Dashboards
+
+Run after the graph Content-Type fix and stable CH05.5/05.7/05.6/05.4 checkpoint.
+
+```text
+00 - Build Platform Artifacts
+05.8 - Configure Checkmk Operations Dashboards
+```
+
+This workflow sets the PlatformInit Alert Manager start page to Checkmk's built-in Host & service problems dashboard (`dashboard.py?name=simple_problems&owner=`), validates main/checkmk dashboards plus host/service drill-down routes, and applies a targeted noise policy for transient k3s/containerd overlay rootfs filesystem services. It does not change the Checkmk runtime deployment or native service discovery beyond reconciling discovery after the disabled-service rule is written.
+
+## CH05.8D dashboard/session/CSRF diagnostics
+
+If Checkmk dashboards render an empty selector/spinner or UI saves fail with `Invalid CSRF token`, run:
+
+```text
+05.8D - Diagnose Checkmk Graph Rendering
+```
+
+The workflow now collects direct-backend versus auth-shim dashboard probes, candidate AJAX references, session cookie continuity and CSRF/token markers without performing any save action. Use the artifact before changing the auth-shim cookie/session policy.
+
+
+### Session / CSRF note
+
+Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.

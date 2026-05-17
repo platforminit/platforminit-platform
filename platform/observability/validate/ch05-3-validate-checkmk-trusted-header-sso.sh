@@ -47,8 +47,12 @@ if ! printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote
 fi
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_pass_request_headers[[:space:]]+off;' \
   || die "Checkmk auth shim still forwards all browser/Authentik headers"
-printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+"";' \
-  || die "Checkmk auth shim does not clear stale browser cookies"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Content-Type[[:space:]]+\$content_type;' \
+  || die "Checkmk auth-shim does not preserve Content-Type for WebUI JSON/AJAX POST requests"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Accept[[:space:]]+\$http_accept;' \
+  || die "Checkmk auth-shim does not preserve Accept for dashboard/WebUI AJAX requests"
+printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+\$http_cookie;' \
+  || die "Checkmk auth shim does not preserve Checkmk session cookies for CSRF-protected WebUI forms"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Authorization[[:space:]]+"";' \
   || die "Checkmk auth shim does not clear browser Authorization headers"
 printf '%s\n' "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Forwarded-Proto[[:space:]]+https;' \
@@ -76,6 +80,10 @@ checkmk_pod="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk
 runtime_shim_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c auth-shim -- sh -lc 'nginx -T 2>/dev/null' || true)"
 printf '%s\n' "$runtime_shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' \
   || die "Running auth-shim nginx config does not contain the logout route; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+printf '%s\n' "$runtime_shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Content-Type[[:space:]]+\$content_type;' \
+  || die "Running auth-shim nginx config does not preserve Content-Type for WebUI JSON/AJAX POST requests; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+printf '%s\n' "$runtime_shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+\$http_cookie;' \
+  || die "Running auth-shim nginx config does not preserve Checkmk session cookies; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 printf '%s\n' "$runtime_shim_conf" | grep -Eq 'https://auth\.' \
   || die "Running auth-shim nginx config must target the Authentik public host, not the Checkmk host; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 printf '%s\n' "$runtime_shim_conf" | grep -Eq '/if/flow/default-invalidation-flow/' \
@@ -95,7 +103,7 @@ case "$logout_location" in
   *) die "Checkmk auth-shim logout redirect points to unexpected Location=${logout_location:-empty}" ;;
 esac
 
-checkmk_auth_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/cmk/etc/check_mk/multisite.d/wato 2>/dev/null || true")"
+checkmk_auth_conf="$(kubectl -n "$NAMESPACE" exec "$checkmk_pod" -c checkmk -- bash -lc "grep -n 'auth_by_http_header' /omd/sites/cmk/etc/check_mk/multisite.d/wato/global.mk 2>/dev/null || true")"
 echo "$checkmk_auth_conf" | grep -q "X-Remote-User" || die "Checkmk site is not configured for X-Remote-User trusted-header authentication"
 
 echo "PASS: Checkmk trusted-header SSO Kubernetes contract exists"

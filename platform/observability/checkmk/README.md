@@ -127,6 +127,7 @@ The Checkmk Community trusted-header SSO proof intentionally keeps the
 `checkmk-nginx-auth-shim` request to the Checkmk upstream minimal:
 
 - `proxy_pass_request_headers off` prevents arbitrary browser/Authentik headers
+- `Content-Type` is explicitly preserved so Checkmk WebUI JSON/AJAX POST requests, including graph rendering, keep their request-body parser contract
   and stale Checkmk cookies from being forwarded into the site Apache process.
 - `Cookie ""` avoids stale `auth_cmk` cookies from older native-login attempts.
 - `Authorization ""` avoids leaking unrelated browser credentials to Checkmk.
@@ -319,3 +320,67 @@ The 05.7D artifact showed that raw TCP access to the host agent worked, but `cmk
 ### 2026-05-16 diagnostic finding
 
 The CH05.7D artifact confirmed that the host is now a real TCP Checkmk agent target: `cmk -D` shows a TCP agent on `62.238.5.243:6556`, `cmk -d platforminit-dev-01` returns Linux agent sections, and `cmk --debug -vvn` fetches/parses data via the TCP datasource. Do not add pre-discovery assertions that expect native Linux service status lines before `cmk -I` has created autochecks.
+
+
+## CH05.8D Checkmk graph_recipe diagnostics
+
+`05.8D - Diagnose Checkmk Graph Rendering` is a read-only diagnostic workflow for the remaining service-page graph error:
+
+```text
+Loading graph failed: (Status: 1)
+'graph_recipe'
+```
+
+It collects Checkmk graphing and metric plugin paths, service inventory, generated core configuration, RRD/perfdata/cache paths, Checkmk logs and sample trusted-header service-page probes. It must not change Checkmk discovery, graph templates, service rules or RRD state.
+
+
+## CH05.8 operations dashboards
+
+`05.8 - Configure Checkmk Operations Dashboards` is the first dashboard layer after the stable Checkmk checkpoint. It keeps the implementation conservative by promoting Checkmk-native dashboards and views instead of creating raw dashboard object definitions.
+
+The workflow sets the cmkadmin/global start URL to the PlatformInit Alert Manager dashboard:
+
+```text
+dashboard.py?name=simple_problems&owner=
+```
+
+This is Checkmk's built-in `Host & service problems` dashboard. PlatformInit uses it as the Alert Manager page because it shows current host/service problems such as WARN, CRIT, UNKNOWN, DOWN and UNREACHABLE without listing OK services.
+
+It writes the dashboard catalog to:
+
+```text
+/omd/sites/cmk/local/share/platforminit/checkmk-operations-dashboards.txt
+```
+
+It writes the current non-OK diagnostic snapshot to:
+
+```text
+/omd/sites/cmk/local/share/platforminit/checkmk-alert-manager-current.txt
+```
+
+The validation requires:
+
+- `platforminit-dev-01` has `cmk-agent` and `tcp` tags.
+- Checkmk reports a TCP agent datasource for the host.
+- the generated service count is at least the expected CH05.7 native discovery threshold.
+- transient k3s/containerd overlay rootfs filesystem services are not generated.
+- Alert Manager, main/checkmk dashboards and host/service drill-down views respond.
+- dashboard and graph probes do not contain `graph_recipe` errors.
+
+### CH05.8D dashboard/session and CSRF diagnostics
+
+The Checkmk auth-shim intentionally minimizes upstream headers. CH05.8D now verifies whether that policy also preserves enough Checkmk session behavior for dashboards and form-based UI operations.
+
+The workflow compares:
+
+```text
+127.0.0.1:5000  direct Checkmk backend with X-Remote-User
+127.0.0.1:8080  nginx auth-shim with X-authentik-* input headers
+```
+
+It records Set-Cookie headers with values redacted, curl cookie jars, CSRF/token/session markers and dashboard AJAX references. This should be reviewed before changing the shim from `Cookie ""` to a selective Checkmk session-cookie forwarding model.
+
+
+### Session / CSRF note
+
+Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.

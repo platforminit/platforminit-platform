@@ -39,10 +39,9 @@ data:
 
       location / {
         # Keep the Checkmk upstream request intentionally small and deterministic.
-        # The browser may carry stale Checkmk auth_* cookies from previous native-login
-        # attempts and Authentik may add additional identity/JWT headers. For the first
-        # PlatformInit Raw/Community SSO bridge, Checkmk only needs the trusted user
-        # header plus standard reverse-proxy metadata.
+        # We still preserve the minimal browser/session headers required by the
+        # Checkmk WebUI itself. Without these, dashboard AJAX and WATO forms can
+        # render or submit with broken session/CSRF semantics behind the auth-shim.
         proxy_pass_request_headers off;
         proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
@@ -53,7 +52,23 @@ data:
         proxy_set_header X-Forwarded-Ssl on;
         proxy_set_header X-Forwarded-Port 443;
         proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header Cookie "";
+
+        # Preserve the request body parser contract for Checkmk's own WebUI AJAX
+        # endpoints while still stripping arbitrary browser/Authentik headers.
+        # Without Content-Type, JSON POST requests such as graph rendering can
+        # reach Checkmk with a body that the WebUI does not parse, causing
+        # ajax_render_graph_content.py to fail with a missing graph_recipe key.
+        proxy_set_header Content-Type $content_type;
+
+        # Preserve only the browser WebUI/session headers Checkmk needs for
+        # dashboard AJAX and CSRF-protected form submissions. We still strip
+        # Authorization and all unlisted request headers because authentication is
+        # owned by Authentik forwardAuth plus the deterministic X-Remote-User bridge.
+        proxy_set_header Accept $http_accept;
+        proxy_set_header X-Requested-With $http_x_requested_with;
+        proxy_set_header Referer $http_referer;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Cookie $http_cookie;
         proxy_set_header Authorization "";
 
         # Authentik forwardAuth returns X-authentik-* headers. Checkmk Raw/Community
