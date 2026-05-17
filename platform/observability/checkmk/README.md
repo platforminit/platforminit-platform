@@ -338,11 +338,13 @@ It collects Checkmk graphing and metric plugin paths, service inventory, generat
 
 `05.8 - Configure Checkmk Operations Dashboards` is the first dashboard layer after the stable Checkmk checkpoint. It keeps the implementation conservative by promoting Checkmk-native dashboards and views instead of creating raw dashboard object definitions.
 
-The workflow sets the cmkadmin/global start URL to:
+The workflow sets the cmkadmin/global start URL to the PlatformInit Alert Manager dashboard:
 
 ```text
-dashboard.py?name=main&owner=
+dashboard.py?name=simple_problems&owner=
 ```
+
+This is Checkmk's built-in `Host & service problems` dashboard. PlatformInit uses it as the Alert Manager page because it shows current host/service problems such as WARN, CRIT, UNKNOWN, DOWN and UNREACHABLE without listing OK services.
 
 It writes the dashboard catalog to:
 
@@ -350,12 +352,19 @@ It writes the dashboard catalog to:
 /omd/sites/cmk/local/share/platforminit/checkmk-operations-dashboards.txt
 ```
 
+It writes the current non-OK diagnostic snapshot to:
+
+```text
+/omd/sites/cmk/local/share/platforminit/checkmk-alert-manager-current.txt
+```
+
 The validation requires:
 
 - `platforminit-dev-01` has `cmk-agent` and `tcp` tags.
 - Checkmk reports a TCP agent datasource for the host.
 - the generated service count is at least the expected CH05.7 native discovery threshold.
-- main/problems/simple-problems dashboards and host/service drill-down views respond.
+- transient k3s/containerd overlay rootfs filesystem services are not generated.
+- Alert Manager, main/checkmk dashboards and host/service drill-down views respond.
 - dashboard and graph probes do not contain `graph_recipe` errors.
 
 ### CH05.8D dashboard/session and CSRF diagnostics

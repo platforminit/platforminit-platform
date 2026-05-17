@@ -204,7 +204,7 @@ Run after the graph Content-Type fix and stable CH05.5/05.7/05.6/05.4 checkpoint
 05.8 - Configure Checkmk Operations Dashboards
 ```
 
-This workflow sets the Checkmk main dashboard as the operator start page and validates the main, problems, host status, host graphs, all hosts, all services and service problems routes through the trusted-header WebUI path. It does not change the Checkmk runtime deployment or native service discovery.
+This workflow sets the PlatformInit Alert Manager start page to Checkmk's built-in Host & service problems dashboard (`dashboard.py?name=simple_problems&owner=`), validates main/checkmk dashboards plus host/service drill-down routes, and applies a targeted noise policy for transient k3s/containerd overlay rootfs filesystem services. It does not change the Checkmk runtime deployment or native service discovery beyond reconciling discovery after the disabled-service rule is written.
 
 ## CH05.8D dashboard/session/CSRF diagnostics
 

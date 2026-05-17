@@ -96,26 +96,27 @@ The CH05.8D artifact showed Checkmk WebUI graph rendering requests failing in `a
 
 ## CH05.8 operations dashboards
 
-`05.8 - Configure Checkmk Operations Dashboards` configures the Checkmk main dashboard as the operator start page and records a PlatformInit dashboard catalog inside the Checkmk site. It intentionally uses Checkmk-native dashboards/views instead of writing raw internal dashboard object files.
+`05.8 - Configure Checkmk Operations Dashboards` promotes the built-in Checkmk `Host & service problems` dashboard as the PlatformInit Alert Manager landing page. This keeps the UI Checkmk-native while giving operators a focused page containing current actionable problem states instead of historical events or OK rows.
 
 Primary start URL:
 
 ```text
-dashboard.py?name=main&owner=
+dashboard.py?name=simple_problems&owner=
 ```
 
-Validated dashboard/drill-down routes:
+Secondary validated dashboard/drill-down routes:
 
 ```text
 dashboard.py?name=main&owner=
-dashboard.py?name=problems&owner=
-dashboard.py?name=simple_problems&owner=
+dashboard.py?name=checkmk&owner=
 view.py?view_name=hoststatus&host=platforminit-dev-01
 view.py?view_name=host_graphs&host=platforminit-dev-01&site=cmk
 view.py?view_name=allhosts
 view.py?view_name=allservices
 view.py?view_name=svcproblems
 ```
+
+The workflow also applies a conservative operations noise policy: transient k3s/containerd overlay rootfs filesystem services matching `^Filesystem /run/k3s/containerd/.*/rootfs$` are ignored and discovery is reconciled, because those mounts disappear whenever pods restart and should not dominate the alert view.
 
 ### CH05.8D dashboard/session diagnostics
 

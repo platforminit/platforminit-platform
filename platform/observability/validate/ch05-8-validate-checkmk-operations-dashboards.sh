@@ -17,10 +17,10 @@ SITE="$1"
 PLATFORM_HOST="$2"
 EXPECTED_MIN_SERVICES="$3"
 SITE_ROOT="/omd/sites/${SITE}"
-START_URL="dashboard.py?name=main&owner="
+ALERT_MANAGER_DASHBOARD_URL="dashboard.py?name=simple_problems&owner="
+START_URL="${ALERT_MANAGER_DASHBOARD_URL}"
 MAIN_DASHBOARD_URL="dashboard.py?name=main&owner="
-PROBLEMS_DASHBOARD_URL="dashboard.py?name=problems&owner="
-SIMPLE_PROBLEMS_DASHBOARD_URL="dashboard.py?name=simple_problems&owner="
+CHECKMK_DASHBOARD_URL="dashboard.py?name=checkmk&owner="
 HOST_STATUS_URL="view.py?view_name=hoststatus&host=${PLATFORM_HOST}"
 HOST_GRAPHS_URL="view.py?view_name=host_graphs&host=${PLATFORM_HOST}&site=${SITE}"
 ALL_HOSTS_URL="view.py?view_name=allhosts"
@@ -30,15 +30,22 @@ SERVICE_PROBLEMS_URL="view.py?view_name=svcproblems"
 UI_FILE="${SITE_ROOT}/etc/check_mk/multisite.d/wato/platforminit_operations_ui.mk"
 USER_START_FILE="${SITE_ROOT}/var/check_mk/web/cmkadmin/start_url.mk"
 DASHBOARD_CATALOG="${SITE_ROOT}/local/share/platforminit/checkmk-operations-dashboards.txt"
+ALERT_SNAPSHOT="${SITE_ROOT}/local/share/platforminit/checkmk-alert-manager-current.txt"
+NOISE_RULE_FILE="${SITE_ROOT}/etc/check_mk/conf.d/platforminit/platforminit_noise_policy.mk"
 
 test -f "${UI_FILE}"
 test -f "${USER_START_FILE}"
 test -f "${DASHBOARD_CATALOG}"
+test -f "${ALERT_SNAPSHOT}"
+test -f "${NOISE_RULE_FILE}"
 grep -F "start_url = '${START_URL}'" "${UI_FILE}" >/dev/null
 grep -F "start_url = '${START_URL}'" "${USER_START_FILE}" >/dev/null
+grep -F "PlatformInit Alert Manager" "${DASHBOARD_CATALOG}" >/dev/null
+grep -F "dashboard.py?name=simple_problems&owner=" "${DASHBOARD_CATALOG}" >/dev/null
 grep -F "dashboard.py?name=main&owner=" "${DASHBOARD_CATALOG}" >/dev/null
-grep -F "dashboard.py?name=problems&owner=" "${DASHBOARD_CATALOG}" >/dev/null
 grep -F "view.py?view_name=host_graphs&host=${PLATFORM_HOST}&site=${SITE}" "${DASHBOARD_CATALOG}" >/dev/null
+grep -F 'Filesystem /run/k3s/containerd/.*/rootfs' "${NOISE_RULE_FILE}" >/dev/null
+grep -F '"$regex"' "${NOISE_RULE_FILE}" >/dev/null
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
@@ -48,6 +55,7 @@ grep -F '[agent:cmk-agent]' "${TMP_DIR}/host-model.txt" >/dev/null
 grep -F '[tcp:tcp]' "${TMP_DIR}/host-model.txt" >/dev/null
 grep -F 'TCP:' "${TMP_DIR}/host-model.txt" >/dev/null
 
+su - "${SITE}" -c "cmk-validate-config" >/dev/null
 su - "${SITE}" -c "cmk -N" > "${TMP_DIR}/nagios.cfg"
 service_count="$(awk -v host="${PLATFORM_HOST}" '
   /^define service[[:space:]]*\{/ { in_block=1; block_host=""; block_service=""; next }
@@ -61,6 +69,12 @@ service_count="$(awk -v host="${PLATFORM_HOST}" '
 ' "${TMP_DIR}/nagios.cfg")"
 if [[ "${service_count}" -lt "${EXPECTED_MIN_SERVICES}" ]]; then
   echo "FATAL: expected at least ${EXPECTED_MIN_SERVICES} services for ${PLATFORM_HOST}, got ${service_count}" >&2
+  exit 1
+fi
+
+if grep -F "Filesystem /run/k3s/containerd/" "${TMP_DIR}/nagios.cfg" | grep -F "/rootfs" >/dev/null; then
+  echo "FATAL: transient k3s/containerd rootfs filesystem services are still generated" >&2
+  grep -F "Filesystem /run/k3s/containerd/" "${TMP_DIR}/nagios.cfg" | head -n 40 >&2 || true
   exit 1
 fi
 
@@ -86,17 +100,18 @@ probe_url() {
   echo "PASS: ${name} responds with HTTP=${code}"
 }
 
+probe_url "alert-manager-dashboard" "${ALERT_MANAGER_DASHBOARD_URL}"
 probe_url "dashboard-main" "${MAIN_DASHBOARD_URL}"
-probe_url "dashboard-problems" "${PROBLEMS_DASHBOARD_URL}"
-probe_url "dashboard-simple-problems" "${SIMPLE_PROBLEMS_DASHBOARD_URL}"
+probe_url "dashboard-checkmk" "${CHECKMK_DASHBOARD_URL}"
 probe_url "host-status" "${HOST_STATUS_URL}"
 probe_url "host-graphs" "${HOST_GRAPHS_URL}"
 probe_url "all-hosts" "${ALL_HOSTS_URL}"
 probe_url "all-services" "${ALL_SERVICES_URL}"
 probe_url "service-problems" "${SERVICE_PROBLEMS_URL}"
 
-echo "PASS: PlatformInit Checkmk dashboard start URL is configured"
+echo "PASS: PlatformInit Alert Manager dashboard start URL is configured"
 echo "PASS: PlatformInit Checkmk dashboard catalog exists"
+echo "PASS: transient k3s/containerd overlay rootfs filesystem noise is ignored"
 echo "PASS: ${PLATFORM_HOST} is a TCP Checkmk agent target with ${service_count} generated services"
-echo "PASS: Checkmk dashboard and drill-down routes respond without graph_recipe errors"
+echo "PASS: Checkmk Alert Manager, overview dashboards and drill-down routes respond without graph_recipe errors"
 CHECKMK_DASHBOARD_VALIDATE
