@@ -314,8 +314,30 @@ jobs:
             esac
           }
           write_sequence
-          echo "CH05 diagnostic mode: $DIAGNOSTIC_MODE"
-          cat ./ch05-diag-sequence.tsv
+          audit_log="./operations-reports/ch05-diagnostics-runner-${SHORTSHA}.log"
+          {
+            echo "CH05 diagnostic mode: $DIAGNOSTIC_MODE"
+            echo "artifact short sha: $SHORTSHA"
+            echo "target host: $HOST"
+            echo "target user: $HOST_LOGIN_USER"
+            echo
+            echo "Planned CH05 diagnostic sequence:"
+            cat ./ch05-diag-sequence.tsv
+          } | tee -a "$audit_log"
+
+          preflight_missing=0
+          while IFS=$'\t' read -r script validator; do
+            [[ -n "$script" ]] || continue
+            for artifact_path in "platform/observability/scripts/${script}" "platform/observability/validate/${validator}"; do
+              if tar -tzf "$ARCHIVE" | grep -Eq "(^|/)${artifact_path}$"; then
+                echo "PASS: artifact contains ${artifact_path}" | tee -a "$audit_log"
+              else
+                echo "FATAL: artifact is missing ${artifact_path}" | tee -a "$audit_log" >&2
+                preflight_missing=1
+              fi
+            done
+          done < ./ch05-diag-sequence.tsv
+          (( preflight_missing == 0 )) || exit 1
 
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "rm -f /tmp/platforminit-operations/${SHORTSHA}/*.log"
@@ -337,27 +359,36 @@ jobs:
           } > ./ch05.env
           retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
 
+          diagnostic_failures=0
           while IFS=$'\t' read -r script validator; do
             [[ -n "$script" ]] || continue
-            echo "=== CH05 diagnostic: script=${script} validator=${validator} ==="
-            retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "
+            echo "=== CH05 diagnostic: script=${script} validator=${validator} ===" | tee -a "$audit_log"
+            if retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "
               set -euo pipefail
               chmod +x /tmp/platforminit-run/ch05-remote.sh
               sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' '${script}' '${validator}' '${HOST_LOGIN_USER}'
-            "
+            "; then
+              echo "PASS: CH05 diagnostic completed: ${script} / ${validator}" | tee -a "$audit_log"
+            else
+              rc=$?
+              echo "FATAL: CH05 diagnostic failed before or during remote execution: ${script} / ${validator} rc=${rc}" | tee -a "$audit_log" >&2
+              diagnostic_failures=1
+            fi
           done < ./ch05-diag-sequence.tsv
 
           missing_logs=0
           while IFS=$'\t' read -r script validator; do
             [[ -n "$script" ]] || continue
             for log_name in "${script%.sh}-${SHORTSHA}.log" "${validator%.sh}-${SHORTSHA}.log"; do
-              if ! ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "test -s '/tmp/platforminit-operations/${SHORTSHA}/${log_name}'"; then
-                echo "FATAL: expected CH05 diagnostic log was not produced: ${log_name}" >&2
+              if ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "test -s '/tmp/platforminit-operations/${SHORTSHA}/${log_name}'"; then
+                echo "PASS: expected diagnostic log exists: ${log_name}" | tee -a "$audit_log"
+              else
+                echo "FATAL: expected CH05 diagnostic log was not produced: ${log_name}" | tee -a "$audit_log" >&2
                 missing_logs=1
               fi
             done
           done < ./ch05-diag-sequence.tsv
-          (( missing_logs == 0 )) || exit 1
+          (( diagnostic_failures == 0 && missing_logs == 0 )) || exit 1
 
       - name: Fetch CH05 diagnostic reports
         if: always()
