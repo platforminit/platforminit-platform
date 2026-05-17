@@ -47,6 +47,7 @@ This repository is the PlatformInit monorepo for the DevOps Homelab / PlatformIn
 | 23 | `05.6 - Configure Checkmk Operations Entry Point` | `observability-release-*` |
 | 24 | `05.8D - Diagnose Checkmk Graph Rendering` | `observability-release-*` |
 | 25 | `05.8 - Configure Checkmk Operations Dashboards` | `observability-release-*` |
+| 26 | `05.8B - Clean Checkmk Alert Noise` | `observability-release-*` |
 
 Each deploy workflow accepts the producing build workflow run ID and the specific artifact ID from `00 - Build Platform Artifacts`.
 
@@ -75,7 +76,7 @@ Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
 Argo CD           -> owns runtime deployment
 ```
 
-CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8D now also collects dashboard AJAX and session/CSRF diagnostics for the empty built-in dashboard selector and invalid-CSRF save symptoms. CH05.8 configures a Checkmk-native PlatformInit Alert Manager landing page backed by the built-in Host & service problems dashboard and applies a noise policy for transient k3s/containerd overlay filesystem services.
+CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8D now also collects dashboard AJAX and session/CSRF diagnostics for the empty built-in dashboard selector and invalid-CSRF save symptoms. CH05.8 configures a Checkmk-native PlatformInit Alert Manager landing page backed by the built-in Host & service problems dashboard and applies a noise policy for transient k3s/containerd overlay filesystem services. CH05.8B reconciles remaining alert noise by clearing stale failed systemd states for known bootstrap/FIM units, refreshing the Checkmk agent cache, running full discovery reconcile, and validating that Check_MK Discovery and known stale systemd failures are no longer active Alert Manager problems.
 
 Public operations WebUI:
 

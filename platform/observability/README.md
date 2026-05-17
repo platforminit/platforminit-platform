@@ -35,6 +35,7 @@ The retired Zabbix / Vector / OpenObserve implementation has been purged from th
 05.4 - Validate Operations Stack
 05.8D - Diagnose Checkmk Graph Rendering
 05.8 - Configure Checkmk Operations Dashboards
+05.8B - Clean Checkmk Alert Noise
 ```
 
 ## Storage contract
@@ -96,7 +97,8 @@ The CH05.8D artifact showed Checkmk WebUI graph rendering requests failing in `a
 
 ## CH05.8 operations dashboards
 
-`05.8 - Configure Checkmk Operations Dashboards` promotes the built-in Checkmk `Host & service problems` dashboard as the PlatformInit Alert Manager landing page. This keeps the UI Checkmk-native while giving operators a focused page containing current actionable problem states instead of historical events or OK rows.
+`05.8 - Configure Checkmk Operations Dashboards
+05.8B - Clean Checkmk Alert Noise` promotes the built-in Checkmk `Host & service problems` dashboard as the PlatformInit Alert Manager landing page. This keeps the UI Checkmk-native while giving operators a focused page containing current actionable problem states instead of historical events or OK rows.
 
 Primary start URL:
 
@@ -128,3 +130,19 @@ The diagnostic compares direct Checkmk backend access with the auth-shim path, c
 ### Session / CSRF note
 
 Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.
+
+
+## CH05.8B alert noise cleanup
+
+`05.8B - Clean Checkmk Alert Noise` is the follow-up after the Alert Manager dashboard is visible. It does not create a new dashboard; it cleans the remaining noisy problem sources so the built-in `Host & service problems` dashboard remains useful.
+
+The workflow:
+
+- resets stale failed systemd states for known bootstrap/FIM units such as `cloud-init-hotplugd.service` and `dailyaidecheck.service`;
+- refreshes the Checkmk agent cache from the deterministic host IPv4/TCP 6556 path;
+- runs a full Checkmk discovery reconcile with the transient k3s/containerd filesystem ignore policy still active;
+- fails if `Check_MK Discovery` remains WARN/CRIT/UNKNOWN after reconcile;
+- fails if the known stale systemd units still appear as active Checkmk problems after reset;
+- updates `/omd/sites/cmk/local/share/platforminit/checkmk-alert-manager-current.txt`.
+
+If a reset unit immediately fails again, CH05.8B intentionally fails rather than hiding the problem. That case should be fixed in the relevant host baseline layer, for example CH02/FIM for `dailyaidecheck`.
