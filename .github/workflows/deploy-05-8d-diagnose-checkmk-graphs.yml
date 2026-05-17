@@ -46,7 +46,7 @@ on:
       session_probe_paths:
         description: Space-separated Checkmk WebUI paths to probe for session/cookie/CSRF diagnostics
         required: false
-        default: 'dashboard.py?name=main&owner= view.py?view_name=allhosts wato.py?mode=global_settings'
+        default: 'check_mk/dashboard.py?name=main&owner= check_mk/view.py?view_name=allhosts check_mk/wato.py?mode=global_settings'
       platform_repo_url:
         description: Git repository URL used by the Argo CD Application
         required: false
@@ -227,7 +227,7 @@ jobs:
           PLATFORM_HOST: ${{ inputs.host_name || 'platforminit-dev-01' }}
           SAMPLE_SERVICE_LIMIT: ${{ inputs.sample_service_limit || '25' }}
           DASHBOARD_SAMPLE_NAMES: ${{ inputs.dashboard_sample_names || 'main checkmk problems simple_problems' }}
-          SESSION_PROBE_PATHS: ${{ inputs.session_probe_paths || 'dashboard.py?name=main&owner= view.py?view_name=allhosts wato.py?mode=global_settings' }}
+          SESSION_PROBE_PATHS: ${{ inputs.session_probe_paths || 'check_mk/dashboard.py?name=main&owner= check_mk/view.py?view_name=allhosts check_mk/wato.py?mode=global_settings' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -284,7 +284,7 @@ jobs:
             printf 'PLATFORM_HOST=%q\n' "${PLATFORM_HOST:-platforminit-dev-01}"
             printf 'SAMPLE_SERVICE_LIMIT=%q\n' "${SAMPLE_SERVICE_LIMIT:-25}"
             printf 'DASHBOARD_SAMPLE_NAMES=%q\n' "${DASHBOARD_SAMPLE_NAMES:-main checkmk problems simple_problems}"
-            printf 'SESSION_PROBE_PATHS=%q\n' "${SESSION_PROBE_PATHS:-dashboard.py?name=main&owner= view.py?view_name=allhosts wato.py?mode=global_settings}"
+            printf 'SESSION_PROBE_PATHS=%q\n' "${SESSION_PROBE_PATHS:-check_mk/dashboard.py?name=main&owner= check_mk/view.py?view_name=allhosts check_mk/wato.py?mode=global_settings}"
           } > ./ch05.env
           retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "

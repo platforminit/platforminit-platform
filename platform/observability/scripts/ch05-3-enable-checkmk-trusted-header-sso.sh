@@ -349,15 +349,28 @@ set -euo pipefail
 HEADER="$1"
 SITE="cmk"
 CONF_DIR="/omd/sites/${SITE}/etc/check_mk/multisite.d/wato"
-CONF_FILE="${CONF_DIR}/platforminit_header_auth.mk"
+GLOBAL_CONF="${CONF_DIR}/global.mk"
+LEGACY_CONF="${CONF_DIR}/platforminit_header_auth.mk"
 mkdir -p "$CONF_DIR"
-cat > "$CONF_FILE" <<EOF
-# Managed by PlatformInit CH05.3.
-# Checkmk Raw/Community trusted-header SSO bridge behind Authentik + Traefik.
-auth_by_http_header = '${HEADER}'
-EOF
-chown "${SITE}:${SITE}" "$CONF_FILE" 2>/dev/null || true
-chmod 0644 "$CONF_FILE"
+touch "$GLOBAL_CONF"
+python3 - "$GLOBAL_CONF" "$HEADER" <<'PY_HEADER_AUTH'
+from pathlib import Path
+import re
+import sys
+path = Path(sys.argv[1])
+header = sys.argv[2]
+text = path.read_text(errors="replace") if path.exists() else ""
+text = re.sub(r"(?m)^# Managed by PlatformInit CH05\.3 trusted-header auth\.\n", "", text)
+text = re.sub(r"(?m)^auth_by_http_header\s*=.*\n?", "", text)
+if text and not text.endswith("\n"):
+    text += "\n"
+text += "\n# Managed by PlatformInit CH05.3 trusted-header auth.\n"
+text += f"auth_by_http_header = {header!r}\n"
+path.write_text(text)
+PY_HEADER_AUTH
+rm -f "$LEGACY_CONF"
+chown "${SITE}:${SITE}" "$GLOBAL_CONF" 2>/dev/null || true
+chmod 0644 "$GLOBAL_CONF"
 omd restart "$SITE" >/tmp/platforminit-checkmk-header-auth-restart.log 2>&1 || {
   cat /tmp/platforminit-checkmk-header-auth-restart.log >&2 || true
   exit 1
@@ -369,27 +382,27 @@ kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_
 CHECKMK_PORT_FORWARD_PID="$!"
 for _ in $(seq 1 45); do
   code="$(curl -fsS -H "${CHECKMK_REMOTE_USER_HEADER}: cmkadmin" -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
-  [[ "$code" =~ ^(200|302|401|403)$ ]] && break
+  [[ "$code" =~ ^(200|302)$ ]] && break
   sleep 2
 done
 code="$(curl -fsS -H "${CHECKMK_REMOTE_USER_HEADER}: cmkadmin" -o /tmp/ch05-checkmk-health.html -w '%{http_code}' "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
-[[ "$code" =~ ^(200|302|401|403)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not answer through direct port-forward with trusted header; HTTP=${code}"; }
+[[ "$code" =~ ^(200|302)$ ]] || { cat /tmp/ch05-checkmk-port-forward.log >&2 || true; die "Checkmk frontend did not accept X-Remote-User trusted-header auth through direct port-forward; HTTP=${code}"; }
 kill "$CHECKMK_PORT_FORWARD_PID" >/dev/null 2>&1 || true
 CHECKMK_PORT_FORWARD_PID=""
 
-auth_conf="$(kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -lc "grep -R 'auth_by_http_header' /omd/sites/${CHECKMK_SITE}/etc/check_mk/multisite.d/wato 2>/dev/null || true")"
-echo "$auth_conf" | grep -q "auth_by_http_header" || die "Checkmk trusted-header auth configuration was not persisted"
+auth_conf="$(kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -lc "grep -n 'auth_by_http_header' /omd/sites/${CHECKMK_SITE}/etc/check_mk/multisite.d/wato/global.mk 2>/dev/null || true")"
+echo "$auth_conf" | grep -q "X-Remote-User" || die "Checkmk trusted-header auth configuration was not persisted in WATO global.mk"
 
 log "Validating Checkmk auth-shim path through service port 80"
 kubectl -n "$NAMESPACE" port-forward --address 127.0.0.1 svc/checkmk "${CHECKMK_LOCAL_PORT}:80" >/tmp/ch05-checkmk-auth-shim-port-forward.log 2>&1 &
 CHECKMK_PORT_FORWARD_PID="$!"
 for _ in $(seq 1 45); do
   shim_code="$(curl -fsS     -H "Host: checkmk.${BASE_DOMAIN}"     -H "X-authentik-username: platforminit-test"     -H "X-authentik-email: platforminit-test@${BASE_DOMAIN}"     -H "Cookie: auth_cmk=stale-test-cookie"     -o /tmp/ch05-checkmk-auth-shim.html     -w '%{http_code}'     "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
-  [[ "$shim_code" =~ ^(200|302|401|403)$ ]] && break
+  [[ "$shim_code" =~ ^(200|302)$ ]] && break
   sleep 2
 done
 shim_code="$(curl -fsS   -H "Host: checkmk.${BASE_DOMAIN}"   -H "X-authentik-username: platforminit-test"   -H "X-authentik-email: platforminit-test@${BASE_DOMAIN}"   -H "Cookie: auth_cmk=stale-test-cookie"   -o /tmp/ch05-checkmk-auth-shim.html   -w '%{http_code}'   "http://127.0.0.1:${CHECKMK_LOCAL_PORT}/${CHECKMK_SITE}/" 2>/dev/null || true)"
-if [[ ! "$shim_code" =~ ^(200|302|401|403)$ ]]; then
+if [[ ! "$shim_code" =~ ^(200|302)$ ]]; then
   cat /tmp/ch05-checkmk-auth-shim-port-forward.log >&2 || true
   kubectl -n "$NAMESPACE" logs "$CHECKMK_POD" -c auth-shim --tail=120 >&2 || true
   kubectl -n "$NAMESPACE" exec "$CHECKMK_POD" -c checkmk -- bash -lc 'tail -n 160 /omd/sites/cmk/var/log/web.log /omd/sites/cmk/var/log/apache/error_log 2>/dev/null || true' >&2 || true
@@ -401,4 +414,4 @@ kubectl -n "$NAMESPACE" create secret generic checkmk-sso \
   --from-literal=CHECKMK_REMOTE_USER_HEADER="$CHECKMK_REMOTE_USER_HEADER" \
   --from-literal=CHECKMK_PUBLIC_URL="https://checkmk.${BASE_DOMAIN}/${CHECKMK_SITE}/" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-log "Checkmk trusted-header SSO contract reconciled. If first SSO login still shows the Checkmk local login screen, enable 'Authenticate users by incoming HTTP requests' once in Checkmk Global Settings."
+log "Checkmk trusted-header SSO contract reconciled with auth_by_http_header managed in WATO global.mk."

@@ -152,7 +152,8 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   shim_conf="$(kubectl -n "$NAMESPACE" get configmap checkmk-nginx-auth-shim -o jsonpath='{.data.default\.conf}')"
   echo "$shim_conf" | grep -Eq 'proxy_pass_request_headers[[:space:]]+off;' || die "Checkmk auth-shim is still forwarding all browser/Authentik headers"
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Content-Type[[:space:]]+\$content_type;' || die "Checkmk auth-shim does not preserve Content-Type for WebUI JSON/AJAX POST requests"
-  echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+"";' || die "Checkmk auth-shim does not clear stale browser cookies"
+  echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Accept[[:space:]]+\$http_accept;' || die "Checkmk auth-shim does not preserve Accept for dashboard/WebUI AJAX requests"
+  echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+\$http_cookie;' || die "Checkmk auth-shim does not preserve Checkmk session cookies for CSRF-protected WebUI forms"
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Forwarded-Proto[[:space:]]+https;' || die "Checkmk auth-shim does not preserve the public HTTPS scheme"
   echo "$shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+X-Remote-User[[:space:]]+cmkadmin;' || die "Checkmk auth-shim does not map approved sessions to cmkadmin"
   echo "$shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' || die "Checkmk auth-shim does not intercept native logout"
@@ -164,6 +165,7 @@ if [[ "$VALIDATION_MODE" == "runtime_with_sso" ]]; then
   runtime_shim_conf="$(kubectl -n "$NAMESPACE" exec "$POD" -c auth-shim -- sh -lc 'nginx -T 2>/dev/null' || true)"
   echo "$runtime_shim_conf" | grep -Eq 'location[[:space:]]*=[[:space:]]*/cmk/check_mk/logout\.py' || die "Running auth-shim nginx config does not contain native logout interception; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
   echo "$runtime_shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Content-Type[[:space:]]+\$content_type;' || die "Running auth-shim nginx config does not preserve Content-Type for WebUI JSON/AJAX POST requests; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
+  echo "$runtime_shim_conf" | grep -Eq 'proxy_set_header[[:space:]]+Cookie[[:space:]]+\$http_cookie;' || die "Running auth-shim nginx config does not preserve Checkmk session cookies; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
   echo "$runtime_shim_conf" | grep -Eq 'https://auth\.' || die "Running auth-shim nginx config must target the Authentik public host, not the Checkmk host; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
   echo "$runtime_shim_conf" | grep -Eq '/if/flow/default-invalidation-flow/' || die "Running auth-shim nginx config does not target Authentik global logout flow; the pod is stale. Run 05.2 and wait for deployment/checkmk rollout."
 

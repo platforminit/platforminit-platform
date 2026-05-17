@@ -215,3 +215,8 @@ If Checkmk dashboards render an empty selector/spinner or UI saves fail with `In
 ```
 
 The workflow now collects direct-backend versus auth-shim dashboard probes, candidate AJAX references, session cookie continuity and CSRF/token markers without performing any save action. Use the artifact before changing the auth-shim cookie/session policy.
+
+
+### Session / CSRF note
+
+Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.
