@@ -21,6 +21,8 @@ N8N_TIMEZONE="${N8N_TIMEZONE:-Europe/Budapest}"
 POSTGRES_DB="${POSTGRES_DB:-n8n}"
 POSTGRES_USER="${POSTGRES_USER:-n8n}"
 RUNTIME_DIR="${RUNTIME_DIR:-/srv/n8n}"
+N8N_CONTAINER_UID="${N8N_CONTAINER_UID:-1000}"
+N8N_CONTAINER_GID="${N8N_CONTAINER_GID:-1000}"
 SOURCE_DIR="${SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 [[ "$N8N_DOMAIN" =~ ^[A-Za-z0-9._-]+$ ]] || fatal "N8N_DOMAIN contains unsupported characters"
@@ -93,6 +95,13 @@ systemctl enable --now docker
 
 install -d -m 0750 "${RUNTIME_DIR}"
 install -d -m 0750 "${RUNTIME_DIR}/data" "${RUNTIME_DIR}/postgres" "${RUNTIME_DIR}/caddy-data" "${RUNTIME_DIR}/caddy-config"
+
+# The official n8n image runs the application as the non-root node user
+# (UID/GID 1000). The bind-mounted data directory must be writable by that
+# user; otherwise the container enters a restart loop before port 5678 opens.
+log "Ensuring n8n data directory ownership uid=${N8N_CONTAINER_UID} gid=${N8N_CONTAINER_GID}"
+chown -R "${N8N_CONTAINER_UID}:${N8N_CONTAINER_GID}" "${RUNTIME_DIR}/data"
+chmod 0700 "${RUNTIME_DIR}/data"
 
 umask 077
 cat > "${RUNTIME_DIR}/.env" <<ENVEOF

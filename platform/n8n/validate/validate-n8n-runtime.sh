@@ -10,6 +10,13 @@ RUNTIME_DIR="${RUNTIME_DIR:-/srv/n8n}"
 
 log "Validating standalone n8n runtime domain=${N8N_DOMAIN}"
 
+dump_n8n_diagnostics() {
+  log "n8n runtime diagnostics"
+  docker compose --env-file "${RUNTIME_DIR}/.env" -f "${RUNTIME_DIR}/docker-compose.yml" ps || true
+  docker inspect platforminit-n8n --format 'n8n state={{json .State}}' 2>/dev/null || true
+  docker logs --tail 120 platforminit-n8n 2>/dev/null || true
+}
+
 command -v docker >/dev/null 2>&1 || fatal "docker is not installed"
 docker compose version >/dev/null 2>&1 || fatal "docker compose plugin is not available"
 [ -f "${RUNTIME_DIR}/docker-compose.yml" ] || fatal "Missing ${RUNTIME_DIR}/docker-compose.yml"
@@ -26,7 +33,22 @@ for container in platforminit-n8n-postgres platforminit-n8n platforminit-n8n-cad
 done
 
 log "Checking local n8n health endpoint through container network"
-docker exec platforminit-n8n sh -lc 'wget -qO- http://127.0.0.1:5678/healthz >/dev/null' || fatal "n8n local health endpoint failed"
+health_ok="false"
+for attempt in $(seq 1 30); do
+  if docker exec platforminit-n8n sh -lc 'wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1'; then
+    health_ok="true"
+    break
+  fi
+
+  state="$(docker inspect -f '{{.State.Status}} restart_count={{.RestartCount}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' platforminit-n8n 2>/dev/null || true)"
+  log "n8n health not ready yet attempt=${attempt}/30 state=${state}"
+  sleep 5
+done
+
+if [ "$health_ok" != "true" ]; then
+  dump_n8n_diagnostics
+  fatal "n8n local health endpoint failed"
+fi
 
 log "Checking host HTTP/HTTPS listener"
 ss -lntp | grep -E ':(80|443)\s' || fatal "Expected Caddy listeners on 80/443"
