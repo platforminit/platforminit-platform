@@ -205,3 +205,8 @@ Run after the graph Content-Type fix and stable CH05.5/05.7/05.6/05.4 checkpoint
 ```
 
 This workflow sets the Checkmk main dashboard as the operator start page and validates the main, problems, host status, host graphs, all hosts, all services and service problems routes through the trusted-header WebUI path. It does not change the Checkmk runtime deployment or native service discovery.
+
+
+### CH05.8D dashboard visibility extension
+
+`05.8D - Diagnose Checkmk Graph Rendering` also collects data for the case where built-in Checkmk dashboards return HTTP 200 but render as an empty/spinning dashboard selector. It compares direct Checkmk backend responses with nginx auth-shim responses, captures dashboard-related files/user state, probes candidate dashboard AJAX/API endpoints, and records the auth-shim header contract.

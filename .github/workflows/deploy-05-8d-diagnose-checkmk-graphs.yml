@@ -39,6 +39,10 @@ on:
         description: Number of Checkmk service pages to probe for graph_recipe diagnostics
         required: false
         default: '25'
+      dashboard_sample_names:
+        description: Space-separated Checkmk dashboard names to probe
+        required: false
+        default: 'main checkmk problems simple_problems'
       platform_repo_url:
         description: Git repository URL used by the Argo CD Application
         required: false
@@ -218,6 +222,7 @@ jobs:
           CHECKMK_SITE: cmk
           PLATFORM_HOST: ${{ inputs.host_name || 'platforminit-dev-01' }}
           SAMPLE_SERVICE_LIMIT: ${{ inputs.sample_service_limit || '25' }}
+          DASHBOARD_SAMPLE_NAMES: ${{ inputs.dashboard_sample_names || 'main checkmk problems simple_problems' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -273,6 +278,7 @@ jobs:
             printf 'CHECKMK_SITE=%q\n' "${CHECKMK_SITE:-cmk}"
             printf 'PLATFORM_HOST=%q\n' "${PLATFORM_HOST:-platforminit-dev-01}"
             printf 'SAMPLE_SERVICE_LIMIT=%q\n' "${SAMPLE_SERVICE_LIMIT:-25}"
+            printf 'DASHBOARD_SAMPLE_NAMES=%q\n' "${DASHBOARD_SAMPLE_NAMES:-main checkmk problems simple_problems}"
           } > ./ch05.env
           retry_io scp "${SCP_OPTS[@]}" ./ch05.env "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/ch05.env"
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "

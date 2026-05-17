@@ -357,3 +357,8 @@ The validation requires:
 - the generated service count is at least the expected CH05.7 native discovery threshold.
 - main/problems/simple-problems dashboards and host/service drill-down views respond.
 - dashboard and graph probes do not contain `graph_recipe` errors.
+
+
+### CH05.8D dashboard visibility extension
+
+`05.8D - Diagnose Checkmk Graph Rendering` also collects data for the case where built-in Checkmk dashboards return HTTP 200 but render as an empty/spinning dashboard selector. It compares direct Checkmk backend responses with nginx auth-shim responses, captures dashboard-related files/user state, probes candidate dashboard AJAX/API endpoints, and records the auth-shim header contract.

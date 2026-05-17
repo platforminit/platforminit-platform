@@ -29,6 +29,7 @@ Useful optional input:
 
 ```text
 sample_service_limit = 25
+dashboard_sample_names = main checkmk problems simple_problems
 ```
 
 ## What it collects
@@ -48,6 +49,10 @@ RRD, PNP and graph cache paths for platforminit-dev-01
 Checkmk logs containing graph_recipe / graph failures
 sample Checkmk service page probes through X-Remote-User trusted header
 host_graphs page probe
+built-in dashboard inventory and user dashboard state
+direct Checkmk backend versus auth-shim dashboard page probes
+dashboard AJAX/API candidate endpoint probes
+auth-shim runtime nginx header contract
 post-probe Checkmk logs
 ```
 
@@ -73,3 +78,29 @@ ch05-checkmk-stable-2026-05-16
 ## CH05.8D artifact conclusion
 
 The diagnostic artifact showed repeated Checkmk WebUI crashes in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The host is a valid TCP Checkmk agent target and native services exist, so the issue is not agent discovery. The likely ingress/auth-shim root cause is that the shim stripped request headers broadly and did not preserve `Content-Type`, causing Checkmk graph AJAX JSON POST bodies to reach the backend without the parser contract needed to populate `graph_recipe`.
+
+
+## Built-in dashboard visibility diagnostics
+
+The workflow also investigates the case where `dashboard.py?name=main` returns HTTP 200 but the browser shows an empty dashboard selector / spinner instead of built-in dashboards.
+
+It compares these routes through both the direct Checkmk backend and the nginx auth-shim:
+
+```text
+dashboard.py
+dashboard.py?name=main&owner=
+dashboard.py?name=checkmk&owner=
+dashboard.py?name=problems&owner=
+dashboard.py?name=simple_problems&owner=
+index.py?start_url=/cmk/dashboard.py?name=main&owner=
+```
+
+The artifact should be used to decide whether the issue is:
+
+| Finding | Likely meaning |
+|---|---|
+| Direct backend renders dashboard content but auth-shim does not | Header stripping / reverse-proxy contract issue |
+| Both direct and auth-shim return empty/spinner content | Checkmk dashboard/user/profile/server-side issue |
+| Dashboard page is HTTP 200 but an AJAX/API candidate returns 4xx/5xx | Frontend metadata/API endpoint issue |
+| Logs show CSRF, permission or invalid request around dashboard AJAX | Missing header/session/browser contract |
+| Built-in dashboard files are missing | Checkmk image/package issue or edition-specific dashboard inventory |

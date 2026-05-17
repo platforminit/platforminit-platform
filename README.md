@@ -208,3 +208,8 @@ CH05 observability data is intentionally kept separate from the generic k3s loca
 
 Checkmk uses a static Retain hostPath PV under `/srv/observability/data/checkmk`. See `docs/ch05-observability-storage-contract.md`.
 
+
+
+### CH05.8D dashboard visibility extension
+
+`05.8D - Diagnose Checkmk Graph Rendering` also collects data for the case where built-in Checkmk dashboards return HTTP 200 but render as an empty/spinning dashboard selector. It compares direct Checkmk backend responses with nginx auth-shim responses, captures dashboard-related files/user state, probes candidate dashboard AJAX/API endpoints, and records the auth-shim header contract.
