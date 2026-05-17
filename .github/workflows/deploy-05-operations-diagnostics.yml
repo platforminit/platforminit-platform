@@ -325,14 +325,48 @@ jobs:
             cat ./ch05-diag-sequence.tsv
           } | tee -a "$audit_log"
 
+          artifact_inventory="./operations-reports/ch05-observability-artifact-inventory-${SHORTSHA}.txt"
+          {
+            echo
+            echo "Observability artifact preflight:"
+            echo "archive_path=$ARCHIVE"
+            echo "archive_size_bytes=$(stat -c %s "$ARCHIVE")"
+            echo "archive_sha256=$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+          } | tee -a "$audit_log"
+
+          # Normalize tar paths because GNU tar commonly lists archives as ./platform/...
+          # while CH05 contract paths are written as platform/observability/... .
+          tar -tzf "$ARCHIVE" | sed 's#^\./##' | sort > "$artifact_inventory"
+
+          {
+            echo
+            echo "Artifact inventory sample:"
+            sed -n '1,160p' "$artifact_inventory"
+            echo
+            echo "Artifact CH05 script/validator inventory:"
+            grep -E '^platform/observability/(scripts|validate)/ch05-' "$artifact_inventory" || true
+          } | tee -a "$audit_log"
+
+          if ! grep -q '^platform/observability/' "$artifact_inventory"; then
+            {
+              echo "FATAL: downloaded archive is not an observability release artifact."
+              echo "Expected paths under platform/observability/, but the archive inventory did not contain that prefix."
+              echo "This usually means the workflow was given the wrong artifact_id from 00 - Build Platform Artifacts."
+              echo "Use the artifact ID for observability-release-<sha>, not host-baseline/cluster/platform-services/identity."
+            } | tee -a "$audit_log" >&2
+            exit 1
+          fi
+
           preflight_missing=0
           while IFS=$'\t' read -r script validator; do
             [[ -n "$script" ]] || continue
             for artifact_path in "platform/observability/scripts/${script}" "platform/observability/validate/${validator}"; do
-              if tar -tzf "$ARCHIVE" | grep -Eq "(^|/)${artifact_path}$"; then
+              if grep -Fx -- "$artifact_path" "$artifact_inventory" >/dev/null; then
                 echo "PASS: artifact contains ${artifact_path}" | tee -a "$audit_log"
               else
                 echo "FATAL: artifact is missing ${artifact_path}" | tee -a "$audit_log" >&2
+                echo "Candidate inventory matches for $(basename "$artifact_path"):" | tee -a "$audit_log" >&2
+                grep -F -- "$(basename "$artifact_path")" "$artifact_inventory" | tee -a "$audit_log" >&2 || true
                 preflight_missing=1
               fi
             done
