@@ -220,3 +220,24 @@ The workflow now collects direct-backend versus auth-shim dashboard probes, cand
 ### Session / CSRF note
 
 Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.
+
+
+## CH05.8B - Clean Checkmk Alert Noise
+
+Run after CH05.8 if the Alert Manager dashboard is working but still contains known non-actionable bootstrap/discovery noise.
+
+```text
+00 - Build Platform Artifacts
+05.8B - Clean Checkmk Alert Noise
+```
+
+Expected effects:
+
+- stale failed states for configured systemd units are reset on the host;
+- Checkmk cache is refreshed from the deterministic TCP agent path;
+- service discovery is fully reconciled from cache;
+- transient k3s/containerd rootfs filesystem services remain ignored;
+- `Check_MK Discovery` should no longer appear as a WARN/CRIT/UNKNOWN problem;
+- if `cloud-init-hotplugd.service` or `dailyaidecheck.service` still fails immediately, the workflow fails and provides systemd/journal context.
+
+Do not use CH05.8B to hide real failures. It is a cleanup/reconcile layer after the Alert Manager dashboard is functional.

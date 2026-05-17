@@ -384,3 +384,15 @@ It records Set-Cookie headers with values redacted, curl cookie jars, CSRF/token
 ### Session / CSRF note
 
 Checkmk trusted-header SSO still requires normal Checkmk WebUI session cookies for dashboard AJAX and CSRF-protected WATO form submissions. The auth-shim keeps `proxy_pass_request_headers off`, but explicitly preserves `Cookie`, `Accept`, `X-Requested-With`, `Referer`, `Origin`, and `Content-Type` while continuing to strip `Authorization` and unlisted request headers. CH05.3 owns the `auth_by_http_header = 'X-Remote-User'` setting in `global.mk`.
+
+
+## CH05.8B alert-noise cleanup
+
+CH05.8B keeps the Checkmk-native Alert Manager dashboard actionable after CH05.8. It targets the two classes of noise observed after native agent discovery:
+
+1. stale failed systemd state reported by `Systemd Service Summary`;
+2. `Check_MK Discovery` WARN caused by unmonitored/vanished service drift after discovery and ignore-rule changes.
+
+The workflow resets configured stale failed systemd units on the host, refreshes the Checkmk cache from the proven TCP agent path, runs full discovery reconcile from cache, reloads Checkmk, and validates that the Alert Manager no longer contains those known stale conditions.
+
+It does not mask services. If a unit fails again after `systemctl reset-failed`, the workflow fails and leaves status/journal context in the artifact instead of silently hiding a real platform issue.
