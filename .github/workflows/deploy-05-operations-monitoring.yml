@@ -339,6 +339,7 @@ jobs:
           cat ./ch05-sequence.tsv
 
           retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "mkdir -p /tmp/platforminit-operations/${SHORTSHA} /tmp/platforminit-run"
+          retry_io ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "rm -f /tmp/platforminit-operations/${SHORTSHA}/*.log"
           retry_io scp "${SCP_OPTS[@]}" "$ARCHIVE" "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-operations/${SHORTSHA}/observability-release.tar.gz"
           retry_io scp "${SCP_OPTS[@]}" /tmp/ch05-remote.sh "$HOST_LOGIN_USER@$HOST:/tmp/platforminit-run/ch05-remote.sh"
           {
@@ -365,6 +366,18 @@ jobs:
               sudo -n /tmp/platforminit-run/ch05-remote.sh '${SHORTSHA}' '${script}' '${validator}' '${HOST_LOGIN_USER}'
             "
           done < ./ch05-sequence.tsv
+
+          missing_logs=0
+          while IFS=$'\t' read -r script validator; do
+            [[ -n "$script" ]] || continue
+            for log_name in "${script%.sh}-${SHORTSHA}.log" "${validator%.sh}-${SHORTSHA}.log"; do
+              if ! ssh "${SSH_OPTS[@]}" "$HOST_LOGIN_USER@$HOST" "test -s '/tmp/platforminit-operations/${SHORTSHA}/${log_name}'"; then
+                echo "FATAL: expected CH05 operations log was not produced: ${log_name}" >&2
+                missing_logs=1
+              fi
+            done
+          done < ./ch05-sequence.tsv
+          (( missing_logs == 0 )) || exit 1
 
       - name: Fetch CH05 operations reports
         if: always()
