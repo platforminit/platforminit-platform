@@ -73,3 +73,33 @@ ch05-checkmk-stable-2026-05-16
 ## CH05.8D artifact conclusion
 
 The diagnostic artifact showed repeated Checkmk WebUI crashes in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The host is a valid TCP Checkmk agent target and native services exist, so the issue is not agent discovery. The likely ingress/auth-shim root cause is that the shim stripped request headers broadly and did not preserve `Content-Type`, causing Checkmk graph AJAX JSON POST bodies to reach the backend without the parser contract needed to populate `graph_recipe`.
+
+## Dashboard AJAX and session/CSRF extension
+
+CH05.8D also diagnoses the related symptom where built-in Checkmk dashboards can return HTTP 200 but render an empty selector/spinner, and where UI form saves can fail with `Invalid CSRF token`.
+
+The workflow now collects:
+
+```text
+dashboard.py route probes for main/checkmk/problems/simple_problems
+index.py start_url probes for the same dashboards
+direct Checkmk backend responses on 127.0.0.1:5000
+auth-shim responses on 127.0.0.1:8080
+candidate AJAX endpoint references from returned HTML
+cmkadmin web/profile/dashboard/sidebar files
+session cookie continuity across repeated GETs
+CSRF/token/session markers from returned forms
+Checkmk logs containing dashboard, AJAX, cookie, session or CSRF errors
+auth-shim runtime nginx header/session contract
+```
+
+The intent is to distinguish these cases:
+
+| Finding | Likely meaning |
+|---|---|
+| Direct backend works but auth-shim route shows empty dashboard | auth-shim header/cookie policy breaks dashboard AJAX/session behavior |
+| Repeated auth-shim GETs create new cookies/session markers | Checkmk session cookie is not preserved through the shim |
+| Form page renders but POST later fails with invalid CSRF | browser session used for GET is not the same session seen by Checkmk on save |
+| Dashboard HTML references AJAX endpoints that fail only through shim | preserve additional Checkmk-required request headers or cookies selectively |
+
+CH05.8D remains read-only. It does not submit form POSTs or change Checkmk settings.

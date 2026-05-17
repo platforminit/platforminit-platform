@@ -205,3 +205,13 @@ Run after the graph Content-Type fix and stable CH05.5/05.7/05.6/05.4 checkpoint
 ```
 
 This workflow sets the Checkmk main dashboard as the operator start page and validates the main, problems, host status, host graphs, all hosts, all services and service problems routes through the trusted-header WebUI path. It does not change the Checkmk runtime deployment or native service discovery.
+
+## CH05.8D dashboard/session/CSRF diagnostics
+
+If Checkmk dashboards render an empty selector/spinner or UI saves fail with `Invalid CSRF token`, run:
+
+```text
+05.8D - Diagnose Checkmk Graph Rendering
+```
+
+The workflow now collects direct-backend versus auth-shim dashboard probes, candidate AJAX references, session cookie continuity and CSRF/token markers without performing any save action. Use the artifact before changing the auth-shim cookie/session policy.
