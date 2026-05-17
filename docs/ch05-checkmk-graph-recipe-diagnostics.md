@@ -29,7 +29,6 @@ Useful optional input:
 
 ```text
 sample_service_limit = 25
-dashboard_sample_names = main checkmk problems simple_problems
 ```
 
 ## What it collects
@@ -49,10 +48,6 @@ RRD, PNP and graph cache paths for platforminit-dev-01
 Checkmk logs containing graph_recipe / graph failures
 sample Checkmk service page probes through X-Remote-User trusted header
 host_graphs page probe
-built-in dashboard inventory and user dashboard state
-direct Checkmk backend versus auth-shim dashboard page probes
-dashboard AJAX/API candidate endpoint probes
-auth-shim runtime nginx header contract
 post-probe Checkmk logs
 ```
 
@@ -79,28 +74,32 @@ ch05-checkmk-stable-2026-05-16
 
 The diagnostic artifact showed repeated Checkmk WebUI crashes in `ajax_render_graph_content.py` with `KeyError: graph_recipe`. The host is a valid TCP Checkmk agent target and native services exist, so the issue is not agent discovery. The likely ingress/auth-shim root cause is that the shim stripped request headers broadly and did not preserve `Content-Type`, causing Checkmk graph AJAX JSON POST bodies to reach the backend without the parser contract needed to populate `graph_recipe`.
 
+## Dashboard AJAX and session/CSRF extension
 
-## Built-in dashboard visibility diagnostics
+CH05.8D also diagnoses the related symptom where built-in Checkmk dashboards can return HTTP 200 but render an empty selector/spinner, and where UI form saves can fail with `Invalid CSRF token`.
 
-The workflow also investigates the case where `dashboard.py?name=main` returns HTTP 200 but the browser shows an empty dashboard selector / spinner instead of built-in dashboards.
-
-It compares these routes through both the direct Checkmk backend and the nginx auth-shim:
+The workflow now collects:
 
 ```text
-dashboard.py
-dashboard.py?name=main&owner=
-dashboard.py?name=checkmk&owner=
-dashboard.py?name=problems&owner=
-dashboard.py?name=simple_problems&owner=
-index.py?start_url=/cmk/dashboard.py?name=main&owner=
+dashboard.py route probes for main/checkmk/problems/simple_problems
+index.py start_url probes for the same dashboards
+direct Checkmk backend responses on 127.0.0.1:5000
+auth-shim responses on 127.0.0.1:8080
+candidate AJAX endpoint references from returned HTML
+cmkadmin web/profile/dashboard/sidebar files
+session cookie continuity across repeated GETs
+CSRF/token/session markers from returned forms
+Checkmk logs containing dashboard, AJAX, cookie, session or CSRF errors
+auth-shim runtime nginx header/session contract
 ```
 
-The artifact should be used to decide whether the issue is:
+The intent is to distinguish these cases:
 
 | Finding | Likely meaning |
 |---|---|
-| Direct backend renders dashboard content but auth-shim does not | Header stripping / reverse-proxy contract issue |
-| Both direct and auth-shim return empty/spinner content | Checkmk dashboard/user/profile/server-side issue |
-| Dashboard page is HTTP 200 but an AJAX/API candidate returns 4xx/5xx | Frontend metadata/API endpoint issue |
-| Logs show CSRF, permission or invalid request around dashboard AJAX | Missing header/session/browser contract |
-| Built-in dashboard files are missing | Checkmk image/package issue or edition-specific dashboard inventory |
+| Direct backend works but auth-shim route shows empty dashboard | auth-shim header/cookie policy breaks dashboard AJAX/session behavior |
+| Repeated auth-shim GETs create new cookies/session markers | Checkmk session cookie is not preserved through the shim |
+| Form page renders but POST later fails with invalid CSRF | browser session used for GET is not the same session seen by Checkmk on save |
+| Dashboard HTML references AJAX endpoints that fail only through shim | preserve additional Checkmk-required request headers or cookies selectively |
+
+CH05.8D remains read-only. It does not submit form POSTs or change Checkmk settings.

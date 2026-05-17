@@ -358,7 +358,15 @@ The validation requires:
 - main/problems/simple-problems dashboards and host/service drill-down views respond.
 - dashboard and graph probes do not contain `graph_recipe` errors.
 
+### CH05.8D dashboard/session and CSRF diagnostics
 
-### CH05.8D dashboard visibility extension
+The Checkmk auth-shim intentionally minimizes upstream headers. CH05.8D now verifies whether that policy also preserves enough Checkmk session behavior for dashboards and form-based UI operations.
 
-`05.8D - Diagnose Checkmk Graph Rendering` also collects data for the case where built-in Checkmk dashboards return HTTP 200 but render as an empty/spinning dashboard selector. It compares direct Checkmk backend responses with nginx auth-shim responses, captures dashboard-related files/user state, probes candidate dashboard AJAX/API endpoints, and records the auth-shim header contract.
+The workflow compares:
+
+```text
+127.0.0.1:5000  direct Checkmk backend with X-Remote-User
+127.0.0.1:8080  nginx auth-shim with X-authentik-* input headers
+```
+
+It records Set-Cookie headers with values redacted, curl cookie jars, CSRF/token/session markers and dashboard AJAX references. This should be reviewed before changing the shim from `Cookie ""` to a selective Checkmk session-cookie forwarding model.

@@ -117,7 +117,8 @@ view.py?view_name=allservices
 view.py?view_name=svcproblems
 ```
 
+### CH05.8D dashboard/session diagnostics
 
-### CH05.8D dashboard visibility extension
+`05.8D - Diagnose Checkmk Graph Rendering` also collects dashboard and session diagnostics. This is used when built-in dashboards return HTTP 200 but render an empty selector/spinner, or when Checkmk form saves fail with `Invalid CSRF token` behind the trusted-header auth-shim.
 
-`05.8D - Diagnose Checkmk Graph Rendering` also collects data for the case where built-in Checkmk dashboards return HTTP 200 but render as an empty/spinning dashboard selector. It compares direct Checkmk backend responses with nginx auth-shim responses, captures dashboard-related files/user state, probes candidate dashboard AJAX/API endpoints, and records the auth-shim header contract.
+The diagnostic compares direct Checkmk backend access with the auth-shim path, captures dashboard route output, candidate AJAX references, cookie jars, CSRF/session markers, and Checkmk logs. It is read-only and does not submit save actions.

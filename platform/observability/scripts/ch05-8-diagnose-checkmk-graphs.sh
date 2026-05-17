@@ -10,8 +10,9 @@ NAMESPACE="${OPERATIONS_NAMESPACE:-operations}"
 CHECKMK_SITE="${CHECKMK_SITE:-cmk}"
 PLATFORM_HOST="${PLATFORM_HOST:-platforminit-dev-01}"
 SAMPLE_SERVICE_LIMIT="${SAMPLE_SERVICE_LIMIT:-25}"
-BASE_DOMAIN="${BASE_DOMAIN:-}"
+BASE_DOMAIN="${BASE_DOMAIN:-example.invalid}"
 DASHBOARD_SAMPLE_NAMES="${DASHBOARD_SAMPLE_NAMES:-main checkmk problems simple_problems}"
+SESSION_PROBE_PATHS="${SESSION_PROBE_PATHS:-dashboard.py?name=main&owner= view.py?view_name=allhosts wato.py?mode=global_settings}"
 export KUBECONFIG
 
 [[ ${EUID} -eq 0 ]] || die "Run as root (sudo)."
@@ -21,18 +22,18 @@ command -v kubectl >/dev/null || die "kubectl is required"
 section "diagnostic scope"
 cat <<EOF
 mode: data-collection-only
-purpose: Checkmk graph_recipe and built-in dashboard UI diagnostics
+purpose: Checkmk graph/dashboard/session diagnostics
 platform_host: ${PLATFORM_HOST}
 namespace: ${NAMESPACE}
 checkmk_site: ${CHECKMK_SITE}
 sample_service_limit: ${SAMPLE_SERVICE_LIMIT}
-base_domain: ${BASE_DOMAIN:-unset}
 dashboard_sample_names: ${DASHBOARD_SAMPLE_NAMES}
+session_probe_paths: ${SESSION_PROBE_PATHS}
 notes:
   - This workflow is intentionally read-only.
-  - It does not change Checkmk configuration, service discovery, graph templates, RRD files, dashboards or autochecks.
-  - It collects Checkmk graphing config, metric inventory, RRD/perfdata state, WebUI page probes and log excerpts.
-  - It also compares built-in Checkmk dashboard rendering through the direct Checkmk backend and the nginx auth-shim.
+  - It does not change Checkmk configuration, service discovery, graph templates, RRD files or autochecks.
+  - It collects graphing config, metric inventory, RRD/perfdata state, WebUI page probes and log excerpts.
+  - It also compares direct Checkmk backend vs auth-shim behavior for dashboard AJAX, cookies, session continuity and CSRF token handling.
 EOF
 
 section "kubernetes operations status"
@@ -42,26 +43,28 @@ kubectl -n "$NAMESPACE" get ingressroute.traefik.io,middleware.traefik.io -o wid
 
 POD="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=checkmk -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 if [[ -z "$POD" ]]; then
-  die "No Checkmk pod found in namespace ${NAMESPACE}; cannot collect graph diagnostics"
+  die "No Checkmk pod found in namespace ${NAMESPACE}; cannot collect diagnostics"
 fi
 
 section "selected Checkmk pod"
 echo "pod=${POD}"
 kubectl -n "$NAMESPACE" describe pod "$POD" 2>&1 | sed -n '1,220p' || true
 
-section "auth-shim runtime nginx header contract"
+section "auth-shim runtime header/session contract"
 kubectl -n "$NAMESPACE" exec "$POD" -c auth-shim -- sh -lc '
-  nginx -T 2>/dev/null | grep -nE "proxy_pass_request_headers|proxy_set_header|Content-Type|Accept|X-Requested-With|Referer|Origin|Cookie|Authorization|X-Remote" -A2 -B2 || true
+  nginx -T 2>/dev/null | grep -nE "proxy_pass_request_headers|proxy_set_header (Cookie|Content-Type|Authorization|X-Remote-User|X-Remote-Original-User|X-Forwarded)|Set-Cookie|logout.py|default-invalidation-flow" -A2 -B2 || true
 ' 2>&1 || true
 
-section "Checkmk graph and dashboard diagnostics from site"
-kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- "$CHECKMK_SITE" "$PLATFORM_HOST" "$SAMPLE_SERVICE_LIMIT" "$BASE_DOMAIN" "$DASHBOARD_SAMPLE_NAMES" <<'CHECKMK_GRAPH_DIAG'
+section "Checkmk graph/dashboard/session diagnostics from site"
+kubectl -n "$NAMESPACE" exec -i "$POD" -c checkmk -- bash -s -- \
+  "$CHECKMK_SITE" "$PLATFORM_HOST" "$SAMPLE_SERVICE_LIMIT" "$BASE_DOMAIN" "$DASHBOARD_SAMPLE_NAMES" "$SESSION_PROBE_PATHS" <<'CHECKMK_GRAPH_DIAG'
 set -uo pipefail
 SITE="$1"
 PLATFORM_HOST="$2"
 SAMPLE_SERVICE_LIMIT="$3"
 BASE_DOMAIN="$4"
 DASHBOARD_SAMPLE_NAMES="$5"
+SESSION_PROBE_PATHS="$6"
 SITE_ROOT="/omd/sites/${SITE}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
@@ -96,6 +99,9 @@ run_site(){
   print_limited "${TMP_DIR}/${label}.err"
   return 0
 }
+redact_headers(){
+  sed -E 's/(Set-Cookie:[[:space:]]*[^=]+=)[^;]*/\1<redacted>/Ig; s/(Cookie:[[:space:]]*)[^\r]*/\1<redacted>/Ig; s/(Authorization:[[:space:]]*)[^\r]*/\1<redacted>/Ig'
+}
 
 if [[ ! -d "${SITE_ROOT}" ]]; then
   echo "FATAL: missing site root ${SITE_ROOT}"
@@ -116,7 +122,7 @@ run_site "cmk-debug-cache-runtime-check" "cmk --debug --cache -vvn '${PLATFORM_H
 
 section "service inventory from generated core config"
 su - "${SITE}" -c "cmk -N '${PLATFORM_HOST}'" >"${TMP_DIR}/core.cfg" 2>"${TMP_DIR}/core.err" || true
-python3 - <<PY
+python3 - <<PY_CORE
 from pathlib import Path
 import re
 text = Path('${TMP_DIR}/core.cfg').read_text(errors='replace')
@@ -124,7 +130,7 @@ services = re.findall(r'service_description\s+(.+)', text)
 print(f'total_service_descriptions={len(services)}')
 for idx, service in enumerate(services[:120], 1):
     print(f'{idx:03d} {service}')
-PY
+PY_CORE
 
 echo "--- native-looking service descriptions ---"
 grep -Ei "service_description\s+(CPU|Memory|Filesystem|Interface|Uptime|Disk|Kernel|Systemd|Mount|TCP|Check_MK|Checkmk)" "${TMP_DIR}/core.cfg" | sed -n '1,180p' || true
@@ -173,178 +179,20 @@ for dir in \
   fi
 done
 
-section "Checkmk logs containing graph, dashboard or ajax failures"
+section "Checkmk logs containing graph_recipe or graph failures"
 if [[ -d "${SITE_ROOT}/var/log" ]]; then
   find "${SITE_ROOT}/var/log" -maxdepth 3 -type f | sort | while read -r log_file; do
-    if grep -qEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph|dashboard|ajax|sidebar|snapin|csrf|invalid" "$log_file" 2>/dev/null; then
+    if grep -qEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph" "$log_file" 2>/dev/null; then
       echo "### ${log_file}"
-      grep -nEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph|dashboard|ajax|sidebar|snapin|csrf|invalid" "$log_file" | tail -n 180
+      grep -nEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph" "$log_file" | tail -n 160
     fi
   done
 else
   echo "missing ${SITE_ROOT}/var/log"
 fi
 
-section "dashboard inventory, definitions and user state"
-echo "--- dashboard sample names ---"
-printf '%s\n' ${DASHBOARD_SAMPLE_NAMES} 2>/dev/null || true
-
-echo "--- dashboard-related files under site root ---"
-find "${SITE_ROOT}" \( -path "${SITE_ROOT}/var/check_mk/core/*" -o -path "${SITE_ROOT}/var/check_mk/rrd/*" -o -path "${SITE_ROOT}/var/pnp4nagios/*" -o -path "${SITE_ROOT}/tmp/*" \) -prune -o \
-  -type f \( -iname '*dashboard*' -o -iname '*dashboards*' -o -iname '*sidebar*' -o -iname '*snapin*' -o -iname '*user_*dashboard*' \) -print 2>/dev/null | sort | sed -n '1,320p'
-
-echo "--- dashboard/view config snippets ---"
-for file in \
-  "${SITE_ROOT}/etc/check_mk/multisite.mk" \
-  "${SITE_ROOT}/etc/check_mk/conf.d/wato/global.mk" \
-  "${SITE_ROOT}/etc/check_mk/conf.d/wato/tags.mk"; do
-  echo "### ${file}"
-  if [[ -f "$file" ]]; then
-    grep -nEi "dashboard|start_url|sidebar|snapin|view" "$file" | sed -n '1,180p' || true
-  else
-    echo "(missing)"
-  fi
-done
-
-echo "--- per-user Checkmk web files for cmkadmin ---"
-if [[ -d "${SITE_ROOT}/var/check_mk/web/cmkadmin" ]]; then
-  find "${SITE_ROOT}/var/check_mk/web/cmkadmin" -maxdepth 2 -type f | sort | while read -r file; do
-    echo "### ${file}"
-    grep -nEi "dashboard|start_url|sidebar|snapin|main|checkmk|problem|select|bookmark" "$file" 2>/dev/null | sed -n '1,140p' || true
-  done
-else
-  echo "(missing ${SITE_ROOT}/var/check_mk/web/cmkadmin)"
-fi
-
-section "dashboard page probes: direct backend versus auth-shim"
-python3 - <<PY >"${TMP_DIR}/dashboard_probe_urls.sh"
-from urllib.parse import quote
-names = '${DASHBOARD_SAMPLE_NAMES}'.split()
-paths = ['dashboard.py']
-for name in names:
-    paths.append('dashboard.py?name=' + quote(name, safe='') + '&owner=')
-paths.extend([
-    'index.py?start_url=' + quote('/cmk/dashboard.py?name=main&owner=', safe=''),
-    'view.py?view_name=allhosts',
-    'view.py?view_name=hoststatus&host=' + quote('${PLATFORM_HOST}', safe=''),
-])
-seen = []
-for path in paths:
-    if path not in seen:
-        seen.append(path)
-for path in seen:
-    print(path)
-PY
-cat "${TMP_DIR}/dashboard_probe_urls.sh"
-probe_dashboard_path(){
-  local mode="$1"
-  local path="$2"
-  local safe
-  safe="$(echo "$mode-$path" | tr ' /:%?&=()' '__________' | tr -cd 'A-Za-z0-9_.-')"
-  local out="${TMP_DIR}/dashboard-${safe}.html"
-  local hdr="${TMP_DIR}/dashboard-${safe}.headers"
-  local jar="${TMP_DIR}/dashboard-${mode}.cookies"
-  local url
-  local -a headers
-  if [[ "$mode" == "direct" ]]; then
-    url="http://127.0.0.1:5000/cmk/${path}"
-    headers=(
-      -H 'Host: checkmk.local'
-      -H 'X-Remote-User: cmkadmin'
-      -H 'X-Remote-Original-User: cmkadmin'
-      -H 'X-Remote-Email: cmkadmin@localhost'
-      -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      -H 'Accept-Language: en-US,en;q=0.8'
-      -H 'Referer: http://checkmk.local/cmk/index.py'
-    )
-  else
-    url="http://127.0.0.1:8080/cmk/${path}"
-    headers=(
-      -H 'Host: checkmk.local'
-      -H 'X-authentik-username: cmkadmin'
-      -H 'X-authentik-name: cmkadmin'
-      -H 'X-authentik-email: cmkadmin@localhost'
-      -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      -H 'Accept-Language: en-US,en;q=0.8'
-      -H 'Referer: http://checkmk.local/cmk/index.py'
-    )
-  fi
-  echo "--- dashboard ${mode}: /cmk/${path} ---"
-  curl -ksS -L -D "$hdr" -o "$out" -b "$jar" -c "$jar" "${headers[@]}" -w 'HTTP=%{http_code} CONTENT_TYPE=%{content_type} REDIRECT=%{redirect_url}\n' "$url" 2>&1 || true
-  echo "headers:"; sed -n '1,80p' "$hdr" 2>/dev/null || true
-  echo "page_bytes=$(wc -c < "$out" 2>/dev/null || echo 0)"
-  echo "signals:"
-  grep -nEi "Main dashboard|Select dashboard|Dashboard|Welcome|Loading|spinner|ajax|fetch|XMLHttpRequest|rest/|api/|dashboard.py|graph_recipe|Traceback|Exception|permission|login" "$out" | sed -n '1,180p' || true
-  echo "script/assets:"
-  grep -oE "(src|href)=['\"][^'\"]+" "$out" | sed -n '1,140p' || true
-  echo "candidate ajax/dashboard endpoints:"
-  grep -oE '([A-Za-z0-9_./-]*(ajax|dashboard|sidebar|snapin|widget|view|api|rest)[A-Za-z0-9_./?&=:%;+,-]*)' "$out" | sort -u | sed -n '1,180p' || true
-}
-while read -r path; do
-  [[ -n "$path" ]] || continue
-  probe_dashboard_path direct "$path"
-  probe_dashboard_path shim "$path"
-done <"${TMP_DIR}/dashboard_probe_urls.sh"
-
-section "dashboard AJAX/API candidate probes"
-python3 - <<PY >"${TMP_DIR}/dashboard_candidate_paths.txt"
-from pathlib import Path
-import re
-candidates = set()
-for path in Path('${TMP_DIR}').glob('dashboard-*.html'):
-    text = path.read_text(errors='replace')
-    for match in re.findall(r'[A-Za-z0-9_./-]*(?:ajax|dashboard|sidebar|snapin|widget|view|api|rest)[A-Za-z0-9_./?&=:%;+,-]*', text):
-        if not match or match.startswith(('http://', 'https://', 'data:')):
-            continue
-        if match.startswith('/cmk/'):
-            match = match[len('/cmk/'):]
-        match = match.lstrip('./')
-        if any(token in match for token in ('ajax', 'dashboard', 'sidebar', 'snapin', 'widget')):
-            candidates.add(match)
-for extra in [
-    'dashboard.py?name=main&owner=',
-    'dashboard.py?name=checkmk&owner=',
-    'ajax_graph_images.py',
-    'ajax_render_graph_content.py',
-]:
-    candidates.add(extra)
-for item in sorted(candidates)[:120]:
-    print(item)
-PY
-cat "${TMP_DIR}/dashboard_candidate_paths.txt"
-while read -r path; do
-  [[ -n "$path" ]] || continue
-  safe="$(echo "candidate-$path" | tr ' /:%?&=()' '__________' | tr -cd 'A-Za-z0-9_.-')"
-  out="${TMP_DIR}/candidate-${safe}.body"
-  hdr="${TMP_DIR}/candidate-${safe}.headers"
-  echo "--- candidate GET via auth-shim: /cmk/${path} ---"
-  curl -ksS -D "$hdr" -o "$out" \
-    -H 'Host: checkmk.local' \
-    -H 'X-authentik-username: cmkadmin' \
-    -H 'X-authentik-name: cmkadmin' \
-    -H 'X-authentik-email: cmkadmin@localhost' \
-    -H 'X-Requested-With: XMLHttpRequest' \
-    -H 'Accept: application/json, text/javascript, */*; q=0.01' \
-    -H 'Referer: http://checkmk.local/cmk/dashboard.py?name=main&owner=' \
-    -w 'HTTP=%{http_code} CONTENT_TYPE=%{content_type}\n' \
-    "http://127.0.0.1:8080/cmk/${path}" 2>&1 || true
-  sed -n '1,50p' "$hdr" 2>/dev/null || true
-  echo "body_bytes=$(wc -c < "$out" 2>/dev/null || echo 0)"
-  grep -nEi "dashboard|ajax|graph_recipe|Traceback|Exception|Not Found|permission|login|error|Select dashboard|Main dashboard|csrf|invalid" "$out" | sed -n '1,120p' || true
-done <"${TMP_DIR}/dashboard_candidate_paths.txt"
-
-section "dashboard-related Checkmk logs after probes"
-if [[ -d "${SITE_ROOT}/var/log" ]]; then
-  find "${SITE_ROOT}/var/log" -maxdepth 3 -type f | sort | while read -r log_file; do
-    if grep -qEi "dashboard|snapin|sidebar|ajax|graph_recipe|exception|traceback|permission|invalid|csrf" "$log_file" 2>/dev/null; then
-      echo "### ${log_file}"
-      grep -nEi "dashboard|snapin|sidebar|ajax|graph_recipe|exception|traceback|permission|invalid|csrf" "$log_file" | tail -n 260
-    fi
-  done
-fi
-
 section "WebUI service-page probes through trusted header"
-python3 - <<PY >"${TMP_DIR}/probe_urls.sh"
+python3 - <<PY_SERVICE >"${TMP_DIR}/probe_urls.sh"
 from pathlib import Path
 from urllib.parse import quote
 import re
@@ -362,48 +210,171 @@ for service in seen[:limit]:
     qs = 'view.py?view_name=service&host=' + quote('${PLATFORM_HOST}', safe='') + '&service=' + quote(service, safe='')
     print('probe_service ' + quote(service) + ' ' + quote(qs, safe='/:?=&%'))
 print('probe_hostgraphs ' + quote('host_graphs') + ' ' + quote('view.py?view_name=host_graphs&host=' + '${PLATFORM_HOST}', safe='/:?=&%'))
-PY
+PY_SERVICE
 cat "${TMP_DIR}/probe_urls.sh"
 while read -r kind encoded_name encoded_path; do
   [[ -n "${kind:-}" ]] || continue
-  name="$(python3 - <<PY
+  name="$(python3 - <<PY_NAME
 from urllib.parse import unquote
 print(unquote('${encoded_name}'))
-PY
+PY_NAME
 )"
-  path="$(python3 - <<PY
+  path="$(python3 - <<PY_PATH
 from urllib.parse import unquote
 print(unquote('${encoded_path}'))
-PY
+PY_PATH
 )"
   safe="$(echo "$kind-$name" | tr ' /:%?&=()' '__________' | tr -cd 'A-Za-z0-9_.-')"
   out="${TMP_DIR}/ui-${safe}.html"
-  echo "--- ${kind}: ${name} -> /cmk/${path} ---"
+  echo "--- ${kind}: ${name} -> /${SITE}/${path} ---"
   curl -ksS \
     -H 'X-Remote-User: cmkadmin' \
     -H 'X-Remote-Original-User: cmkadmin' \
     -H 'X-Remote-Email: cmkadmin@localhost' \
     -o "$out" \
     -w 'HTTP=%{http_code}\n' \
-    "http://127.0.0.1:5000/cmk/${path}" 2>&1 || true
+    "http://127.0.0.1:5000/${SITE}/${path}" 2>&1 || true
   echo "page_bytes=$(wc -c < "$out" 2>/dev/null || echo 0)"
   grep -nEi "graph_recipe|Loading graph failed|Traceback|Exception|ajax.*graph|render.*graph|metric|rrd" "$out" | sed -n '1,120p' || true
   grep -oE '[-A-Za-z0-9_/\.]*ajax[-A-Za-z0-9_/\.]*graph[-A-Za-z0-9_/?&=%.;:+]*' "$out" | sort -u | sed -n '1,80p' || true
 done <"${TMP_DIR}/probe_urls.sh"
 
-section "post-probe Checkmk logs containing graph, dashboard or ajax failures"
+section "dashboard inventory and profile files"
+for dir in \
+  "${SITE_ROOT}/share/check_mk/web/htdocs" \
+  "${SITE_ROOT}/lib/python3/cmk/gui" \
+  "${SITE_ROOT}/local/share/check_mk/web" \
+  "${SITE_ROOT}/var/check_mk/web" \
+  "${SITE_ROOT}/etc/check_mk/multisite.d/wato"; do
+  echo "--- ${dir} ---"
+  if [[ -d "$dir" ]]; then
+    find "$dir" -maxdepth 4 -type f \( -iname '*dashboard*' -o -iname '*sidebar*' -o -iname '*snapin*' -o -iname '*user*' -o -iname '*profile*' \) 2>/dev/null | sort | sed -n '1,220p'
+  else
+    echo "(missing)"
+  fi
+done
+
+for file in \
+  "${SITE_ROOT}/var/check_mk/web/cmkadmin/user_dashboards.mk" \
+  "${SITE_ROOT}/var/check_mk/web/cmkadmin/user_settings.mk" \
+  "${SITE_ROOT}/var/check_mk/web/cmkadmin/sidebar.mk" \
+  "${SITE_ROOT}/etc/check_mk/multisite.d/wato/global.mk"; do
+  echo "--- ${file} ---"
+  if [[ -f "$file" ]]; then
+    sed -n '1,220p' "$file"
+  else
+    echo "(missing)"
+  fi
+done
+
+section "dashboard route probes: direct backend vs auth-shim"
+python3 - <<PY_DASH >"${TMP_DIR}/dashboard_probe_urls.sh"
+from urllib.parse import quote
+names = '''${DASHBOARD_SAMPLE_NAMES}'''.split()
+paths = ['dashboard.py']
+for name in names:
+    paths.append('dashboard.py?name=' + quote(name, safe='') + '&owner=')
+    paths.append('index.py?start_url=' + quote('/cmk/dashboard.py?name=' + name + '&owner=', safe=''))
+for path in dict.fromkeys(paths):
+    print(path)
+PY_DASH
+cat "${TMP_DIR}/dashboard_probe_urls.sh"
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  safe="$(echo "$path" | tr ' /:%?&=()' '__________' | tr -cd 'A-Za-z0-9_.-')"
+  for mode in direct shim; do
+    out="${TMP_DIR}/dashboard-${mode}-${safe}.html"
+    hdr="${TMP_DIR}/dashboard-${mode}-${safe}.headers"
+    if [[ "$mode" == direct ]]; then
+      url="http://127.0.0.1:5000/${SITE}/${path}"
+      header_args=(-H 'X-Remote-User: cmkadmin' -H 'X-Remote-Original-User: cmkadmin' -H 'X-Remote-Email: cmkadmin@localhost')
+    else
+      url="http://127.0.0.1:8080/${SITE}/${path}"
+      header_args=(-H "Host: checkmk.${BASE_DOMAIN}" -H 'X-authentik-username: cmkadmin' -H 'X-authentik-name: cmkadmin' -H 'X-authentik-email: cmkadmin@localhost' -H 'X-authentik-groups: PlatformInit Admins')
+    fi
+    echo "--- dashboard ${mode}: /${SITE}/${path} ---"
+    curl -ksS -D "$hdr" "${header_args[@]}" -o "$out" -w 'HTTP=%{http_code}\n' "$url" 2>&1 || true
+    echo "headers:"; sed -n '1,80p' "$hdr" | redact_headers || true
+    echo "page_bytes=$(wc -c < "$out" 2>/dev/null || echo 0)"
+    echo "dashboard/html markers:"
+    grep -nEi "Dashboard|Select dashboard|loading|spinner|ajax|fetch|XMLHttpRequest|csrf|graph_recipe|General error|Invalid CSRF|Traceback|Exception" "$out" | sed -n '1,160p' || true
+    echo "candidate AJAX endpoints in HTML:"
+    grep -oE '[-A-Za-z0-9_/\.]*ajax[-A-Za-z0-9_/\.]*[-A-Za-z0-9_/?&=%.;:+]*' "$out" | sort -u | sed -n '1,120p' || true
+  done
+done <"${TMP_DIR}/dashboard_probe_urls.sh"
+
+section "session, cookie and CSRF continuity probes"
+cat <<'SESSION_NOTE'
+This section compares direct Checkmk backend requests with auth-shim requests.
+If auth-shim strips Cookie, Checkmk may create a fresh session per request. That
+can make forms fail with "Invalid CSRF token" even when GET pages render.
+No POST/save action is executed by this diagnostic section.
+SESSION_NOTE
+python3 - <<PY_SESSION >"${TMP_DIR}/session_probe_urls.sh"
+paths = '''${SESSION_PROBE_PATHS}'''.split()
+if not paths:
+    paths = ['dashboard.py?name=main&owner=', 'view.py?view_name=allhosts', 'wato.py?mode=global_settings']
+for path in dict.fromkeys(paths):
+    print(path)
+PY_SESSION
+cat "${TMP_DIR}/session_probe_urls.sh"
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  safe="$(echo "$path" | tr ' /:%?&=()' '__________' | tr -cd 'A-Za-z0-9_.-')"
+  for mode in direct shim; do
+    jar="${TMP_DIR}/session-${mode}-${safe}.cookies"
+    rm -f "$jar"
+    out1="${TMP_DIR}/session-${mode}-${safe}-1.html"
+    hdr1="${TMP_DIR}/session-${mode}-${safe}-1.headers"
+    out2="${TMP_DIR}/session-${mode}-${safe}-2.html"
+    hdr2="${TMP_DIR}/session-${mode}-${safe}-2.headers"
+    if [[ "$mode" == direct ]]; then
+      url="http://127.0.0.1:5000/${SITE}/${path}"
+      header_args=(-H 'X-Remote-User: cmkadmin' -H 'X-Remote-Original-User: cmkadmin' -H 'X-Remote-Email: cmkadmin@localhost')
+    else
+      url="http://127.0.0.1:8080/${SITE}/${path}"
+      header_args=(-H "Host: checkmk.${BASE_DOMAIN}" -H 'X-authentik-username: cmkadmin' -H 'X-authentik-name: cmkadmin' -H 'X-authentik-email: cmkadmin@localhost' -H 'X-authentik-groups: PlatformInit Admins')
+    fi
+
+    echo "--- session ${mode}: /${SITE}/${path} first GET ---"
+    curl -ksS -D "$hdr1" -c "$jar" -b "$jar" "${header_args[@]}" -o "$out1" -w 'HTTP=%{http_code}\n' "$url" 2>&1 || true
+    echo "first_response_set_cookie:"; grep -Ei '^Set-Cookie:' "$hdr1" | redact_headers | sed -n '1,40p' || true
+    echo "cookie_jar_after_first:"; awk 'BEGIN{FS="\t"} /^#/ {next} NF>=7 {print $1, $3, $4, $5, $6, "<redacted>"}' "$jar" 2>/dev/null | sed -n '1,80p' || true
+    echo "first_page_csrf/session markers:"; grep -nE "csrf|CSRF|_csrf|token|Token|session|auth_cmk|transid|_transid|secret" "$out1" | sed -E 's/(value=")[^"]*/\1<redacted>/g' | sed -n '1,120p' || true
+
+    echo "--- session ${mode}: /${SITE}/${path} second GET with same curl cookie jar ---"
+    curl -ksS -D "$hdr2" -c "$jar" -b "$jar" "${header_args[@]}" -o "$out2" -w 'HTTP=%{http_code}\n' "$url" 2>&1 || true
+    echo "second_response_set_cookie:"; grep -Ei '^Set-Cookie:' "$hdr2" | redact_headers | sed -n '1,40p' || true
+    echo "cookie_jar_after_second:"; awk 'BEGIN{FS="\t"} /^#/ {next} NF>=7 {print $1, $3, $4, $5, $6, "<redacted>"}' "$jar" 2>/dev/null | sed -n '1,80p' || true
+    echo "second_page_csrf/session markers:"; grep -nE "csrf|CSRF|_csrf|token|Token|session|auth_cmk|transid|_transid|secret" "$out2" | sed -E 's/(value=")[^"]*/\1<redacted>/g' | sed -n '1,120p' || true
+    echo "body_hash_first=$(sha256sum "$out1" 2>/dev/null | awk '{print $1}')"
+    echo "body_hash_second=$(sha256sum "$out2" 2>/dev/null | awk '{print $1}')"
+  done
+done <"${TMP_DIR}/session_probe_urls.sh"
+
+section "dashboard/session related Checkmk logs"
 if [[ -d "${SITE_ROOT}/var/log" ]]; then
   find "${SITE_ROOT}/var/log" -maxdepth 3 -type f | sort | while read -r log_file; do
-    if grep -qEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph|dashboard|ajax|sidebar|snapin|csrf|invalid" "$log_file" 2>/dev/null; then
+    if grep -qEi "dashboard|csrf|CSRF|Invalid CSRF|session|auth_cmk|cookie|ajax|traceback|exception" "$log_file" 2>/dev/null; then
       echo "### ${log_file}"
-      grep -nEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph|dashboard|ajax|sidebar|snapin|csrf|invalid" "$log_file" | tail -n 260
+      grep -nEi "dashboard|csrf|CSRF|Invalid CSRF|session|auth_cmk|cookie|ajax|traceback|exception" "$log_file" | tail -n 220
+    fi
+  done
+fi
+
+section "post-probe Checkmk logs containing graph_recipe or graph failures"
+if [[ -d "${SITE_ROOT}/var/log" ]]; then
+  find "${SITE_ROOT}/var/log" -maxdepth 3 -type f | sort | while read -r log_file; do
+    if grep -qEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph" "$log_file" 2>/dev/null; then
+      echo "### ${log_file}"
+      grep -nEi "graph_recipe|Loading graph failed|exception|traceback|metric.*not|graph" "$log_file" | tail -n 220
     fi
   done
 fi
 CHECKMK_GRAPH_DIAG
 
 section "Checkmk pod logs after WebUI probes"
-kubectl -n "$NAMESPACE" logs "$POD" -c checkmk --tail=260 2>&1 || true
-kubectl -n "$NAMESPACE" logs "$POD" -c auth-shim --tail=180 2>&1 || true
+kubectl -n "$NAMESPACE" logs "$POD" -c checkmk --tail=220 2>&1 || true
+kubectl -n "$NAMESPACE" logs "$POD" -c auth-shim --tail=160 2>&1 || true
 
-log "CH05.8D graph/dashboard diagnostic collection completed. Review uploaded operations-graph-* artifact before making dashboard or graph UI changes."
+log "CH05.8D graph/dashboard/session diagnostic collection completed. Review uploaded operations-graph-* artifact before making UI/auth-shim changes."

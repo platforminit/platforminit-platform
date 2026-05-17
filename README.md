@@ -75,7 +75,7 @@ Nginx auth-shim   -> X-authentik-* to X-Remote-User header bridge
 Argo CD           -> owns runtime deployment
 ```
 
-CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8 configures Checkmk-native dashboard entrypoints on top of the stable runtime.
+CH05.5, CH05.7, CH05.6 and CH05.4 have a stable Checkmk checkpoint tagged as `ch05-checkmk-stable-2026-05-16`. The `graph_recipe` UI error was diagnosed with `05.8D - Diagnose Checkmk Graph Rendering` and fixed by preserving `Content-Type` in the Checkmk auth-shim. CH05.8D now also collects dashboard AJAX and session/CSRF diagnostics for the empty built-in dashboard selector and invalid-CSRF save symptoms. CH05.8 configures Checkmk-native dashboard entrypoints on top of the stable runtime.
 
 Public operations WebUI:
 
@@ -208,8 +208,3 @@ CH05 observability data is intentionally kept separate from the generic k3s loca
 
 Checkmk uses a static Retain hostPath PV under `/srv/observability/data/checkmk`. See `docs/ch05-observability-storage-contract.md`.
 
-
-
-### CH05.8D dashboard visibility extension
-
-`05.8D - Diagnose Checkmk Graph Rendering` also collects data for the case where built-in Checkmk dashboards return HTTP 200 but render as an empty/spinning dashboard selector. It compares direct Checkmk backend responses with nginx auth-shim responses, captures dashboard-related files/user state, probes candidate dashboard AJAX/API endpoints, and records the auth-shim header contract.
