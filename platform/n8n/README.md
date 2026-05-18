@@ -110,3 +110,8 @@ The first iteration uses n8n's built-in login. Native SAML/OIDC SSO is not part
 of the default open self-hosted path and should not block the initial host.
 Google OAuth credentials inside n8n are for workflow integrations, not for
 logging in to the n8n UI.
+
+
+## Host lifecycle volume contract
+
+For the `n8n` project, `01 - Create or Rebuild Host` must resolve `volume_layout=project-default` to `none`. The CX23 n8n host is root-disk-only: no Hetzner Volume should be created, attached, mounted, or expected by bootstrap/baseline workflows.
