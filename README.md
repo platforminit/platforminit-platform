@@ -213,6 +213,7 @@ git checkout -b feat/ch05-checkmk-community-operations-layer
 | CH05 Argo CD refactor runbook | `docs/ch05-argocd-operations-refactor-runbook.md` |
 | Checkmk monitoring | `platform/observability/checkmk/README.md` |
 | External host monitoring backlog | `platform/observability/external-hosts/README.md` |
+| Platform rationalization and open issues | `docs/platforminit-rationalization-open-issues.md` |
 
 ## Principles
 
