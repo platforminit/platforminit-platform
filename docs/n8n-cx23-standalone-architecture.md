@@ -51,3 +51,8 @@ N8N - Deploy Standalone Runtime
 ```
 
 Use the existing CH01/CH02 host foundation and the new n8n runtime workflow.
+
+
+## Host lifecycle volume contract
+
+For the `n8n` project, `01 - Create or Rebuild Host` must resolve `volume_layout=project-default` to `none`. The CX23 n8n host is root-disk-only: no Hetzner Volume should be created, attached, mounted, or expected by bootstrap/baseline workflows.

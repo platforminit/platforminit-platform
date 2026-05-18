@@ -58,11 +58,12 @@ name: 01 - Create or Rebuild Host
         required: false
         default: ""
       volume_layout:
-        description: Volume layout for create
+        description: Volume layout for create; project-default uses platform defaults such as n8n=none and development/platforminit=split
         required: true
-        default: single
+        default: project-default
         type: choice
         options:
+          - project-default
           - none
           - single
           - split
@@ -125,6 +126,31 @@ jobs:
             export INFRA_API_TOKEN
           }
           resolve_hcloud_token
+          resolve_volume_layout() {
+            local requested="${VOLUME_LAYOUT:-project-default}"
+            case "$requested" in
+              project-default|"")
+                case "${PROJECT:-development}" in
+                  n8n) VOLUME_LAYOUT="none" ;;
+                  development|platforminit) VOLUME_LAYOUT="split" ;;
+                  *) VOLUME_LAYOUT="single" ;;
+                esac
+                ;;
+              none|single|split)
+                VOLUME_LAYOUT="$requested"
+                ;;
+              *)
+                echo "Unsupported volume_layout=${requested}" >&2
+                exit 1
+                ;;
+            esac
+            if [[ "${PROJECT:-}" == "n8n" && "$VOLUME_LAYOUT" != "none" ]]; then
+              echo "FATAL: project=n8n is a root-disk-only CX23 runtime and requires volume_layout=none; got ${VOLUME_LAYOUT}" >&2
+              exit 1
+            fi
+          }
+          resolve_volume_layout
+          echo "Effective volume_layout=${VOLUME_LAYOUT} for project=${PROJECT}"
           [ -n "${INFRA_API_TOKEN:-}" ] || { echo "Missing Hetzner token for project ${PROJECT}" >&2; exit 1; }
           [ -n "${AUTOMATION_SSH_PUBLIC_KEY:-}" ] || { echo "Missing AUTOMATION_SSH_PUBLIC_KEY" >&2; exit 1; }
           [[ "${PROJECT}" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo "project contains unsupported characters" >&2; exit 1; }
@@ -222,6 +248,31 @@ jobs:
             export INFRA_API_TOKEN
           }
           resolve_hcloud_token
+          resolve_volume_layout() {
+            local requested="${VOLUME_LAYOUT:-project-default}"
+            case "$requested" in
+              project-default|"")
+                case "${PROJECT:-development}" in
+                  n8n) VOLUME_LAYOUT="none" ;;
+                  development|platforminit) VOLUME_LAYOUT="split" ;;
+                  *) VOLUME_LAYOUT="single" ;;
+                esac
+                ;;
+              none|single|split)
+                VOLUME_LAYOUT="$requested"
+                ;;
+              *)
+                echo "Unsupported volume_layout=${requested}" >&2
+                exit 1
+                ;;
+            esac
+            if [[ "${PROJECT:-}" == "n8n" && "$VOLUME_LAYOUT" != "none" ]]; then
+              echo "FATAL: project=n8n is a root-disk-only CX23 runtime and requires volume_layout=none; got ${VOLUME_LAYOUT}" >&2
+              exit 1
+            fi
+          }
+          resolve_volume_layout
+          echo "Effective volume_layout=${VOLUME_LAYOUT} for project=${PROJECT}"
 
           mkdir -p .tmp
           cat > .tmp/user-data.yaml <<EOF
@@ -473,6 +524,7 @@ jobs:
           echo "volume_summary=${volume_summary}" >> "$GITHUB_OUTPUT"
           echo "effective_region=${effective_region}" >> "$GITHUB_OUTPUT"
           echo "volume_attach_action_ids=${volume_attach_action_ids}" >> "$GITHUB_OUTPUT"
+          echo "effective_volume_layout=${VOLUME_LAYOUT}" >> "$GITHUB_OUTPUT"
 
       - name: Wait for Hetzner action to finish
         shell: bash
@@ -546,6 +598,7 @@ jobs:
         id: server
         shell: bash
         env:
+          PROJECT: ${{ inputs.project || 'development' }}
           SERVER_ID: ${{ steps.lifecycle.outputs.server_id }}
         run: |
           set -euo pipefail
@@ -624,7 +677,7 @@ jobs:
           HOST: ${{ steps.server.outputs.public_ip }}
           PROJECT: ${{ inputs.project || 'development' }}
           HOST_NAME: ${{ inputs.host_name || 'platforminit-dev-01' }}
-          VOLUME_LAYOUT: ${{ inputs.volume_layout }}
+          VOLUME_LAYOUT: ${{ steps.lifecycle.outputs.effective_volume_layout }}
         run: |
           set -euo pipefail
           if [[ "$VOLUME_LAYOUT" == "split" ]]; then
@@ -674,7 +727,8 @@ jobs:
           server_name=${{ steps.lifecycle.outputs.server_name }}
           public_ip=${{ steps.server.outputs.public_ip }}
           host_role=${{ inputs.host_role }}
-          volume_layout=${{ inputs.volume_layout }}
+          requested_volume_layout=${{ inputs.volume_layout }}
+          effective_volume_layout=${{ steps.lifecycle.outputs.effective_volume_layout }}
           volume_ids=${{ steps.lifecycle.outputs.volume_ids }}
           volume_summary=${{ steps.lifecycle.outputs.volume_summary }}
           ssh_key_id=${{ steps.sshkey.outputs.ssh_key_id }}

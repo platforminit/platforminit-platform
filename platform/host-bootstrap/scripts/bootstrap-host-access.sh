@@ -162,6 +162,14 @@ ensure_srv_mount(){
     return 0
   fi
 
+  if [[ "${PLATFORMINIT_VOLUME_LAYOUT:-single}" == "none" ]]; then
+    log "volume_layout=none selected; skipping Hetzner volume mount reconciliation"
+    mkdir -p "${PLATFORMINIT_SRV_PATH:-/srv}" /var/lib/platforminit
+    init_audit_dirs
+    audit "volume_layout_none" "ok" "root-disk-backed runtime path=${PLATFORMINIT_SRV_PATH:-/srv}"
+    return 0
+  fi
+
   if [[ "${PLATFORMINIT_VOLUME_LAYOUT:-single}" == "split" ]]; then
     echo "FATAL: volume_layout=split but /etc/platforminit/volume-layout.tsv is missing or empty" >&2
     echo "01 - Create or Rebuild Host must resolve data/db/observability volume IDs and write the split volume layout before 01.1 Host Bootstrap runs." >&2
